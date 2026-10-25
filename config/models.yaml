@@ -1,0 +1,170 @@
+# Model registry. DECISION(D1). Prices are per million tokens in USD and are placeholders
+# until the researcher confirms them in Phase 17 (scripts/estimate_cost.py reads them).
+# `provider` selects the LlmProvider implementation; `stub` is used for every test.
+models:
+  - id: qwen3.5-4b
+    display_name: Qwen 3.5 4B (thinking off)
+    kind: local
+    provider: ollama
+    provider_model: "qwen3.5:4b"      # UNVERIFIED: confirm the exact Ollama tag in Phase 17
+    snapshot_id: null
+    enabled: true
+    role: primary
+    settings:
+      temperature: 0.0
+      seed: 1234
+      max_output_tokens: 300
+      reasoning: none
+      think: false
+    price:
+      input_per_m: 0.0
+      cached_input_per_m: 0.0
+      output_per_m: 0.0
+      batch_discount: 0.0
+  - id: phi4-mini
+    display_name: Phi-4 Mini 3.8B
+    kind: local
+    provider: ollama
+    provider_model: "phi4-mini"       # UNVERIFIED: confirm the exact Ollama tag in Phase 17
+    snapshot_id: null
+    enabled: true
+    role: primary
+    settings:
+      temperature: 0.0
+      seed: 1234
+      max_output_tokens: 300
+      reasoning: none
+    price:
+      input_per_m: 0.0
+      cached_input_per_m: 0.0
+      output_per_m: 0.0
+      batch_discount: 0.0
+  - id: llama3.2-3b
+    display_name: Llama 3.2 3B (fallback only)
+    kind: local
+    provider: ollama
+    provider_model: "llama3.2:3b"     # UNVERIFIED: confirm the exact Ollama tag in Phase 17
+    snapshot_id: null
+    enabled: false
+    role: fallback
+    settings:
+      temperature: 0.0
+      seed: 1234
+      max_output_tokens: 300
+      reasoning: none
+    price:
+      input_per_m: 0.0
+      cached_input_per_m: 0.0
+      output_per_m: 0.0
+      batch_discount: 0.0
+  - id: claude-haiku-5.5
+    display_name: Claude Haiku 5.5
+    kind: api
+    provider: anthropic_batch
+    provider_model: "claude-haiku-5-5"   # UNVERIFIED: pin the dated snapshot ID in Phase 17
+    snapshot_id: null
+    enabled: true
+    role: primary
+    settings:
+      temperature: 0.0
+      seed: 1234
+      max_output_tokens: 300
+      reasoning: none
+    price:
+      input_per_m: 1.00                 # placeholder, confirm in Phase 17
+      cached_input_per_m: 0.10
+      output_per_m: 5.00
+      batch_discount: 0.50
+  - id: gpt-6-luna
+    display_name: GPT-6 Luna (reasoning none)
+    kind: api
+    provider: openai_batch
+    provider_model: "gpt-6-luna"         # UNVERIFIED: pin the dated snapshot ID in Phase 17
+    snapshot_id: null
+    enabled: true
+    role: primary
+    settings:
+      temperature: 0.0
+      seed: 1234
+      max_output_tokens: 300
+      reasoning: none
+    price:
+      input_per_m: 1.00                 # placeholder, confirm in Phase 17
+      cached_input_per_m: 0.25
+      output_per_m: 4.00
+      batch_discount: 0.50
+
+# Stub models used by tests and the synthetic run. They mirror the shape of the real registry.
+stub_models:
+  - id: stub-local-a
+    display_name: Stub local A
+    kind: local
+    provider: stub
+    provider_model: stub
+    snapshot_id: stub-2026-01-01
+    enabled: true
+    role: primary
+    settings:
+      temperature: 0.0
+      seed: 1234
+      max_output_tokens: 300
+      reasoning: none
+    price:
+      input_per_m: 0.0
+      cached_input_per_m: 0.0
+      output_per_m: 0.0
+      batch_discount: 0.0
+  - id: stub-local-b
+    display_name: Stub local B
+    kind: local
+    provider: stub
+    provider_model: stub
+    snapshot_id: stub-2026-01-01
+    enabled: true
+    role: primary
+    settings:
+      temperature: 0.0
+      seed: 1234
+      max_output_tokens: 300
+      reasoning: none
+    price:
+      input_per_m: 0.0
+      cached_input_per_m: 0.0
+      output_per_m: 0.0
+      batch_discount: 0.0
+  - id: stub-api-a
+    display_name: Stub API A
+    kind: api
+    provider: stub
+    provider_model: stub
+    snapshot_id: stub-2026-01-01
+    enabled: true
+    role: primary
+    settings:
+      temperature: 0.0
+      seed: 1234
+      max_output_tokens: 300
+      reasoning: none
+    price:
+      input_per_m: 1.00
+      cached_input_per_m: 0.10
+      output_per_m: 5.00
+      batch_discount: 0.50
+  - id: stub-api-b
+    display_name: Stub API B
+    kind: api
+    provider: stub
+    provider_model: stub
+    snapshot_id: stub-2026-01-01
+    enabled: true
+    role: primary
+    settings:
+      temperature: 0.0
+      seed: 1234
+      max_output_tokens: 300
+      reasoning: none
+    price:
+      input_per_m: 1.00
+      cached_input_per_m: 0.25
+      output_per_m: 4.00
+      batch_discount: 0.50

@@ -1,0 +1,234 @@
+# Study configuration: every setting and every deferred decision lives here.
+# Decision IDs (D1, B2, ...) refer to section 0.3 of devin.md. Code tags each use with DECISION(<ID>).
+
+universe:
+  size: 100                       # DECISION(B4)
+  source: sp500                   # DECISION(B2): sector balanced, drawn from the S&P 500
+  sectors: 11
+  per_sector: 9
+  min_history_days: 300
+  dollar_volume_window_days: 60
+  extra_tickers: []
+  universe_file: config/universe.csv
+  etf_proxies: [SPY, IWM, IWD, IWF, QUAL]
+
+timing:
+  timezone: America/New_York
+  cutoff_time_et: "16:00"
+  lock_deadline_time_et: "09:00"  # Monday, 30 minutes before the open
+  pilot_week: null                # ISO week id of the pilot, excluded from results
+  live_start_week: null           # DECISION(A2): first live week is the week after the pilot passes
+  live_end_date: null             # DECISION(A3): set by the researcher, no later than the April deadline
+
+data:
+  price_provider: alpaca          # alpaca | yfinance | synthetic
+  news_provider: alpaca           # alpaca | synthetic
+  reference_provider: yfinance    # yfinance | synthetic
+  rate_provider: fred             # fred | synthetic
+  earnings_provider: finnhub      # finnhub | synthetic
+  price_history_days: 300
+  first_snapshot_news_days: 7
+  news_token_budget_per_stock: 1500
+  news_tokenizer: null            # null uses the len/4 estimate
+  rate_limits:
+    alpaca_per_minute: 200
+    finnhub_per_minute: 60
+    fred_per_minute: 120
+    yfinance_per_minute: 60
+  retries:
+    attempts: 3
+    backoff_seconds: 2.0
+  fixture_dir: tests/fixtures/providers
+  checks:
+    missing_days: forward_fill
+    nonpositive_price: skip_stock
+    extreme_move: skip_stock
+    duplicate_rows: skip_stock
+    stale_price: skip_stock
+    no_news: forward_fill         # the stock stays; the no-news sentence is used
+    news_after_cutoff: forward_fill  # rows are dropped, the stock stays
+    short_history: skip_stock
+    extreme_move_threshold: 0.40
+    stale_days: 5
+
+synthetic:
+  seed: 20260101
+  n_tickers: 120
+  history_days: 400
+  future_weeks: 40
+  world_dir: data/synthetic
+
+baseline:
+  forecaster: stub                # stub | kronos
+  momentum_lookbacks:
+    long: 252
+    skip: 21
+    medium: 63
+    short: 21
+  kronos:
+    repo_commit: UNPINNED         # researcher pins the vendor/kronos commit in Phase 17
+    model_id: NeoQuasar/Kronos-base
+    tokenizer_id: NeoQuasar/Kronos-Tokenizer-base
+    context_candles: 252
+    horizon: 5
+    n_samples: 20
+    temperature: 1.0
+    top_p: 0.9
+    seed: 7
+    input_prices: adjusted        # DECISION(E4)
+  stub_seed: 11
+
+risk:
+  cov_lookback_days: 252
+  delta: 2.5
+  weekly_scale: 5
+  min_eigenvalue: 1.0e-10
+  market_cap_weights: study_only  # DECISION(E5)
+
+llm:
+  cost_goal_usd: 50.0             # DECISION(D3)
+  cost_warn_usd: 50.0
+  temperature: 0.0                # DECISION(D4)
+  no_news_sentence: "No relevant news is available for this week."   # DECISION(C2)
+  prompt_fields: [ticker, name, sector, news]                       # DECISION(C1)
+  skills_token_cap: 6000          # DECISION(C4)
+  rationale_token_cap: 150        # DECISION(C7)
+  placebo_length_tolerance: 0.02
+  invalid_rate_threshold: 0.15    # DECISION(N1)
+  retry_invalid_once: true
+  batch_retry_count: 1
+  api_poll_seconds: 300
+  settings_default:
+    temperature: 0.0
+    seed: 1234
+    max_output_tokens: 300
+    reasoning: none
+  settings: {}
+
+views:
+  tau: 0.05
+  ic_window_weeks: 8
+  ic_floor: 0.0
+  cold_start_weeks: 5             # DECISION(A6)
+  cold_start_ic: 0.02             # DECISION(A6)
+  ic_min_weeks: 3
+  confidence_clip: [0.1, 1.0]
+  ic_signal_for_llm: llm_resid    # DECISION(E2)
+
+optimizer:
+  max_weight: 0.05
+  min_stocks: 20
+  solvers: [OSQP, CLARABEL]
+
+simulator:
+  initial_value: 100000
+  cost_bps: 10
+  stop_loss: -0.08
+  take_profit: 0.15
+
+pipeline:
+  jobs: [J1, J2, J3, J4, J5, J6, J7, J8, J9]
+  stop_on_failure: true
+
+eval:
+  tie_band: 0.01
+  bootstrap_samples: 2000
+  permutation_samples: 10000
+  significance: 0.05
+  seed: 2026
+  combined_signal: bl_tilt        # DECISION(E3)
+  factor_frequency: daily         # DECISION(G5)
+  fama_french_file: null
+  holm_families:
+    H1_ic_gap: all_portfolios
+    H2_ic_gap: all_portfolios
+    H2_portfolio_vs_q0: all_portfolios
+    H3_skills_vs_controls: per_model_skills_vs_bare_and_placebo
+    H5_shuffle: all_portfolios_plus_q0
+  h4_splits: [market_direction, volatility, earnings_week]   # DECISION(G4)
+  min_group_size: 10
+  shuffle:
+    n_shuffles: 500               # DECISION(G6)
+    seed: 99
+    processes: 1
+
+backup:
+  keep_zips: true
+  master_tables: [llm_scores, trades, daily_values, weekly_ic, fallback_log, cost_log]
+
+decisions:
+  - id: D1
+    value: "local: qwen3.5-4b (thinking off), phi4-mini; fallback llama3.2-3b; api: claude-haiku-5.5, gpt-6-luna (reasoning none)"
+    status: confirmed
+  - id: D3
+    value: 50.0
+    status: provisional
+  - id: D4
+    value: 0.0
+    status: confirmed
+  - id: B1
+    value: [bare, skills, placebo]
+    status: confirmed
+  - id: B2
+    value: sp500_sector_balanced
+    status: confirmed
+  - id: B4
+    value: 100
+    status: confirmed
+  - id: A2
+    value: week_after_pilot
+    status: confirmed
+  - id: A3
+    value: timing.live_end_date
+    status: confirmed
+  - id: A4
+    value: closed_friday_uses_prior_trading_day
+    status: confirmed
+  - id: A6
+    value: 0.02
+    status: confirmed
+  - id: C1
+    value: [ticker, name, sector, news]
+    status: confirmed
+  - id: C2
+    value: "No relevant news is available for this week."
+    status: confirmed
+  - id: C4
+    value: 6000
+    status: provisional
+  - id: C7
+    value: 150
+    status: provisional
+  - id: E2
+    value: llm_resid
+    status: confirmed
+  - id: E3
+    value: bl_tilt
+    status: confirmed
+  - id: E4
+    value: adjusted
+    status: confirmed
+  - id: E5
+    value: study_only
+    status: confirmed
+  - id: G3
+    value: paired_weekly_holm_placebo_control
+    status: confirmed
+  - id: G4
+    value: [market_direction, volatility, earnings_week]
+    status: confirmed
+  - id: G5
+    value: daily
+    status: confirmed
+  - id: G6
+    value: 500
+    status: confirmed
+  - id: N1
+    value: "invalid_rate>0.15 or local not done by lock or batch not ready by lock"
+    status: confirmed
+  - id: N2
+    value: manual_weekend_script
+    status: confirmed
+  - id: N3
+    value: csv_weekly_download
+    status: confirmed

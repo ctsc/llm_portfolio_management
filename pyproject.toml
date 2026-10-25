@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portstudy"
+version = "0.1.0"
+description = "LLM skills and investor mindsets study: quant baseline plus LLM views in a weekly Black-Litterman pipeline"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "MIT" }
+dependencies = [
+    "pandas>=2.1,<3",
+    "numpy>=1.26,<3",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
+    "statsmodels>=0.14",
+    "cvxpy>=1.4",
+    "osqp>=0.6",
+    "clarabel>=0.6",
+    "pydantic>=2.5,<3",
+    "pyyaml>=6.0",
+    "typer>=0.9",
+    "httpx>=0.25",
+    "tenacity>=8.2",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+ml = ["torch>=2.1", "transformers>=4.36", "huggingface-hub>=0.20"]
+api = ["anthropic>=0.40", "openai>=1.50", "tiktoken>=0.5"]
+data = ["alpaca-py>=0.20", "yfinance>=0.2.40", "finnhub-python>=2.4", "pandas_market_calendars>=4.3"]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "hypothesis>=6.90",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "pandas-stubs>=2.1",
+    "types-PyYAML>=6.0",
+    "yamllint>=1.33",
+]
+
+[project.scripts]
+portstudy = "portstudy.pipeline.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+portstudy = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["B008", "B905"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = false
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["cvxpy", "cvxpy.*", "scipy", "scipy.*", "sklearn", "sklearn.*", "statsmodels", "statsmodels.*", "matplotlib", "matplotlib.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]
+markers = ["e2e: end to end rehearsal tests", "slow: slow tests"]
