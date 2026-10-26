@@ -197,3 +197,15 @@ Built (`tests/e2e/`):
 - `scripts/benchmark_pipeline.py`: seconds per job for one synthetic week.
 
 `pytest tests/e2e` passes in 6 min 23 s on the desktop.
+
+## Phase 15: Documentation
+
+Built:
+- `README.md`: install, synthetic demo, tests, directory map, data folder conventions.
+- `docs/runbook.md`: where files live, `portstudy status`, rerunning one job, a table of every failure with its fallback and remedy, restore from backup, prompt or config changes mid-run.
+- `docs/config_reference.md`: every key in `study.yaml`, `models.yaml`, and `prompts_manifest.yaml` with default, meaning, and decision id; environment variables and key names.
+- `docs/open_questions.md`: the section 0.3 decision table with config locations and `DECISION(...)` code tags, the provisional items settled in Phase 17, and the rule that any change after the live start is logged and versioned.
+- `docs/design.md`: one section per pipeline stage with the formula sheet copied from `devin.md`.
+- `scripts/smoke_real_services.py` (prepared for Phase 17 B4): one tiny real call per data service and per enabled model, printing status, cost, and latency; loads `.env`.
+
+Done-when: the README demo (three weekend runs, `portstudy status`, `portstudy eval --synthetic --skip-shuffle`) was followed in a fresh Python 3.11 virtual environment created from the README alone; every step succeeded. Note: the system `python` on this desktop is 3.14, so the venv must be created with the 3.11 interpreter (`uv python` install); the README states the 3.11 requirement.
