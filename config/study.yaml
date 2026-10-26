@@ -48,6 +48,7 @@ data:
     no_news: forward_fill         # the stock stays; the no-news sentence is used
     news_after_cutoff: forward_fill  # rows are dropped, the stock stays
     short_history: skip_stock
+    stopped_trading: skip_stock   # delisted or suspended: dropped without replacement
     extreme_move_threshold: 0.40
     stale_days: 5
 
@@ -56,6 +57,7 @@ synthetic:
   n_tickers: 120
   history_days: 400
   future_weeks: 40
+  first_week: "2026-W02"         # first weekly cutoff in the synthetic world
   world_dir: data/synthetic
 
 baseline:

@@ -62,6 +62,7 @@ class CheckRules(StrictModel):
     no_news: CheckRule = "forward_fill"
     news_after_cutoff: CheckRule = "forward_fill"
     short_history: CheckRule = "skip_stock"
+    stopped_trading: CheckRule = "skip_stock"
     extreme_move_threshold: float = 0.40
     stale_days: int = 5
 
@@ -93,6 +94,7 @@ class SyntheticConfig(StrictModel):
     n_tickers: int = 120
     history_days: int = 400
     future_weeks: int = 40
+    first_week: str = "2026-W02"
     world_dir: str = "data/synthetic"
 
 
