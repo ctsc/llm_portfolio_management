@@ -169,3 +169,11 @@ Built:
 - `docs/gitlab_setup.md`, `docs/desktop_checklist.md`.
 
 Tests: `tests/unit/test_phase12_ci.py` (5 tests): yamllint passes, stages and jobs present with the default-branch rule on e2e, every command in the CI file exists locally, the repository passes both greps, and both greps catch planted problems.
+
+## Phase 13: Backups
+
+Built:
+- `backup.py`: `run_backup(week_id)` writes `data/backups/<week_id>_<timestamp>/` with the full ledger, the week's snapshot and output CSVs, `ic_history.csv`, portfolio and trade CSVs, logs, prompt files and manifest, configs, `run_metadata.json` (git commit, Python and package versions), `checksums.json`, and one zip of the folder; never overwrites an earlier backup; prints the folder and zip paths; `--dry-run` prints every file it would copy and writes nothing. `rebuild_master_exports` maintains `data/exports/master/{llm_scores,trades,daily_values,weekly_ic,fallback_log,cost_log}_all.csv` from the weekly files. `verify_backup` recomputes every hash and flags missing or unexpected files; `restore_backup(path, target)` verifies first, then copies the data folder (and optionally prompts and config) back.
+- `portstudy backup --week ... [--dry-run]` and J9 call it.
+
+Tests: `tests/integration/test_phase13_backup.py` (4 tests): round trip on the synthetic pipeline run (back up, delete the originals, restore, hashes equal), corrupted and missing files detected by `verify_backup` (and restore refuses), master CSVs equal the concatenation of the weekly files, dry run writes nothing.
