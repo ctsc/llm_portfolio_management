@@ -1,6 +1,6 @@
 """Trade simulator with stop-loss and take-profit guardrails, driven only by the price ledger.
 
-Rules (all from devin.md Phase 9):
+Rules (all from PLAN.md Phase 9):
 - Start at `initial_value` cash on the same start date for every portfolio.
 - Rebalance at the Monday open: value positions at the open, target_value_i = w_i * V_open,
   fractional shares filled at the open, cost = cost_bps / 10000 * |trade value| paid from cash.

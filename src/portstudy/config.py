@@ -1,6 +1,6 @@
 """Typed study configuration loaded from config/study.yaml and config/models.yaml.
 
-Unknown keys are an error. Every deferred decision from devin.md section 0.3 is listed
+Unknown keys are an error. Every deferred decision from PLAN.md section 0.3 is listed
 under `decisions` with an id, a value, and a status of confirmed or provisional.
 """
 

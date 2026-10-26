@@ -1,5 +1,5 @@
 # Study configuration: every setting and every deferred decision lives here.
-# Decision IDs (D1, B2, ...) refer to section 0.3 of devin.md. Code tags each use with DECISION(<ID>).
+# Decision IDs (D1, B2, ...) refer to section 0.3 of PLAN.md. Code tags each use with DECISION(<ID>).
 
 universe:
   size: 100                       # DECISION(B4)

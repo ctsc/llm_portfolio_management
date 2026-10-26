@@ -1,6 +1,6 @@
 # Design: one page per pipeline stage
 
-The formulas below are copied from the appendix of `devin.md` so the code and the spec cannot
+The formulas below are copied from the appendix of `PLAN.md` so the code and the spec cannot
 drift. Each stage names the module that implements it.
 
 ## Week alignment (`calendar.py`)

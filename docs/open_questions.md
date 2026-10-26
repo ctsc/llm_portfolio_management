@@ -1,6 +1,6 @@
 # Open questions and study decisions
 
-A mirror of the decision table in `devin.md` section 0.3, with the place each default lives in
+A mirror of the decision table in `PLAN.md` section 0.3, with the place each default lives in
 `config/study.yaml` (or `config/models.yaml`) and the code locations tagged `DECISION(<id>)`.
 Rows marked `provisional` may change after the real prompt test runs (Phase 17 D); everything
 else is confirmed.

@@ -2,7 +2,7 @@
 
 All settings live in `config/study.yaml` (typed by `src/portstudy/config.py`, unknown keys
 rejected), `config/models.yaml`, and `config/prompts_manifest.yaml`. The `decision` column
-gives the id from `devin.md` section 0.3 where one applies; code tags each use with
+gives the id from `PLAN.md` section 0.3 where one applies; code tags each use with
 `DECISION(<id>)`.
 
 ## Environment variables

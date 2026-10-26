@@ -1,12 +1,12 @@
-# devin.md: AI Build Plan for the LLM Skills and Investor Mindsets Study
+# PLAN.md: Build Plan for the LLM Skills and Investor Mindsets Study
 
-This file tells an AI coding agent how to build the entire codebase for the study, start to finish, with no human input until the manual section at the end (Phase 17).
+This file is the phased build plan for the whole codebase, start to finish, ending with the manual research work in Phase 17.
 
 Study in one sentence: with a quantitative portfolio optimizer and guardrails held fixed, test whether an LLM given specialized skills files can beat or improve a quant baseline, using a weekly pipeline simulated on live data.
 
 ---
 
-## 0. Rules for the agent (read first, follow always)
+## 0. Working rules (read first, follow always)
 
 ### 0.1 How to work
 1. Work through the phases in order. Do not start phase N+1 until phase N's "Done when" checks pass.
@@ -79,8 +79,8 @@ Each decision below is a config value in `config/study.yaml`, tagged in code wit
 
 ```
 repo/
-  devin.md                    this file
-  PROGRESS.md                 agent progress log
+  PLAN.md                     this file
+  PROGRESS.md                 build log, one entry per phase
   README.md                   how to run everything
   pyproject.toml
   .gitlab-ci.yml
@@ -90,7 +90,7 @@ repo/
     prompts_manifest.yaml     prompt files, versions, hashes
   prompts/
     base_instructions.md      shared instructions and JSON schema text
-    skills/                   HUMAN-WRITTEN skills files (agent writes placeholders only)
+    skills/                   researcher-written skills files (placeholders only until Phase 17)
     placebo/                  placebo file (placeholder generated to match length)
   src/portstudy/
     config.py  paths.py  io.py  hashing.py  logging_setup.py  calendar.py  types.py
@@ -278,7 +278,7 @@ eval.tie_band: 0.01
    {"score": <integer -5..5>, "confidence": <number 0..1>, "rationale": "<short reason>"}
    ```
    Respond with JSON only.
-2. `prompts/skills/` and `prompts/placebo/`: the agent writes only clearly labeled placeholder files (one `skills_PLACEHOLDER_v0.md` and one `placebo_PLACEHOLDER_v0.md`) of a plausible structure, each starting with a banner `PLACEHOLDER: the researcher writes the real file (Phase 17)`. The real skills file is human work. Never generate investing advice text intended as the final skills. The `bare` configuration (bare prompt) uses no file: its shared prefix is the base instructions only. The design must allow more skills files to be added later as new configurations with no code change.
+2. `prompts/skills/` and `prompts/placebo/`: only clearly labeled placeholder files are written (one `skills_PLACEHOLDER_v0.md` and one `placebo_PLACEHOLDER_v0.md`) of a plausible structure, each starting with a banner `PLACEHOLDER: the researcher writes the real file (Phase 17)`. The real skills file is human work. Never generate investing advice text intended as the final skills. The `bare` configuration (bare prompt) uses no file: its shared prefix is the base instructions only. The design must allow more skills files to be added later as new configurations with no code change.
 3. `config/prompts_manifest.yaml`: list of configurations, each with `id`, `file`, `kind` (`bare`, `skills`, `placebo`), `version`, `sha256`, `enabled`. A script `scripts/refresh_manifest.py` recomputes hashes and fails CI if a file changed without a version bump.
 4. `llm/prompts.py`:
    - `assemble_prompt(config_id, stock_row, news_text) -> AssembledPrompt(shared_prefix, stock_part, full_text, prefix_hash, prompt_hash)`.
@@ -609,7 +609,7 @@ eval.tie_band: 0.01
 
 ---
 
-## Phase 16: Final agent checklist
+## Phase 16: Final checklist
 
 Before declaring the code complete, verify and record in `PROGRESS.md`:
 - [ ] `ruff`, `mypy`, and the full test suite pass from a clean checkout.
@@ -623,9 +623,9 @@ Before declaring the code complete, verify and record in `PROGRESS.md`:
 
 ---
 
-## Phase 17: Manual developer work (a human does this; the agent cannot)
+## Phase 17: Manual research work (needs real accounts, keys, and the desktop)
 
-Do these in order after Phases 1 to 16 are green. Each item says what the agent should have already prepared.
+Do these in order after Phases 1 to 16 are green. Each item says what the earlier phases should have already prepared.
 
 ### A. Accounts, keys, and spending limits
 1. Create API accounts and keys for Anthropic (Claude Haiku 5.5) and OpenAI (GPT-6 Luna). Put the keys in a `.env` file on the desktop only (names are listed in `docs/config_reference.md`). Never commit it.
@@ -637,7 +637,7 @@ Do these in order after Phases 1 to 16 are green. Each item says what the agent 
 1. Install NVIDIA drivers and CUDA, Python 3.11, and Ollama.
 2. Pull the local models: Qwen 3.5 4B (thinking off) and Phi-4 Mini, plus Llama 3.2 3B as the fallback. Confirm exact tags in the Ollama library.
 3. Clone Kronos at the pinned commit into `vendor/kronos` and download `Kronos-base` and `Kronos-Tokenizer-base` from the `NeoQuasar` Hugging Face organization.
-4. Run `scripts/smoke_real_services.py` (the agent writes it to make one real call per service with a tiny prompt and print status, cost, and latency). Fix every `UNVERIFIED` item it exposes (see `PROGRESS.md`).
+4. Run `scripts/smoke_real_services.py` (it makes one real call per service with a tiny prompt and print status, cost, and latency). Fix every `UNVERIFIED` item it exposes (see `PROGRESS.md`).
 5. Benchmark: seconds per call and GPU memory per local model with a full-length prompt, and one Kronos-base run over 100 stocks. Confirm the total fits between your Friday night or Saturday morning start and Monday 9:30 am ET with margin. If a local model does not fit in 6 GB, swap it for Llama 3.2 3B in `config/models.yaml` and log why.
 6. Power settings: plugged in, no sleep while the weekend script runs, Windows updates paused for the weekend.
 

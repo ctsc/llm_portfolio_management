@@ -1,5 +1,5 @@
 base_instructions: prompts/base_instructions.md
-base_sha256: d476a24b2ef3697b8ff677ba204ae746766b65ea9917d25c388ba891fd4b1d51
+base_sha256: 0622daaedabc704bbaad6c40accf7916ba9cefbce9abdd8fdc89d499a26bc9b9
 configurations:
 - id: bare
   kind: bare
@@ -11,14 +11,14 @@ configurations:
   kind: skills
   file: prompts/skills/skills_PLACEHOLDER_v0.md
   version: v0
-  sha256: 7b19e53d4f9f5bdd1ccfbc06d467e89c099316b8c983b1f5e7e6085d15524771
+  sha256: 9352ab7a528999697a8b5e45a41695cfe3ffa6cef964a5e2cbd1b86a11b33b8e
   enabled: true
   hashed_version: v0
 - id: placebo
   kind: placebo
   file: prompts/placebo/placebo_PLACEHOLDER_v0.md
   version: v0
-  sha256: ae60c5292ef5f8a739abe153ea0b8a5eb89ec7bbbc1a24b095bcde6b226a23a2
+  sha256: ba63df48e91703bf628460bb731dc5bd9f89e55225bf0adfcf304fd926b7019c
   enabled: true
   matches: skills
   hashed_version: v0

@@ -1,4 +1,4 @@
-# PROGRESS.md: agent build log
+# PROGRESS.md: build log
 
 Each entry: what was built, tests passing, anything skipped and why.
 
@@ -6,7 +6,7 @@ Each entry: what was built, tests passing, anything skipped and why.
 
 Built:
 - `pyproject.toml` with dependency groups `ml`, `api`, `data`, `dev`; core installs without extras.
-- `config/study.yaml` (every section and every decision from devin.md 0.3) and `config/models.yaml` (model registry with stub models for tests).
+- `config/study.yaml` (every section and every decision from PLAN.md 0.3) and `config/models.yaml` (model registry with stub models for tests).
 - `src/portstudy/config.py`: strict pydantic models, unknown keys rejected, decisions carry `id`, `value`, `status`.
 - `paths.py`, `hashing.py`, `io.py` (atomic writes, `%.12g` floats), `logging_setup.py` (JSON lines, ET timestamps), `types.py`, `calendar.py` (built-in NYSE table 2024 to 2027 with early closes, `pandas_market_calendars` when installed).
 
@@ -165,7 +165,7 @@ Tests: 10 unit tests (hand calculations for NW with zero lags, sign test, permut
 Built:
 - `.gitlab-ci.yml`: image `python:3.11`, stages `lint` (ruff, mypy), `test` (pytest over `tests/unit` and `tests/integration` with coverage artifacts), `e2e` (default branch only), `checks` (manifest hash check, placebo length, banned words, secret patterns, yamllint). Pip cache per branch; no secrets.
 - `.yamllint` config; `.gitattributes` forcing LF line endings (the Windows editor had produced CRLF in a few files, now renormalized).
-- `scripts/check_banned_words.py` (em dash and the banned condition word; `devin.md`, which states the rule, and the script itself are excluded) and `scripts/check_secrets.py` (OpenAI, Anthropic, AWS, GitHub, GitLab key shapes, private key blocks, quoted key assignments).
+- `scripts/check_banned_words.py` (em dash and the banned condition word; `PLAN.md`, which states the rule, and the script itself are excluded) and `scripts/check_secrets.py` (OpenAI, Anthropic, AWS, GitHub, GitLab key shapes, private key blocks, quoted key assignments).
 - `docs/gitlab_setup.md`, `docs/desktop_checklist.md`.
 
 Tests: `tests/unit/test_phase12_ci.py` (5 tests): yamllint passes, stages and jobs present with the default-branch rule on e2e, every command in the CI file exists locally, the repository passes both greps, and both greps catch planted problems.
@@ -205,7 +205,7 @@ Built:
 - `docs/runbook.md`: where files live, `portstudy status`, rerunning one job, a table of every failure with its fallback and remedy, restore from backup, prompt or config changes mid-run.
 - `docs/config_reference.md`: every key in `study.yaml`, `models.yaml`, and `prompts_manifest.yaml` with default, meaning, and decision id; environment variables and key names.
 - `docs/open_questions.md`: the section 0.3 decision table with config locations and `DECISION(...)` code tags, the provisional items settled in Phase 17, and the rule that any change after the live start is logged and versioned.
-- `docs/design.md`: one section per pipeline stage with the formula sheet copied from `devin.md`.
+- `docs/design.md`: one section per pipeline stage with the formula sheet copied from `PLAN.md`.
 - `scripts/smoke_real_services.py` (prepared for Phase 17 B4): one tiny real call per data service and per enabled model, printing status, cost, and latency; loads `.env`.
 
 Done-when: the README demo (three weekend runs, `portstudy status`, `portstudy eval --synthetic --skip-shuffle`) was followed in a fresh Python 3.11 virtual environment created from the README alone; every step succeeded. Note: the system `python` on this desktop is 3.14, so the venv must be created with the 3.11 interpreter (`uv python` install); the README states the 3.11 requirement.
