@@ -75,7 +75,7 @@ def append_prices(new_rows: pd.DataFrame, logger: logging.Logger | None = None) 
         fresh = incoming
     if len(fresh) == 0:
         return 0
-    merged = pd.concat([existing, fresh], ignore_index=True)
+    merged = pd.concat([existing, fresh], ignore_index=True) if len(existing) else fresh
     merged = merged.sort_values(["date", "ticker"], kind="stable").reset_index(drop=True)
     write_csv_atomic(merged, ledger_dir() / "prices_raw.csv")
     return len(fresh)
@@ -96,7 +96,7 @@ def append_actions(new_rows: pd.DataFrame) -> int:
         incoming = incoming[mask]
     if len(incoming) == 0:
         return 0
-    merged = pd.concat([existing, incoming], ignore_index=True)
+    merged = pd.concat([existing, incoming], ignore_index=True) if len(existing) else incoming
     merged = merged.sort_values(["date", "ticker", "action"], kind="stable").reset_index(drop=True)
     write_csv_atomic(merged, ledger_dir() / "corporate_actions.csv")
     return len(incoming)

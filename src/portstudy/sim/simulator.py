@@ -253,6 +253,9 @@ class PortfolioSim:
         for tk in list(self.pending_sales):
             if tk in opens and tk in targets:
                 self.pending_sales.pop(tk)
+        # Float rounding can leave cash a hair below zero after a fully scaled buy.
+        if abs(self.cash) < 1e-6:
+            self.cash = 0.0
 
     def execute_pending(
         self, week_id: str, day: dt.date, opens: dict[str, float], decision_source: DecisionSource

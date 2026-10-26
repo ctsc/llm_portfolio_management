@@ -463,6 +463,12 @@ class WeekRunner:
             if not path.exists():
                 continue
             handle = BatchHandle.from_dict(read_json(path))
+            tasks = {t.item.custom_id: t for t in self.plan_week(model) if t.config_id == conf.id}
+            # Providers that hold batch state in memory (the stub) re-attach the items after a
+            # process restart; real providers keep the state server-side and ignore this.
+            rehydrate = getattr(provider, "rehydrate_batch", None)
+            if callable(rehydrate):
+                rehydrate(handle, [tasks[c].item for c in handle.custom_ids if c in tasks])
             status = provider.poll_batch(handle)
             if status.state != "done":
                 if status.state == "failed":
@@ -478,7 +484,6 @@ class WeekRunner:
                     )
                 continue
             results = {r.custom_id: r for r in provider.collect_batch(handle)}
-            tasks = {t.item.custom_id: t for t in self.plan_week(model) if t.config_id == conf.id}
             done = self._read_records(model, conf.id)
             failed: list[Task] = []
             for cid in handle.custom_ids:
@@ -578,7 +583,13 @@ class WeekRunner:
 
     # Assessment ---------------------------------------------------------------------------
 
-    def assess_run(self, model: str, config_id: str, now: dt.datetime | None = None) -> RunStatus:
+    def assess_run(
+        self,
+        model: str,
+        config_id: str,
+        now: dt.datetime | None = None,
+        deadline: dt.datetime | None = None,
+    ) -> RunStatus:
         """DECISION(N1): invalid rate above the threshold, or not finished by the lock deadline."""
         spec = self.registry.get(model)
         tasks = [t for t in self.plan_week(model) if t.config_id == config_id]
@@ -597,7 +608,7 @@ class WeekRunner:
             assessed_at=current.isoformat(),
         )
         if len(done) < len(tasks):
-            if current >= lock_deadline(self.week_id, self.cfg):
+            if current >= (deadline or lock_deadline(self.week_id, self.cfg)):
                 status.state = "failed"
                 status.reason = (
                     "batch_not_ready_by_lock"

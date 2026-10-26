@@ -121,3 +121,59 @@ def work_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_data_
     copy_snapshots(session_data_root, target, session_weeks[:4])
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(target))
     return target
+
+
+# Full pipeline runs ------------------------------------------------------------------------
+
+PIPELINE_WEEKS = 3
+
+
+def generous_budget(cfg: StudyConfig) -> StudyConfig:
+    """The stub API models carry placeholder prices; lift the goal so tests are not blocked."""
+    return cfg.model_copy(update={"llm": cfg.llm.model_copy(
+        update={"cost_goal_usd": 1e9, "cost_warn_usd": 1e9})})
+
+
+@pytest.fixture(scope="session")
+def pipeline_root(tmp_path_factory: pytest.TempPathFactory, study_config: StudyConfig,
+                  model_registry: ModelRegistry, world: SyntheticWorld) -> Path:
+    """A data dir where the first PIPELINE_WEEKS synthetic weeks ran through J1 to J9."""
+    from portstudy.data.providers.synthetic import synthetic_bundle
+    from portstudy.llm.prompts import load_manifest
+    from portstudy.pipeline.context import RunContext, synthetic_clock
+    from portstudy.pipeline.jobs import run_named
+
+    root = tmp_path_factory.mktemp("pipeline_root")
+    previous = os.environ.get("PORTSTUDY_DATA_DIR")
+    os.environ["PORTSTUDY_DATA_DIR"] = str(root)
+    try:
+        cfg = generous_budget(study_config)
+        for w in cal.week_range(study_config.synthetic.first_week, PIPELINE_WEEKS):
+            ctx = RunContext(cfg=cfg, registry=model_registry, manifest=load_manifest(), synthetic=True,
+                             data_providers=synthetic_bundle(world), clock=synthetic_clock(w))
+            for job in cfg.pipeline.jobs:
+                state = run_named(ctx, job, w).state
+                assert state == "done", (w, job, state)
+    finally:
+        if previous is None:
+            os.environ.pop("PORTSTUDY_DATA_DIR", None)
+        else:
+            os.environ["PORTSTUDY_DATA_DIR"] = previous
+    return root
+
+
+@pytest.fixture()
+def pipeline_dir(pipeline_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A private copy of the pipeline run (without backups) for tests that modify it."""
+    import shutil
+
+    target = tmp_path / "data"
+    shutil.copytree(pipeline_root, target, ignore=shutil.ignore_patterns("backups"))
+    monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(target))
+    return target
+
+
+@pytest.fixture()
+def inject_week(study_config: StudyConfig) -> str:
+    """The first week after the shared pipeline run, used for failure injection."""
+    return cal.week_range(study_config.synthetic.first_week, PIPELINE_WEEKS + 1)[-1]

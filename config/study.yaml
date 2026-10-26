@@ -131,6 +131,7 @@ simulator:
 pipeline:
   jobs: [J1, J2, J3, J4, J5, J6, J7, J8, J9]
   stop_on_failure: true
+  lock_margin_minutes: 30         # J6 fails a run not finished this long before the Monday lock
 
 eval:
   tie_band: 0.01

@@ -190,6 +190,9 @@ class PipelineConfig(StrictModel):
         default_factory=lambda: ["J1", "J2", "J3", "J4", "J5", "J6", "J7", "J8", "J9"]
     )
     stop_on_failure: bool = True
+    # J6 declares a run failed when it is not finished this many minutes before the lock, so
+    # that J7 still has time to write the weights before the deadline.
+    lock_margin_minutes: int = 30
 
 
 class ShuffleConfig(StrictModel):

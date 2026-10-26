@@ -164,7 +164,8 @@ class RunningCost:
         row = {"week_id": self.week_id, **row}
         mask = (df["model"] == row["model"]) & (df["config_id"] == row["config_id"])
         df = df[~mask] if len(df) else df
-        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+        new = pd.DataFrame([row])
+        df = pd.concat([df, new], ignore_index=True) if len(df) else new
         df = df.loc[:, COST_LOG_COLUMNS].sort_values(["model", "config_id"]).reset_index(drop=True)
         write_csv_atomic(df, self.path)
 
