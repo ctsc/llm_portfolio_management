@@ -73,6 +73,7 @@ files = ["src"]
 [[tool.mypy.overrides]]
 module = ["cvxpy", "cvxpy.*", "scipy", "scipy.*", "sklearn", "sklearn.*", "statsmodels", "statsmodels.*", "matplotlib", "matplotlib.*"]
 ignore_missing_imports = true
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
