@@ -76,7 +76,7 @@ PLANTED = {
 }
 
 # Weekly planted effect per unit of sentiment (sentiment in -2..2, applied over 5 days).
-NEWS_EFFECT_WEEKLY = 0.004
+NEWS_EFFECT_WEEKLY = 0.010
 MOMENTUM_EFFECT_DAILY = 0.0005
 NO_NEWS_PROB = 0.12
 LATE_NEWS_PROB = 0.10

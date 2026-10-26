@@ -28,7 +28,9 @@ from portstudy.llm.providers.base import (
     RawResult,
 )
 
-DEFAULT_NOISE = {"bare": 1.6, "skills": 1.0, "placebo": 1.6}
+# Noise per configuration: skills reads the planted words much more cleanly than the two
+# controls, which share the same noise so that placebo equals bare in expectation.
+DEFAULT_NOISE = {"bare": 3.0, "skills": 0.8, "placebo": 3.0}
 STUB_MODEL_VERSION = "stub-2026-01-01"
 
 
@@ -50,14 +52,25 @@ class StubFailures:
 _WORD = re.compile(r"[a-z]+")
 
 
-def sentiment_from_text(text: str) -> int:
-    """Net count of planted positive minus negative words in the news section of a prompt."""
+def sentiment_from_text(text: str) -> float:
+    """Mean per-article net count of planted positive minus negative words in the news section.
+
+    Each article is one line of the news block; averaging over lines keeps the signal in the
+    planted -2..2 range regardless of how many articles a stock had that week.
+    """
     marker = "News from the past week:"
     body = text.split(marker, 1)[1] if marker in text else text
-    words = _WORD.findall(body.lower())
-    pos = sum(w in POSITIVE_WORDS for w in words)
-    neg = sum(w in NEGATIVE_WORDS for w in words)
-    return pos - neg
+    body = body.split("Respond with the JSON object now.", 1)[0]
+    lines = [ln for ln in body.splitlines() if ln.strip()]
+    if not lines:
+        return 0.0
+    nets = []
+    for line in lines:
+        words = _WORD.findall(line.lower())
+        pos = sum(w in POSITIVE_WORDS for w in words)
+        neg = sum(w in NEGATIVE_WORDS for w in words)
+        nets.append(pos - neg)
+    return float(sum(nets) / len(nets))
 
 
 def _rng(seed: int, *parts: str) -> np.random.Generator:
