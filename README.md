@@ -1,4 +1,4 @@
-# portstudy
+# LLM Enhanced Quantitative Portfolio Management 
 
 **Do LLM "skills files" add anything to a quant stock-picking baseline?**
 A weekly, fully reproducible research pipeline that holds the optimizer and risk guardrails fixed and measures whether language-model stock views, with and without a specialized skills file, improve on a momentum-plus-forecast baseline.
