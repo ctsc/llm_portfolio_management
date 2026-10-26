@@ -101,7 +101,7 @@ stub_models:
     kind: local
     provider: stub
     provider_model: stub
-    snapshot_id: stub-2026-01-01
+    snapshot_id: stub-local-a-2026-01-01
     enabled: true
     role: primary
     settings:
@@ -119,7 +119,7 @@ stub_models:
     kind: local
     provider: stub
     provider_model: stub
-    snapshot_id: stub-2026-01-01
+    snapshot_id: stub-local-b-2026-01-01
     enabled: true
     role: primary
     settings:
@@ -137,7 +137,7 @@ stub_models:
     kind: api
     provider: stub
     provider_model: stub
-    snapshot_id: stub-2026-01-01
+    snapshot_id: stub-api-a-2026-01-01
     enabled: true
     role: primary
     settings:
@@ -155,7 +155,7 @@ stub_models:
     kind: api
     provider: stub
     provider_model: stub
-    snapshot_id: stub-2026-01-01
+    snapshot_id: stub-api-b-2026-01-01
     enabled: true
     role: primary
     settings:

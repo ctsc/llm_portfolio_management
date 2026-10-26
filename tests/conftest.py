@@ -100,3 +100,24 @@ def snapshot_data_dir(session_data_root: Path, monkeypatch: pytest.MonkeyPatch) 
     """Point PORTSTUDY_DATA_DIR at the shared snapshot folder for one test."""
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(session_data_root))
     return session_data_root
+
+
+def copy_snapshots(src_root: Path, dst_root: Path, weeks: list[str]) -> None:
+    """Copy the snapshot folders (and the ledger) for `weeks` into a fresh data dir."""
+    import shutil
+
+    (dst_root / "snapshots").mkdir(parents=True, exist_ok=True)
+    for w in weeks:
+        shutil.copytree(src_root / "snapshots" / w, dst_root / "snapshots" / w, dirs_exist_ok=True)
+    if (src_root / "ledger").exists():
+        shutil.copytree(src_root / "ledger", dst_root / "ledger", dirs_exist_ok=True)
+
+
+@pytest.fixture()
+def work_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_data_root: Path,
+                  session_weeks: list[str]) -> Path:
+    """A private data dir seeded with the first few session snapshots (writable per test)."""
+    target = tmp_path / "work"
+    copy_snapshots(session_data_root, target, session_weeks[:4])
+    monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(target))
+    return target
