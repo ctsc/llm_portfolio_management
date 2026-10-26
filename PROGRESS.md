@@ -159,3 +159,13 @@ Built (`src/portstudy/eval/`):
 - Synthetic world: `NEWS_EFFECT_WEEKLY` raised from 0.004 to 0.010 so the planted LLM-detectable effect is recoverable within 30 weeks (the oracle IC ceiling was about 0.10, below the 30-week minimum detectable gap). Stub noise now 3.0 (bare, placebo) vs 0.8 (skills), and the stub averages the planted word count per article so the signal no longer saturates.
 
 Tests: 10 unit tests (hand calculations for NW with zero lags, sign test, permutation, Holm never below raw and monotone, min detectable gap, paired counts, fallback-week exclusion in IC tables, planted skills edge detected by H1 and H3 after Holm on the real stub over 30 snapshot weeks, placebo-vs-bare false-positive rate at or under 10 percent over 200 seeds) and `tests/integration/test_phase11_report.py` (report builds on the synthetic pipeline run with every table and figure, shuffle cache resumes). `portstudy eval --synthetic` produced the full report on the 30-week run (90 s with 5 shuffles per portfolio).
+
+## Phase 12: GitLab CI
+
+Built:
+- `.gitlab-ci.yml`: image `python:3.11`, stages `lint` (ruff, mypy), `test` (pytest over `tests/unit` and `tests/integration` with coverage artifacts), `e2e` (default branch only), `checks` (manifest hash check, placebo length, banned words, secret patterns, yamllint). Pip cache per branch; no secrets.
+- `.yamllint` config; `.gitattributes` forcing LF line endings (the Windows editor had produced CRLF in a few files, now renormalized).
+- `scripts/check_banned_words.py` (em dash and the banned condition word; `devin.md`, which states the rule, and the script itself are excluded) and `scripts/check_secrets.py` (OpenAI, Anthropic, AWS, GitHub, GitLab key shapes, private key blocks, quoted key assignments).
+- `docs/gitlab_setup.md`, `docs/desktop_checklist.md`.
+
+Tests: `tests/unit/test_phase12_ci.py` (5 tests): yamllint passes, stages and jobs present with the default-branch rule on e2e, every command in the CI file exists locally, the repository passes both greps, and both greps catch planted problems.

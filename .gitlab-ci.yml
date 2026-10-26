@@ -1,0 +1,65 @@
+---
+# GitLab CI: lint and test every push. The weekly pipeline is never run here (DECISION(N2)).
+# No secrets are needed: nothing in CI calls a real service.
+
+image: python:3.11
+
+stages:
+  - lint
+  - test
+  - checks
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PORTSTUDY_DATA_DIR: "$CI_PROJECT_DIR/data"
+
+cache:
+  key: "pip-$CI_COMMIT_REF_SLUG"
+  paths:
+    - .cache/pip
+
+.install: &install
+  before_script:
+    - python --version
+    - pip install --upgrade pip
+    - pip install -e ".[dev]"
+
+lint:
+  stage: lint
+  <<: *install
+  script:
+    - ruff check src tests scripts
+    - mypy src scripts
+
+test:
+  stage: test
+  <<: *install
+  script:
+    - pytest tests/unit tests/integration --cov=portstudy --cov-report=term --cov-report=xml
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    when: always
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    expire_in: 1 week
+
+# End-to-end rehearsal only on the default branch, to save the free-tier minutes.
+e2e:
+  stage: test
+  <<: *install
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - pytest tests/e2e -q
+
+checks:
+  stage: checks
+  <<: *install
+  script:
+    - python scripts/refresh_manifest.py --check
+    - python scripts/check_placebo_length.py
+    - python scripts/check_banned_words.py
+    - python scripts/check_secrets.py
+    - yamllint -c .yamllint .gitlab-ci.yml config/study.yaml config/models.yaml config/prompts_manifest.yaml
