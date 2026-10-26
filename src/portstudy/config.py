@@ -7,6 +7,7 @@ under `decisions` with an id, a value, and a status of confirmed or provisional.
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -311,12 +312,16 @@ class ModelRegistry(StrictModel):
         raise KeyError(f"unknown model {model_id}")
 
 
-def repo_root() -> Path:
-    """Repository root: PORTSTUDY_ROOT if set, else the parent of the src folder."""
-    env = os.environ.get("PORTSTUDY_ROOT")
+@lru_cache(maxsize=8)
+def _resolved_root(env: str | None) -> Path:
     if env:
         return Path(env).resolve()
     return Path(__file__).resolve().parents[2]
+
+
+def repo_root() -> Path:
+    """Repository root: PORTSTUDY_ROOT if set, else the parent of the src folder."""
+    return _resolved_root(os.environ.get("PORTSTUDY_ROOT"))
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

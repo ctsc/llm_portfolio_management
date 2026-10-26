@@ -177,3 +177,23 @@ Built:
 - `portstudy backup --week ... [--dry-run]` and J9 call it.
 
 Tests: `tests/integration/test_phase13_backup.py` (4 tests): round trip on the synthetic pipeline run (back up, delete the originals, restore, hashes equal), corrupted and missing files detected by `verify_backup` (and restore refuses), master CSVs equal the concatenation of the weekly files, dry run writes nothing.
+
+## Phase 14: End-to-end rehearsal on synthetic data
+
+Speed-ups found by profiling one week (19 s to about 7 s in process, from about 45 s per fresh week in the Phase 10 run):
+- Prompt file text and hashes cached on (path, mtime, size); `repo_root()` cached; `WeekRunner.plan_week` cached per model (it was rebuilt 34 times a week).
+- Multithreaded OpenBLAS made every 100-by-100 `np.linalg.solve` take 0.16 s on the desktop (0.1 ms single-threaded). `portstudy/__init__.py` now pins the BLAS pool to one thread (env vars plus `threadpoolctl`).
+- Stub default `model_version` follows the registry convention so an injected stub and `make_provider` agree.
+
+Built (`tests/e2e/`):
+- `conftest.py`: `WeekendRunner` drives `scripts/run_weekend.py` in process week after week with the shared world, injectable LLM and data providers, and a clock; session fixture `e2e_root` runs 25 synthetic weeks (4 stub models, 3 configurations, 100 stocks).
+- `test_full_run_synthetic`: no snapshot row after its cutoff, weights locked before the deadline, sum to 1 within 1e-8 and capped, costs equal 10 bps of trade value, cash identity, every week normal, IC history covers exactly the closed windows, no file under `prompts/` changed, report builds.
+- `test_failure_week`: J4 crash then resume (week 2), invalid-output storm (week 3, fallback), batch never returns at the lock margin (week 4, fallback for that model only), data failure (week 5, no_rebalance for all), normal week 6; as-traded records carry the labels and clean weeks exclude them.
+- `test_resume_equals_uninterrupted_run`: a crash in J4 then a rerun gives CSVs identical to the uninterrupted run (latency column excluded).
+- `test_determinism_two_runs_identical`: a second 6-week run matches the first run's outputs and IC history exactly.
+- `test_no_future_data`: guarded providers raise on any price request past the cutoff; the news pull stays inside the documented 12-hour leakage window and the snapshot holds nothing after 16:00 ET.
+- `test_cost_log`: every logged cost equals the cost table applied to the logged tokens; weekly cost log totals equal the score totals.
+- `test_backups_exist_for_every_week`.
+- `scripts/benchmark_pipeline.py`: seconds per job for one synthetic week.
+
+`pytest tests/e2e` passes in 6 min 23 s on the desktop.

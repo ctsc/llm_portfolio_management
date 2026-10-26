@@ -132,6 +132,7 @@ class WeekRunner:
         self.table = CostTable(registry)
         self.stub_seed = stub_seed
         self._providers: dict[str, LlmProvider] = dict(providers or {})
+        self._plans: dict[str, list[Task]] = {}
         self.folder = week_output_dir(week_id) / "llm"
         self.folder.mkdir(parents=True, exist_ok=True)
 
@@ -147,11 +148,21 @@ class WeekRunner:
 
     def plan_week(self, model: str | None = None) -> list[Task]:
         """Tasks (model, configuration, ticker) for every enabled model and configuration."""
+        if model is None:
+            return [t for m in self.models() for t in self.plan_week(m.id)]
+        cached = self._plans.get(model)
+        if cached is not None:
+            return cached
+        tasks = self._plan_model(model)
+        self._plans[model] = tasks
+        return tasks
+
+    def _plan_model(self, model: str) -> list[Task]:
         ref = self.snapshot.reference.set_index("ticker")
         news = self.snapshot.news_text.set_index("ticker")["news_text"]
         tasks: list[Task] = []
         for spec in self.models():
-            if model is not None and spec.id != model:
+            if spec.id != model:
                 continue
             for conf in self.manifest.enabled():
                 for tk in self.snapshot.included_tickers:

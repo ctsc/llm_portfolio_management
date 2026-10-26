@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -64,12 +65,25 @@ def load_manifest(path: Path | None = None) -> PromptManifest:
     return PromptManifest.model_validate(raw)
 
 
+@lru_cache(maxsize=256)
+def _read_cached(path: str, mtime_ns: int, size: int) -> tuple[str, str]:
+    text = Path(path).read_text(encoding="utf-8")
+    return text, sha256_file(Path(path))
+
+
+def _text_and_hash(rel: str) -> tuple[str, str]:
+    """Prompt file text and hash, cached on (path, mtime, size) so edits are always seen."""
+    path = repo_root() / rel
+    st = path.stat()
+    return _read_cached(str(path), st.st_mtime_ns, st.st_size)
+
+
 def read_prompt_file(rel: str) -> str:
-    return (repo_root() / rel).read_text(encoding="utf-8")
+    return _text_and_hash(rel)[0]
 
 
 def file_hash(rel: str) -> str:
-    return sha256_file(repo_root() / rel)
+    return _text_and_hash(rel)[1]
 
 
 # Assembly -------------------------------------------------------------------------------------

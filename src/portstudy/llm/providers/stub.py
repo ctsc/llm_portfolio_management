@@ -86,14 +86,15 @@ class StubLlmProvider(LlmProvider):
         model_id: str,
         seed: int = 0,
         noise_by_config: dict[str, float] | None = None,
-        model_version: str = STUB_MODEL_VERSION,
+        model_version: str | None = None,
         failures: StubFailures | None = None,
         model_skill: float = 1.0,
     ) -> None:
         self.model_id = model_id
         self.seed = seed
         self.noise_by_config = dict(DEFAULT_NOISE, **(noise_by_config or {}))
-        self.model_version = model_version
+        # Default version matches the registry convention `<model_id>-2026-01-01`.
+        self.model_version = model_version or f"{model_id}-{STUB_MODEL_VERSION.split('-', 1)[1]}"
         self.failures = failures or StubFailures()
         self.model_skill = model_skill
         self.calls = 0
