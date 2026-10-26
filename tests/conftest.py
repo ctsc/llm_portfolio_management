@@ -63,3 +63,40 @@ def first_cutoff(study_config: StudyConfig) -> dt.date:
 @pytest.fixture(scope="session")
 def universe(study_config: StudyConfig, providers: ProviderBundle, first_cutoff: dt.date) -> pd.DataFrame:
     return build_universe(first_cutoff, study_config, providers, print_table=False)
+
+
+# Number of consecutive synthetic weeks snapshotted once per session for the later phases.
+SESSION_WEEKS = 30
+
+
+@pytest.fixture(scope="session")
+def session_weeks(study_config: StudyConfig) -> list[str]:
+    return cal.week_range(study_config.synthetic.first_week, SESSION_WEEKS)
+
+
+@pytest.fixture(scope="session")
+def session_data_root(tmp_path_factory: pytest.TempPathFactory, study_config: StudyConfig,
+                      providers: ProviderBundle, universe: pd.DataFrame,
+                      session_weeks: list[str]) -> Path:
+    """A data dir holding SESSION_WEEKS snapshots, built once and shared read-mostly."""
+    from portstudy.data.snapshot import make_snapshot
+
+    target = tmp_path_factory.mktemp("session_data")
+    previous = os.environ.get("PORTSTUDY_DATA_DIR")
+    os.environ["PORTSTUDY_DATA_DIR"] = str(target)
+    try:
+        for w in session_weeks:
+            make_snapshot(w, study_config, providers, universe)
+    finally:
+        if previous is None:
+            os.environ.pop("PORTSTUDY_DATA_DIR", None)
+        else:
+            os.environ["PORTSTUDY_DATA_DIR"] = previous
+    return target
+
+
+@pytest.fixture()
+def snapshot_data_dir(session_data_root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point PORTSTUDY_DATA_DIR at the shared snapshot folder for one test."""
+    monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(session_data_root))
+    return session_data_root
