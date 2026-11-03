@@ -1,4 +1,4 @@
-PLACEHOLDER: the researcher writes the real file (Phase 17)
+PLACEHOLDER skills_5: the researcher writes the real file (Phase 17)
 
 # Skills file (placeholder)
 
@@ -10,11 +10,11 @@ Placeholder paragraph one. The real skills file describes a way of reading compa
 
 ## Section 2: How to read the news (placeholder)
 
-Placeholder paragraph two. Lorem ipsum style filler is avoided on purpose; instead this text repeats plain sentences of similar length to ordinary prose. The researcher replaces every line of this file. No model or code ever edits it.
+Placeholder paragraph two. Lorem ipsum filler is avoided; instead the text repeats plain sentences similar to ordinary prose. The researcher replaces every line of this file. No model or code ever edits it.
 
 ## Section 3: How to map a view to the score (placeholder)
 
-Placeholder paragraph three. The output schema is fixed by the base instructions and is not restated here. The real file may give the model a procedure for turning a view into an integer score and a confidence, but this placeholder does not.
+Placeholder paragraph three. The output schema is fixed by the base instructions and is not restated here. The real file may give the model a procedure for expressing an observation as a range and a short rationale, but this placeholder does not.
 
 ## Section 4: Reminders (placeholder)
 

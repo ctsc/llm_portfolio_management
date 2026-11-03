@@ -57,8 +57,10 @@ baseline and the risk model share one ticker set (`baseline/common.py`).
 ## Prompts (`llm/prompts.py`)
 
 Shared prefix first (base instructions plus the configuration's file), then the stock part
-(ticker, company name, sector, news; C1). No price statistics anywhere. A stock with no news
-gets the fixed sentence (C2). Output schema:
+(ticker, company name, sector, news; C1). Prompt configurations are selected by manifest kind:
+`bare`, `placebo`, and `skills_1` through `skills_5`, with `skills_5` disabled by default. The
+placebo matches the enabled skills mean, and skills file lengths are checked against that mean.
+No price statistics anywhere. A stock with no news gets the fixed sentence (C2). Output schema:
 
 ```
 {"low": <integer -5..5>, "likely": <integer -5..5>, "high": <integer -5..5>, "rationale": "<short reason>"}

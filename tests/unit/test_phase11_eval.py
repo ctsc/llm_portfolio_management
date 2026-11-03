@@ -86,11 +86,11 @@ def test_ic_tables_exclude_fallback_weeks(tmp_path: object) -> None:
     weeks = cal.week_range("2026-W05", 4)
     rows = [{"week_id": w, "signal": "baseline", "model": "", "config_id": "", "rank_ic": 0.1, "n_stocks": 100}
             for w in weeks]
-    rows += [{"week_id": w, "signal": "llm_raw", "model": "m", "config_id": "skills", "rank_ic": 0.2, "n_stocks": 100}
+    rows += [{"week_id": w, "signal": "llm_raw", "model": "m", "config_id": "skills_1", "rank_ic": 0.2, "n_stocks": 100}
              for w in weeks]
     store.upsert(rows)
-    tables = ic_tables(store, ["m__skills"], clean_weeks=lambda p: [weeks[0], weeks[2], weeks[3]])
-    col = tables["llm_raw"]["m__skills"]
+    tables = ic_tables(store, ["m__skills_1"], clean_weeks=lambda p: [weeks[0], weeks[2], weeks[3]])
+    col = tables["llm_raw"]["m__skills_1"]
     assert np.isnan(col[weeks[1]]) and col[weeks[0]] == 0.2
     assert tables["baseline"]["baseline"].notna().all()
     long = long_table(tables)
@@ -132,16 +132,16 @@ def _weekly_ics(study_config: StudyConfig, world: SyntheticWorld, weeks: list[st
 def test_h1_and_h3_detect_the_planted_skills_edge(snapshot_data_dir: object, study_config: StudyConfig,
                                                   world: SyntheticWorld, session_weeks: list[str]) -> None:
     # A known edge: skills reads the planted words almost cleanly, the controls barely do.
-    noise = {"bare": 6.0, "skills": 0.5, "placebo": 6.0}
-    ics = _weekly_ics(study_config, world, session_weeks, seed=0, configs=["bare", "skills", "placebo"],
+    noise = {"bare": 6.0, "skills_1": 0.5, "placebo": 6.0}
+    ics = _weekly_ics(study_config, world, session_weeks, seed=0, configs=["bare", "skills_1", "placebo"],
                       noise=noise)
     assert len(ics) >= 25
     # H1: the skills configuration has a clearly positive IC against the realized returns.
-    assert newey_west_mean(ics["skills"]).p < 0.01 and ics["skills"].mean() > 0.05
-    assert sign_flip_permutation(ics["skills"], n=5000, seed=0) < 0.01
+    assert newey_west_mean(ics["skills_1"]).p < 0.01 and ics["skills_1"].mean() > 0.05
+    assert sign_flip_permutation(ics["skills_1"], n=5000, seed=0) < 0.01
     # H3: skills beats bare and placebo after Holm across the family.
-    gap_bare = ics["skills"] - ics["bare"]
-    gap_placebo = ics["skills"] - ics["placebo"]
+    gap_bare = ics["skills_1"] - ics["bare"]
+    gap_placebo = ics["skills_1"] - ics["placebo"]
     p = holm([sign_flip_permutation(gap_bare, n=5000, seed=0), sign_flip_permutation(gap_placebo, n=5000, seed=0)])
     assert gap_bare.mean() > 0 and gap_placebo.mean() > 0
     assert (p < study_config.eval.significance).all(), (gap_bare.mean(), gap_placebo.mean(), p)

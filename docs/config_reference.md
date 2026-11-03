@@ -96,9 +96,10 @@ Keys go in a `.env` file on the desktop only; `scripts/smoke_real_services.py` l
 | `temperature` | 0.0 | For every model | D4 |
 | `no_news_sentence` | "No relevant news is available for this week." | Used when a stock has no news | C2 |
 | `prompt_fields` | ticker, name, sector, news | Stock part of the prompt | C1 |
-| `skills_token_cap` | 6000 | Cap on every skills file for every tokenizer | C4 |
+| `skills_token_cap` | 6000 | Cap on each enabled skills and placebo file for every tokenizer | C4 |
+| `skills_length_tolerance` | 0.05 | Each enabled skills file within 5 percent of the enabled skills mean | P1 |
 | `rationale_token_cap` | 150 | Rationale truncation | C7 |
-| `placebo_length_tolerance` | 0.02 | Placebo within 2 percent of its skills file | |
+| `placebo_length_tolerance` | 0.02 | Placebo within 2 percent of the enabled skills mean | |
 | `invalid_rate_threshold` | 0.15 | Failure rule | N1 |
 | `retry_invalid_once` | true | One retry on an invalid answer | |
 | `batch_retry_count` | 1 | Resubmissions of failed batch items | |
@@ -178,6 +179,7 @@ when the provider offers one; the returned version is logged on every call), `en
 ## prompts_manifest.yaml
 
 `base_instructions`, `base_sha256`, and `configurations`: `id`, `kind` (`bare`, `skills`,
-`placebo`), `file`, `version`, `sha256`, `hashed_version`, `enabled`, `matches` (the skills
-configuration a placebo is length-matched to). Decision B1. Maintained by
+`placebo`), `file`, `version`, `sha256`, `hashed_version`, `enabled`, `matches` (a skills
+configuration id or `skills_mean` for the enabled skills mean). `skills_5` is disabled by default.
+Decision B1. Maintained by
 `scripts/refresh_manifest.py`.

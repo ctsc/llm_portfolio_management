@@ -153,6 +153,7 @@ class LlmConfig(StrictModel):
     skills_token_cap: int = 6000
     rationale_token_cap: int = 150
     placebo_length_tolerance: float = 0.02
+    skills_length_tolerance: float = 0.05  # DECISION(P1)
     invalid_rate_threshold: float = 0.15
     retry_invalid_once: bool = True
     batch_retry_count: int = 1

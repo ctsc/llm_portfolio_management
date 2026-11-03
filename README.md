@@ -30,14 +30,14 @@ Each week, for 100 sector-balanced S&P 500 stocks:
 |---|---|
 | **Quant baseline** | Momentum features (12-1, 3-month, 1-month reversal) plus a 5-day price forecast are rank-averaged into `z_b`. |
 | **Risk model** | Ledoit-Wolf covariance on 252 daily returns, scaled to weekly; market-cap prior `pi = delta Sigma w_mkt`. |
-| **LLM views** | Every model rates every stock from its ticker, name, sector, and the week's news, under three prompt configurations: `bare`, `skills`, and a length-matched `placebo`. One stock per call, temperature 0, JSON output only. |
+| **LLM views** | Every model rates every stock from its ticker, name, sector, and the week's news, under `bare`, `placebo`, and `skills_1` through `skills_5` prompt configurations. Skills and placebo files are length-matched to the enabled skills mean. One stock per call, temperature 0, JSON output only. |
 | **Residualize** | LLM likely ratings are regressed on `z_b`; the standardized residual `z_L` is the part of the view the baseline did not already know. |
 | **Black-Litterman** | Baseline and LLM views enter as stacked identity views, scaled by trailing rank IC and range-derived certainty. |
 | **Optimize** | Phase 1 enables MVO with a 5 percent cap. Its baseline-only portfolio is `mvo__Q0`; a steered portfolio is `mvo__<model>__<prompt-id>`. |
 | **Simulate** | Monday-open rebalance at raw ledger prices, 10 bps costs, daily stop-loss (-8%) and take-profit (+15%), dividends and splits handled. |
 | **Evaluate** | Weekly rank IC gaps (H1 to H3), pre-registered splits (H4), factor regressions and a shuffled-ratings test (H5), all with Holm correction. |
 
-The planned strategies are MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, with HRP and equal weight as controls. Portfolio identity separates the rating source (`<model>__<prompt-id>`) from the portfolio using it. Rank IC is stored once per source. Phase 1 enables MVO only and no controls; with the current four-model registry and three enabled prompt configurations, the default run writes one `mvo__Q0` plus 12 steered portfolios. The test config selects two stub models and the same three prompt configurations. A null result is a valid result; the evaluation reports the minimum detectable gap and never tunes toward a positive finding.
+The planned strategies are MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, with HRP and equal weight as controls. Portfolio identity separates the rating source (`<model>__<prompt-id>`) from the portfolio using it. Rank IC is stored once per source. Phase 1 enables MVO only and no controls; with the current four-model registry and six enabled prompt configurations, the default run writes one `mvo__Q0` plus 24 steered portfolios. `skills_5` is disabled by default. The test config selects two stub models and `bare`, `placebo`, `skills_1`, and `skills_2`. A null result is a valid result; the evaluation reports the minimum detectable gap and never tunes toward a positive finding.
 
 ---
 
@@ -105,7 +105,7 @@ Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_c
 | `python scripts/benchmark_pipeline.py` | Seconds per job for one 100-stock week |
 | `python scripts/estimate_cost.py` | Projected API cost from logged token counts |
 | `python scripts/refresh_manifest.py --check\|--write` | Prompt file hashes; a prompt edited without a version bump fails |
-| `python scripts/check_placebo_length.py` | Placebo within 2 percent of the skills file for every tokenizer |
+| `python scripts/check_placebo_length.py` | Skills within 5 percent and placebo within 2 percent of the enabled skills mean for every tokenizer |
 | `python scripts/smoke_real_services.py` | One tiny real call per data service and model (needs keys) |
 
 Add `--synthetic` to any pipeline command to use the synthetic world and stub LLM.
@@ -216,3 +216,7 @@ License: MIT.
 - **Stub range width (chosen during build)**: half-width follows the absolute sampled noise with a minimum of one, so noisier synthetic ratings have wider ranges.
 - **Range certainty adapter (chosen during build)**: apply width-derived certainty at the optimizer boundary to preserve the existing view-builder interface until Phase 6.
 - **Empty endpoint metadata (chosen during build)**: keep the output column stable until a provider exposes the resolved serving endpoint.
+- **DECISION(B1), prompt configurations**: compare `bare`, `placebo`, and five named skills prompts, with `skills_5` disabled by default, so skills sources can be added without changing discovery code.
+- **DECISION(P1), prompt length tolerances**: keep each enabled skills file within 5 percent of the skills mean and placebo within 2 percent of that mean, controlling for prompt length.
+- **Equal-length neutral skills placeholders (chosen during build)**: use equal-length text with distinct configuration labels so each placeholder has its own prompt hash until the researcher replaces them.
+- **Stub noise progression (chosen during build)**: use `3.0` for both controls and `1.2`, `1.0`, `0.8`, `0.6`, and `0.4` for `skills_1` to `skills_5` to create distinct synthetic skill effects below the controls.

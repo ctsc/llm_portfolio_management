@@ -330,7 +330,7 @@ class FakeTransport:
         return self.responses.pop(0)
 
 
-def _item(study_config: StudyConfig, model: str = "m", config_id: str = "skills") -> BatchItem:
+def _item(study_config: StudyConfig, model: str = "m", config_id: str = "skills_1") -> BatchItem:
     prompt: AssembledPrompt = assemble_prompt(config_id, {"ticker": "AAA", "name": "Alpha", "sector": "Energy"},
                                               "Alpha beats estimates.", study_config)
     return BatchItem(make_custom_id(model, config_id, "2026-W05", "AAA"), model, config_id, "2026-W05", "AAA", prompt)
@@ -339,7 +339,7 @@ def _item(study_config: StudyConfig, model: str = "m", config_id: str = "skills"
 def test_stub_ranges_are_deterministic_and_reflect_prompt_noise(study_config: StudyConfig) -> None:
     provider = StubLlmProvider("stub", seed=29)
     bare = _item(study_config, config_id="bare")
-    skills = _item(study_config, config_id="skills")
+    skills = _item(study_config, config_id="skills_1")
     bare_widths = []
     skill_widths = []
     for index in range(500):
@@ -482,4 +482,4 @@ def test_full_synthetic_week_all_models(work_data_dir: Path, week_snapshot: tupl
     scores["net"] = [sentiment_from_text(tasks[make_custom_id(m, c, week, t)].item.prompt.full_text)
                      for m, c, t in zip(scores["model"], scores["config_id"], scores["ticker"])]
     corr = scores.groupby("config_id").apply(lambda g: g["likely"].corr(g["net"]))
-    assert corr["skills"] > corr["bare"] > 0.3
+    assert corr["skills_1"] > corr["bare"] > 0.3

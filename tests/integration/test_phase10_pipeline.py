@@ -93,7 +93,7 @@ def test_j4_crash_then_resume(pipeline_dir: Path, study_config: StudyConfig, mod
     healthy = StubLlmProvider("stub-local-a")
     ctx2 = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-local-a": healthy})
     assert run_named(ctx2, "J4", inject_week).state == "done"
-    assert healthy.calls == 300 - 50
+    assert healthy.calls == 600 - 50
     rest = run_week(ctx2, inject_week, ["J5", "J6", "J7"])
     assert all(s == "done" for s in rest.values())
     assert fb.week_status_for(inject_week, "mvo__stub-local-a__bare") == "normal"
@@ -179,7 +179,7 @@ def test_invalid_rate_above_threshold_falls_back(pipeline_dir: Path, study_confi
         assert plan.status_for(f"mvo__stub-local-a__{conf.id}") == "normal"
     pd.testing.assert_frame_equal(
         read_weights(inject_week, "mvo__Q0"),
-        read_weights(inject_week, "mvo__stub-local-b__skills"),
+        read_weights(inject_week, "mvo__stub-local-b__skills_1"),
     )
     log = fb.read_log(inject_week)
     assert sum(1 for e in log if e["status"] == "fallback") == len(load_manifest().enabled())

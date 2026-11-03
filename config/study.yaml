@@ -93,6 +93,7 @@ llm:
   no_news_sentence: "No relevant news is available for this week."   # DECISION(C2)
   prompt_fields: [ticker, name, sector, news]                       # DECISION(C1)
   skills_token_cap: 6000          # DECISION(C4)
+  skills_length_tolerance: 0.05   # DECISION(P1)
   rationale_token_cap: 150        # DECISION(C7)
   placebo_length_tolerance: 0.02
   invalid_rate_threshold: 0.15    # DECISION(N1)

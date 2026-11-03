@@ -276,3 +276,39 @@ Choices made while unattended:
 - Stub half-width is `max(1, ceil(abs(noise)))`, so synthetic uncertainty follows the sampled noise while retaining a nonzero interval.
 - Width-derived certainty is applied at the optimizer boundary; the existing view-builder interface remains until Phase 6.
 - The `endpoint` output field is empty because `RawResult` does not yet expose a resolved serving endpoint; the column is retained for the later serving implementation.
+
+## v2 phase 3: prompt manifest and skills placeholders
+
+Built:
+- Replaced the single skills placeholder with five equal-length neutral files and updated the manifest to `bare`, `placebo`, and `skills_1` through `skills_5`. `skills_5` is disabled by default; placebo matches `skills_mean`.
+- Added enabled kind-based prompt discovery and mean-based skills and placebo length validation per enabled tokenizer, including the 6000-token cap, zero and one-skill cases, and unknown match handling.
+- Added `skills_length_tolerance: 0.05` for DECISION(P1), assigned distinct stub noise levels to the five skills configurations, and updated the test configuration prompt subset.
+- Updated README, design, and config-reference documentation for the manifest, enabled prompt sources, and length rules.
+
+Tests and checks:
+- Full pytest: 207 passed, 3 warnings in 487.05 seconds. The warnings are NumPy empty-slice warnings from the synthetic report test.
+- `ruff check src tests scripts` and `mypy src scripts` passed.
+- Manifest refresh check, placebo-length check, banned-word check, secret check, and yamllint passed.
+- Targeted `ruff format --check` reports seven existing v1 files that would be reformatted. They are part of the known 27-file baseline and were left unchanged: the synthetic e2e test, Phase 10 and Phase 11 integration tests, and the Phase 5, Phase 6, Phase 8, and Phase 11 unit tests. The new Phase 3 test and the other checked files pass.
+- `git diff --check` and LF line-ending checks passed.
+
+Changed v1 tests and reasons:
+- `tests/unit/test_phase5_prompts.py`: migrated placeholder, prompt assembly, and checker assertions to the new skills IDs and mean-length rules.
+- `tests/unit/test_phase6_llm.py`: migrated stub call and cache expectations to distinct hashes for the five skills placeholders.
+- `tests/unit/test_phase8_optimize.py`: migrated weight-building and readback checks to the enabled `skills_1` configuration.
+- `tests/unit/test_phase11_eval.py`: migrated IC source and planted-edge assertions to `skills_1`.
+- `tests/unit/test_v2_phase1_config_identity.py`: updated the test config source list for its four selected prompt IDs.
+- Phase 10 integration and synthetic e2e tests: migrated persisted portfolio references to `skills_1` and updated counts for six enabled prompt configurations.
+- Added `tests/unit/test_v2_phase3_manifest.py` for enabled kind ordering, disabled configuration exclusion, placeholder lengths, skills tolerances, mean matching, and zero, one, and unknown-match edge cases.
+
+UNVERIFIED:
+- No real-provider behavior was added or exercised. Live services remain outside the offline scope.
+
+Skipped:
+- Phase 4 and later phases were not started.
+- No real data, paid APIs, brokers, or external services were used.
+
+Choices made while unattended:
+- Used equal-length neutral text with distinct configuration labels so the placeholders remain independently hashed and cached while the real texts are unavailable.
+- Set stub noise to 3.0 for both controls and 1.2, 1.0, 0.8, 0.6, and 0.4 for skills_1 through skills_5, respectively, to meet the required distinct lower-noise progression.
+- Applied the C4 token cap to enabled skills and placebo files because the plan requires every checked file to remain under the cap.

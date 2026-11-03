@@ -7,18 +7,46 @@ configurations:
   version: v0
   sha256: null
   enabled: true
-- id: skills
-  kind: skills
-  file: prompts/skills/skills_PLACEHOLDER_v0.md
-  version: v0
-  sha256: 9352ab7a528999697a8b5e45a41695cfe3ffa6cef964a5e2cbd1b86a11b33b8e
-  enabled: true
-  hashed_version: v0
 - id: placebo
   kind: placebo
   file: prompts/placebo/placebo_PLACEHOLDER_v0.md
   version: v0
   sha256: ba63df48e91703bf628460bb731dc5bd9f89e55225bf0adfcf304fd926b7019c
   enabled: true
-  matches: skills
+  matches: skills_mean
+  hashed_version: v0
+- id: skills_1
+  kind: skills
+  file: prompts/skills/skills_1_PLACEHOLDER_v0.md
+  version: v0
+  sha256: 9c1dfe285970a520293aa0de244623a11fe32d2ac10bc40e903a3c2c20ba53c2
+  enabled: true
+  hashed_version: v0
+- id: skills_2
+  kind: skills
+  file: prompts/skills/skills_2_PLACEHOLDER_v0.md
+  version: v0
+  sha256: a98699b4d70fd3b800cf636f12244942a129008621d09d5421938bc8de571db2
+  enabled: true
+  hashed_version: v0
+- id: skills_3
+  kind: skills
+  file: prompts/skills/skills_3_PLACEHOLDER_v0.md
+  version: v0
+  sha256: d56229cfe2d850326a5bee8f0c3f7f3528eef6e8d87a8c94e296051243db4475
+  enabled: true
+  hashed_version: v0
+- id: skills_4
+  kind: skills
+  file: prompts/skills/skills_4_PLACEHOLDER_v0.md
+  version: v0
+  sha256: 8c56a01da025f15dc3a9db0687625415bd7ee4386a88f6fd0372abd52cc85ed2
+  enabled: true
+  hashed_version: v0
+- id: skills_5
+  kind: skills
+  file: prompts/skills/skills_5_PLACEHOLDER_v0.md
+  version: v0
+  sha256: a05efdd94be52594b7175ae5dcea48c4ff0ef062c3cc6dba28f9e596c6edee28
+  enabled: false
   hashed_version: v0

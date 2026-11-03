@@ -99,11 +99,13 @@ def test_test_config_selects_expected_sources_and_portfolio_count() -> None:
     )
     assert [source.key for source in ctx.sources()] == [
         "stub-local-a__bare",
-        "stub-local-a__skills",
         "stub-local-a__placebo",
+        "stub-local-a__skills_1",
+        "stub-local-a__skills_2",
         "stub-local-b__bare",
-        "stub-local-b__skills",
         "stub-local-b__placebo",
+        "stub-local-b__skills_1",
+        "stub-local-b__skills_2",
     ]
     assert ctx.portfolio_keys() == [
         "mvo__Q0",

@@ -1,6 +1,6 @@
 llm:
   model_ids: [stub-local-a, stub-local-b]
-  prompt_ids: [bare, skills, placebo]
+  prompt_ids: [bare, placebo, skills_1, skills_2]
 
 synthetic:
   n_tickers: 120

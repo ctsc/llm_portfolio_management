@@ -35,7 +35,7 @@ class PromptConfiguration(BaseModel):
     sha256: str | None = None
     hashed_version: str | None = None  # the version the recorded sha256 belongs to
     enabled: bool = True
-    matches: str | None = None  # for placebo: the skills configuration it is length-matched to
+    matches: str | None = None  # for placebo: a skills id or skills_mean
 
 
 class PromptManifest(BaseModel):
@@ -53,6 +53,9 @@ class PromptManifest(BaseModel):
 
     def enabled(self) -> list[PromptConfiguration]:
         return [c for c in self.configurations if c.enabled]
+
+    def by_kind(self, kind: PromptKind) -> list[PromptConfiguration]:
+        return [c for c in self.configurations if c.enabled and c.kind == kind]
 
 
 def manifest_path() -> Path:

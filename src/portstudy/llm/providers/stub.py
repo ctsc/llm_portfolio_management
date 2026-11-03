@@ -28,9 +28,16 @@ from portstudy.llm.providers.base import (
 )
 from portstudy.llm.schema import RANGE_MAX, RANGE_MIN
 
-# Noise per configuration: skills reads the planted words much more cleanly than the two
-# controls, which share the same noise so that placebo equals bare in expectation.
-DEFAULT_NOISE = {"bare": 3.0, "skills": 0.8, "placebo": 3.0}
+# Controls share noise, while skill prompt noise decreases across the configurations.
+DEFAULT_NOISE = {
+    "bare": 3.0,
+    "placebo": 3.0,
+    "skills_1": 1.2,
+    "skills_2": 1.0,
+    "skills_3": 0.8,
+    "skills_4": 0.6,
+    "skills_5": 0.4,
+}
 STUB_MODEL_VERSION = "stub-2026-01-01"
 
 
