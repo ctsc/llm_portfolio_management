@@ -10,7 +10,8 @@ On a failure the script stops, prints what failed, the fallback that will apply,
 command to rerun that one job. Rerunning the script resumes where it stopped.
 
 Usage: python scripts/run_weekend.py [--week 2026-W46] [--dry-run] [--synthetic]
-                                     [--allow-over-budget] [--now ISO] [--poll-seconds N]
+                                     [--allow-over-budget] [--gateway-fallback] [--now ISO]
+                                     [--poll-seconds N]
 """
 
 from __future__ import annotations
@@ -34,7 +35,10 @@ FALLBACK_HINTS = {
     "J1": "data failure: every portfolio holds last week's positions (no_rebalance)",
     "J2": "baseline failure: every portfolio holds last week's positions (no_rebalance)",
     "J3": "batch not submitted: the API portfolios trade the Q0 weights (fallback_q0)",
-    "J4": "local run incomplete: those portfolios trade the Q0 weights (fallback_q0) at the lock",
+    "J4": (
+        "open-weight run incomplete: those portfolios trade the Q0 weights "
+        "(fallback_q0) at the lock"
+    ),
     "J5": "batch not collected: those portfolios trade the Q0 weights (fallback_q0) at the lock",
     "J6": "validation did not finish: rerun J6 before the lock margin",
     "J7": "weights not written: fix and rerun J7 before the lock deadline",
@@ -47,8 +51,14 @@ def say(msg: str) -> None:
     print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def rerun_command(job: str, week: str, synthetic: bool) -> str:
-    return f"portstudy run-job {job} --week {week}" + (" --synthetic" if synthetic else "")
+def rerun_command(
+    job: str, week: str, synthetic: bool, gateway_fallback: bool = False
+) -> str:
+    return (
+        f"portstudy run-job {job} --week {week}"
+        + (" --synthetic" if synthetic else "")
+        + (" --gateway-fallback" if gateway_fallback else "")
+    )
 
 
 def run(ctx: RunContext, job: str, week: str, synthetic: bool) -> str:
@@ -58,7 +68,7 @@ def run(ctx: RunContext, job: str, week: str, synthetic: bool) -> str:
     except Exception as exc:  # a JobFailed, or a hard crash that left no status file
         say(f"{job} {week} FAILED: {exc}")
         say(f"fallback that will apply: {FALLBACK_HINTS.get(job, '')}")
-        say(f"rerun with: {rerun_command(job, week, synthetic)}")
+        say(f"rerun with: {rerun_command(job, week, synthetic, ctx.gateway_fallback)}")
         raise JobFailed(job, week, str(exc)) from exc
     result = status.result or {}
     summary = _summarize(job, result)
@@ -145,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--synthetic", action="store_true")
     parser.add_argument("--allow-over-budget", action="store_true")
+    parser.add_argument("--gateway-fallback", action="store_true")
     parser.add_argument("--config", default=None, help="study YAML path")
     parser.add_argument("--now", default=None, help="override the clock, ISO datetime with offset")
     parser.add_argument("--poll-seconds", type=int, default=None)
@@ -161,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         allow_over_budget=args.allow_over_budget,
         clock=clock,
         config_path=Path(args.config) if args.config else None,
+        gateway_fallback=args.gateway_fallback,
     )
     week = args.week or current_week(ctx.now())
     poll = (

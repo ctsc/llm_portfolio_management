@@ -170,11 +170,16 @@ code. See `docs/open_questions.md`.
 ## models.yaml
 
 `models` (real registry) and `stub_models` (tests and `--synthetic`). Each entry: `id`,
-`display_name`, `kind` (`local` or `api`), `provider` (`ollama`, `anthropic_batch`,
-`openai_batch`, `stub`), `provider_model` (tag or model name), `snapshot_id` (dated snapshot
-when the provider offers one; the returned version is logged on every call), `enabled`,
-`role` (`primary` or `fallback`), `settings`, and `price` (`input_per_m`, `cached_input_per_m`,
-`output_per_m`, `batch_discount`). Decision D1; prices are placeholders until Phase 17 D4.
+`display_name`, `kind` (`open_weight` or `api`), `provider` (`litellm`,
+`anthropic_batch`, `openai_batch`, `stub`), `provider_model`, `serving` (`gateway` or
+`slurm_fallback`), `fallback_eligible`, `snapshot_id`, `enabled`, `settings`, and `price`
+(`input_per_m`, `cached_input_per_m`, `output_per_m`, `batch_discount`). Gateway entries use
+zero prices; API prices follow D3.
+
+`llm.concurrency` sets per-model open-weight worker counts, defaulting to four when omitted.
+`llm.settings` supports `send_seed` and `json_mode`. The `llm.gateway` section contains the
+gateway `base_url` and `fallback_endpoint_file`. The fallback JSON file requires a `base_url` or
+`url`, may specify `week_id`, and must be newer than the source run.
 
 ## prompts_manifest.yaml
 

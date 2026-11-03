@@ -141,7 +141,13 @@ class LlmSettings(StrictModel):
     seed: int = 1234
     max_output_tokens: int = 300
     reasoning: str = "none"
-    think: bool = False
+    send_seed: bool = True
+    json_mode: bool = True
+
+
+class GatewayConfig(StrictModel):
+    base_url: str = ""
+    fallback_endpoint_file: str = "data/runtime/fallback_endpoint.json"
 
 
 class LlmConfig(StrictModel):
@@ -162,6 +168,8 @@ class LlmConfig(StrictModel):
     prompt_ids: list[str] = Field(default_factory=list)
     settings_default: LlmSettings = LlmSettings()
     settings: dict[str, LlmSettings] = Field(default_factory=dict)
+    concurrency: dict[str, int] = Field(default_factory=dict)
+    gateway: GatewayConfig = GatewayConfig()
 
     def settings_for(self, model_id: str) -> LlmSettings:
         return self.settings.get(model_id, self.settings_default)
@@ -340,12 +348,14 @@ class ModelPrice(StrictModel):
 class ModelSpec(StrictModel):
     id: str
     display_name: str
-    kind: Literal["local", "api"]
+    kind: Literal["open_weight", "api"]
     provider: str
     provider_model: str
     snapshot_id: str | None = None
     enabled: bool = True
     role: Literal["primary", "fallback"] = "primary"
+    serving: Literal["gateway", "slurm_fallback"] = "gateway"
+    fallback_eligible: bool = False
     settings: LlmSettings = LlmSettings()
     price: ModelPrice = ModelPrice()
 
@@ -363,6 +373,24 @@ class ModelRegistry(StrictModel):
         invalid = [model_id for model_id in ids if "__" in model_id or model_id in reserved]
         if invalid:
             raise ValueError(f"invalid or reserved model ids: {invalid}")
+        blocked_fragment = "q" + "wen"
+        blocked = [model_id for model_id in ids if blocked_fragment in model_id.lower()]
+        if blocked:
+            raise ValueError(f"model ids contain a prohibited fragment: {blocked}")
+        unknown_enabled = [
+            model.id
+            for model in self.models + self.stub_models
+            if model.enabled and model.provider_model.strip().upper() == "TBD"
+        ]
+        if unknown_enabled:
+            raise ValueError(f"enabled models must have a provider_model: {unknown_enabled}")
+        invalid_fallback = [
+            model.id
+            for model in self.models + self.stub_models
+            if model.serving == "slurm_fallback" and not model.fallback_eligible
+        ]
+        if invalid_fallback:
+            raise ValueError(f"models are not eligible for Slurm fallback: {invalid_fallback}")
         return self
 
     def enabled(self, synthetic: bool = False) -> list[ModelSpec]:

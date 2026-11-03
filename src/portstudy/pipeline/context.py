@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from portstudy.config import (
     ModelRegistry,
+    ModelSpec,
     StudyConfig,
     load_model_registry,
     load_study_config,
@@ -32,6 +33,7 @@ class RunContext:
     synthetic: bool = False
     allow_over_budget: bool = False
     force: bool = False
+    gateway_fallback: bool = False
     data_providers: ProviderBundle | None = None
     llm_providers: dict[str, LlmProvider] = field(default_factory=dict)
     clock: Callable[[], dt.datetime] | None = None
@@ -83,11 +85,20 @@ class RunContext:
 
     def run_registry(self) -> ModelRegistry:
         selected = set(self.models())
+        def for_endpoint(model: ModelSpec) -> ModelSpec:
+            if self.gateway_fallback and model.fallback_eligible:
+                return model.model_copy(update={"serving": "slurm_fallback"})
+            return model
+
         return self.registry.model_copy(
             update={
-                "models": [model for model in self.registry.models if model.id in selected],
+                "models": [
+                    for_endpoint(model) for model in self.registry.models if model.id in selected
+                ],
                 "stub_models": [
-                    model for model in self.registry.stub_models if model.id in selected
+                    for_endpoint(model)
+                    for model in self.registry.stub_models
+                    if model.id in selected
                 ],
             }
         )
@@ -102,9 +113,11 @@ class RunContext:
             }
         )
 
-    def local_models(self) -> list[str]:
+    def open_weight_models(self) -> list[str]:
         return [
-            model_id for model_id in self.models() if self.registry.get(model_id).kind == "local"
+            model_id
+            for model_id in self.models()
+            if self.registry.get(model_id).kind == "open_weight"
         ]
 
     def api_models(self) -> list[str]:
@@ -144,6 +157,7 @@ def default_context(
     force: bool = False,
     clock: Callable[[], dt.datetime] | None = None,
     config_path: Path | None = None,
+    gateway_fallback: bool = False,
 ) -> RunContext:
     return RunContext(
         cfg=load_study_config(config_path),
@@ -152,6 +166,7 @@ def default_context(
         synthetic=synthetic,
         allow_over_budget=allow_over_budget,
         force=force,
+        gateway_fallback=gateway_fallback,
         clock=clock,
     )
 

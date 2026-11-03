@@ -106,12 +106,12 @@ def test_failure_week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_con
     weeks = e2e_weeks[:6]
     assert runner.run(weeks[0], monkeypatch) == 0
     # Week 2: a local crash, then a clean resume.
-    runner.llm_providers = {"stub-local-a": StubLlmProvider("stub-local-a", failures=StubFailures(crash_after_calls=40))}
+    runner.llm_providers = {"stub-ow-a": StubLlmProvider("stub-ow-a", failures=StubFailures(crash_after_calls=40))}
     assert runner.run(weeks[1], monkeypatch) == 1
     runner.llm_providers = {}
     assert runner.run(weeks[1], monkeypatch) == 0
     # Week 3: invalid-output storm for one model.
-    runner.llm_providers = {"stub-local-b": StubLlmProvider("stub-local-b", failures=StubFailures(invalid_rate=0.6))}
+    runner.llm_providers = {"stub-ow-b": StubLlmProvider("stub-ow-b", failures=StubFailures(invalid_rate=0.6))}
     assert runner.run(weeks[2], monkeypatch) == 0
     runner.llm_providers = {}
     # Week 4: a batch that never returns; the clock sits at the lock margin so J6 can decide.
@@ -140,22 +140,22 @@ def test_failure_week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_con
 
     manifest = load_manifest()
     for conf in manifest.enabled():
-        assert fb.week_status_for(weeks[1], f"mvo__stub-local-a__{conf.id}") == "normal"
-        assert fb.week_status_for(weeks[2], f"mvo__stub-local-b__{conf.id}") == "fallback"
+        assert fb.week_status_for(weeks[1], f"mvo__stub-ow-a__{conf.id}") == "normal"
+        assert fb.week_status_for(weeks[2], f"mvo__stub-ow-b__{conf.id}") == "fallback"
         assert fb.week_status_for(weeks[3], f"mvo__stub-api-a__{conf.id}") == "fallback"
         assert fb.week_status_for(weeks[3], f"mvo__stub-api-b__{conf.id}") == "normal"
     assert fb.week_status_for(weeks[4], "mvo__Q0") == "no_rebalance"
-    daily = read_daily("mvo__stub-local-b__skills_1")
+    daily = read_daily("mvo__stub-ow-b__skills_1")
     assert set(daily.loc[daily["week_id"] == weeks[2], "week_status"]) == {"fallback"}
     assert set(daily.loc[daily["week_id"] == weeks[4], "week_status"]) == {"no_rebalance"}
-    trades = read_trades("mvo__stub-local-b__skills_1")
+    trades = read_trades("mvo__stub-ow-b__skills_1")
     assert (trades.loc[trades["week_id"] == weeks[2], "decision_source"] == "fallback_q0").all()
     assert not ((trades["week_id"] == weeks[4]) & (trades["reason"] == "rebalance")).any()
     data = load_eval_data(cfg, runner.context(weeks[5]).portfolio_keys(), weeks=weeks)
     counts = data.fallback_counts().set_index("portfolio")
-    assert counts.loc["mvo__stub-local-b__skills_1", "fallback"] == 1 and counts.loc["mvo__stub-local-b__skills_1", "no_rebalance"] == 1
+    assert counts.loc["mvo__stub-ow-b__skills_1", "fallback"] == 1 and counts.loc["mvo__stub-ow-b__skills_1", "no_rebalance"] == 1
     assert counts.loc["mvo__stub-api-b__bare", "fallback"] == 0
-    assert fb.clean_weeks("mvo__stub-local-b__skills_1", weeks) == [weeks[0], weeks[1], weeks[3], weeks[5]]
+    assert fb.clean_weeks("mvo__stub-ow-b__skills_1", weeks) == [weeks[0], weeks[1], weeks[3], weeks[5]]
 
 
 def test_resume_equals_uninterrupted_run(e2e_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -168,7 +168,7 @@ def test_resume_equals_uninterrupted_run(e2e_dir: Path, tmp_path: Path, monkeypa
     cfg = generous_budget(study_config)
     runner = WeekendRunner(cfg, model_registry, world)
     week = e2e_weeks[0]
-    runner.llm_providers = {"stub-local-a": StubLlmProvider("stub-local-a", failures=StubFailures(crash_after_calls=33))}
+    runner.llm_providers = {"stub-ow-a": StubLlmProvider("stub-ow-a", failures=StubFailures(crash_after_calls=33))}
     assert runner.run(week, monkeypatch) == 1
     assert read_status(week, "J4").state == "failed"
     runner.llm_providers = {}

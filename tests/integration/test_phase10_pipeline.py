@@ -83,20 +83,20 @@ def test_every_job_runs_alone_and_rerun_is_idempotent(pipeline_dir: Path, study_
 def test_j4_crash_then_resume(pipeline_dir: Path, study_config: StudyConfig, model_registry: ModelRegistry,
                               world: SyntheticWorld, inject_week: str) -> None:
     cfg = _cfg(study_config)
-    crashing = StubLlmProvider("stub-local-a", failures=StubFailures(crash_after_calls=50))
-    ctx = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-local-a": crashing})
+    crashing = StubLlmProvider("stub-ow-a", failures=StubFailures(crash_after_calls=50))
+    ctx = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-ow-a": crashing})
     run_week(ctx, inject_week, ["J1", "J2", "J3"])
     with pytest.raises(JobFailed):
         run_named(ctx, "J4", inject_week)
     assert read_status(inject_week, "J4").state == "failed"
     assert "StubCrash" in (read_status(inject_week, "J4").error or "")
-    healthy = StubLlmProvider("stub-local-a")
-    ctx2 = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-local-a": healthy})
+    healthy = StubLlmProvider("stub-ow-a")
+    ctx2 = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-ow-a": healthy})
     assert run_named(ctx2, "J4", inject_week).state == "done"
     assert healthy.calls == 600 - 50
     rest = run_week(ctx2, inject_week, ["J5", "J6", "J7"])
     assert all(s == "done" for s in rest.values())
-    assert fb.week_status_for(inject_week, "mvo__stub-local-a__bare") == "normal"
+    assert fb.week_status_for(inject_week, "mvo__stub-ow-a__bare") == "normal"
 
 
 def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_config: StudyConfig,
@@ -167,19 +167,19 @@ def test_invalid_rate_above_threshold_falls_back(pipeline_dir: Path, study_confi
                                                  model_registry: ModelRegistry, world: SyntheticWorld,
                                                  inject_week: str) -> None:
     cfg = _cfg(study_config)
-    noisy = StubLlmProvider("stub-local-b", failures=StubFailures(invalid_rate=0.5))
-    ctx = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-local-b": noisy})
+    noisy = StubLlmProvider("stub-ow-b", failures=StubFailures(invalid_rate=0.5))
+    ctx = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-ow-b": noisy})
     states = run_week(ctx, inject_week, ["J1", "J2", "J3", "J4", "J5", "J6", "J7", "J8"])
     assert all(s == "done" for s in states.values())
     plan = fb.read_plan(inject_week)
     assert plan is not None
     for conf in load_manifest().enabled():
-        assert plan.status_for(f"mvo__stub-local-b__{conf.id}") == "fallback"
-        assert "invalid_rate" in plan.reasons[f"mvo__stub-local-b__{conf.id}"]
-        assert plan.status_for(f"mvo__stub-local-a__{conf.id}") == "normal"
+        assert plan.status_for(f"mvo__stub-ow-b__{conf.id}") == "fallback"
+        assert "invalid_rate" in plan.reasons[f"mvo__stub-ow-b__{conf.id}"]
+        assert plan.status_for(f"mvo__stub-ow-a__{conf.id}") == "normal"
     pd.testing.assert_frame_equal(
         read_weights(inject_week, "mvo__Q0"),
-        read_weights(inject_week, "mvo__stub-local-b__skills_1"),
+        read_weights(inject_week, "mvo__stub-ow-b__skills_1"),
     )
     log = fb.read_log(inject_week)
     assert sum(1 for e in log if e["status"] == "fallback") == len(load_manifest().enabled())

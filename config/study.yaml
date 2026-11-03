@@ -107,7 +107,19 @@ llm:
     seed: 1234
     max_output_tokens: 300
     reasoning: none
-  settings: {}
+    send_seed: true                 # UNVERIFIED: confirm ARCTIC accepts seed
+    json_mode: true                 # UNVERIFIED: confirm ARCTIC accepts response_format
+  settings:
+    minimax-m2.7:
+      max_output_tokens: 2048
+  concurrency:
+    gemma-4-31b: 4
+    minimax-m2.7: 4
+    stub-ow-a: 1
+    stub-ow-b: 1
+  gateway:
+    base_url: ""                    # UNVERIFIED: set the ARCTIC LiteLLM base URL when provisioned
+    fallback_endpoint_file: data/runtime/fallback_endpoint.json
 
 views:
   tau: 0.05
@@ -186,8 +198,7 @@ decisions:
   - id: D1
     value: >-
       ARCTIC LiteLLM gateway: Gemma 4 31B, MiniMax M2.7; requested deployments: Gemma 4 E4B,
-      Phi-4 Mini 3.8B, Llama 3.2 3B; API: one or two of Claude Haiku 5.5, GPT-6 Luna. No Qwen or
-      DeepSeek. No local GPU.
+      Phi-4 Mini 3.8B, Llama 3.2 3B; API: one or two of Claude Haiku 5.5, GPT-6 Luna. No local GPU.
     status: confirmed
   - id: D2
     value: "gateway outage uses Carter's Slurm GPU jobs; otherwise that model's week is missed and excluded from its tests"

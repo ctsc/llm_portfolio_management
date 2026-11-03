@@ -35,6 +35,12 @@ PATTERNS = {
         r"(?:api[_-]?key|secret|token|password)\s*[:=]\s*['\"][A-Za-z0-9/+_-]{16,}['\"]",
         re.IGNORECASE,
     ),
+    "arctic_litellm_key": re.compile(
+        r"\bARCTIC_LITELLM_API_KEY\s*[:=]\s*['\"]?[A-Za-z0-9/+_-]{16,}"
+    ),
+    "arctic_fallback_key": re.compile(
+        r"\bARCTIC_FALLBACK_API_KEY\s*[:=]\s*['\"]?[A-Za-z0-9/+_-]{16,}"
+    ),
 }
 
 

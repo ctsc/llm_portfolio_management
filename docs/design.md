@@ -71,12 +71,16 @@ recorded. Invalid output stores `low = likely = high = 0`, `valid = false`, and 
 
 ## LLM runner (`llm/runner.py`)
 
-One stock per call, temperature 0, no tools. Invalid output: retry once, then store
+Open-weight models use the OpenAI-compatible LiteLLM provider with a bounded worker pool, one
+stock per call, temperature 0, and no tools. The serving endpoint is included in the cache key
+and stored per source-week. Switching to a fallback archives gateway records and restarts the
+source there. The main thread validates and writes completed records so a crash can resume.
+Invalid output: retry once, then store
 `low = likely = high = 0`, an empty width, and `fallback_flag = invalid_output`
 (`invalid_truncated` when the answer hit the output limit). Valid width is `high - low`. Cache
-key `sha256(model_version, prompt_hash, ticker, week_id,
-settings, model_id)`. Cost guard before any batch: projected study total above the goal raises
-unless `--allow-over-budget` (D3). Failure rule (N1): invalid rate above 0.15, or local job or
+key `sha256(model_version, prompt_hash, ticker, week_id, settings, model_id, endpoint)`. Cost
+guard before any batch: projected study total above the goal raises unless
+`--allow-over-budget` (D3). Failure rule (N1): invalid rate above 0.15, or open-weight job or
 batch not finished by the lock deadline minus the margin.
 
 ## Rank IC, residual, views (`views/`)

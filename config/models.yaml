@@ -2,136 +2,101 @@
 # until the researcher confirms them in Phase 17 (scripts/estimate_cost.py reads them).
 # `provider` selects the LlmProvider implementation; `stub` is used for every test.
 models:
-  - id: qwen3.5-4b
-    display_name: Qwen 3.5 4B (thinking off)
-    kind: local
-    provider: ollama
-    provider_model: "qwen3.5:4b"      # UNVERIFIED: confirm the exact Ollama tag in Phase 17
-    snapshot_id: null
+  - id: gemma-4-31b
+    display_name: Gemma 4 31B
+    kind: open_weight
+    provider: litellm
+    provider_model: google/gemma-4-31B-it
     enabled: true
     role: primary
-    settings:
-      temperature: 0.0
-      seed: 1234
-      max_output_tokens: 300
-      reasoning: none
-      think: false
-    price:
-      input_per_m: 0.0
-      cached_input_per_m: 0.0
-      output_per_m: 0.0
-      batch_discount: 0.0
-  - id: phi4-mini
-    display_name: Phi-4 Mini 3.8B
-    kind: local
-    provider: ollama
-    provider_model: "phi4-mini"       # UNVERIFIED: confirm the exact Ollama tag in Phase 17
-    snapshot_id: null
+    serving: gateway
+    price: {input_per_m: 0.0, cached_input_per_m: 0.0, output_per_m: 0.0, batch_discount: 0.0}
+  - id: minimax-m2.7
+    display_name: MiniMax M2.7
+    kind: open_weight
+    provider: litellm
+    provider_model: MiniMaxAI/MiniMax-M2.7
     enabled: true
     role: primary
-    settings:
-      temperature: 0.0
-      seed: 1234
-      max_output_tokens: 300
-      reasoning: none
-    price:
-      input_per_m: 0.0
-      cached_input_per_m: 0.0
-      output_per_m: 0.0
-      batch_discount: 0.0
-  - id: llama3.2-3b
-    display_name: Llama 3.2 3B (fallback only)
-    kind: local
-    provider: ollama
-    provider_model: "llama3.2:3b"     # UNVERIFIED: confirm the exact Ollama tag in Phase 17
-    snapshot_id: null
+    serving: gateway
+    price: {input_per_m: 0.0, cached_input_per_m: 0.0, output_per_m: 0.0, batch_discount: 0.0}
+  - id: gemma-4-e4b
+    display_name: Gemma 4 E4B
+    kind: open_weight
+    provider: litellm
+    provider_model: TBD
     enabled: false
     role: fallback
-    settings:
-      temperature: 0.0
-      seed: 1234
-      max_output_tokens: 300
-      reasoning: none
-    price:
-      input_per_m: 0.0
-      cached_input_per_m: 0.0
-      output_per_m: 0.0
-      batch_discount: 0.0
+    serving: gateway
+    fallback_eligible: true
+    price: {input_per_m: 0.0, cached_input_per_m: 0.0, output_per_m: 0.0, batch_discount: 0.0}
+  - id: phi-4-mini
+    display_name: Phi-4 Mini
+    kind: open_weight
+    provider: litellm
+    provider_model: TBD
+    enabled: false
+    role: fallback
+    serving: gateway
+    fallback_eligible: true
+    price: {input_per_m: 0.0, cached_input_per_m: 0.0, output_per_m: 0.0, batch_discount: 0.0}
+  - id: llama-3.2-3b
+    display_name: Llama 3.2 3B
+    kind: open_weight
+    provider: litellm
+    provider_model: TBD
+    enabled: false
+    role: fallback
+    serving: gateway
+    fallback_eligible: true
+    price: {input_per_m: 0.0, cached_input_per_m: 0.0, output_per_m: 0.0, batch_discount: 0.0}
   - id: claude-haiku-5.5
     display_name: Claude Haiku 5.5
     kind: api
     provider: anthropic_batch
-    provider_model: "claude-haiku-5-5"   # UNVERIFIED: pin the dated snapshot ID in Phase 17
+    provider_model: claude-haiku-5-5
     snapshot_id: null
     enabled: true
     role: primary
-    settings:
-      temperature: 0.0
-      seed: 1234
-      max_output_tokens: 300
-      reasoning: none
     price:
-      input_per_m: 1.00                 # placeholder, confirm in Phase 17
+      input_per_m: 1.00
       cached_input_per_m: 0.10
       output_per_m: 5.00
       batch_discount: 0.50
   - id: gpt-6-luna
-    display_name: GPT-6 Luna (reasoning none)
+    display_name: GPT-6 Luna
     kind: api
     provider: openai_batch
-    provider_model: "gpt-6-luna"         # UNVERIFIED: pin the dated snapshot ID in Phase 17
+    provider_model: gpt-6-luna
     snapshot_id: null
     enabled: true
     role: primary
-    settings:
-      temperature: 0.0
-      seed: 1234
-      max_output_tokens: 300
-      reasoning: none
     price:
-      input_per_m: 1.00                 # placeholder, confirm in Phase 17
+      input_per_m: 1.00
       cached_input_per_m: 0.25
       output_per_m: 4.00
       batch_discount: 0.50
 
 # Stub models used by tests and the synthetic run. They mirror the shape of the real registry.
 stub_models:
-  - id: stub-local-a
-    display_name: Stub local A
-    kind: local
+  - id: stub-ow-a
+    display_name: Stub Open Weight A
+    kind: open_weight
     provider: stub
     provider_model: stub
-    snapshot_id: stub-local-a-2026-01-01
+    snapshot_id: stub-ow-a-2026-01-01
     enabled: true
     role: primary
-    settings:
-      temperature: 0.0
-      seed: 1234
-      max_output_tokens: 300
-      reasoning: none
-    price:
-      input_per_m: 0.0
-      cached_input_per_m: 0.0
-      output_per_m: 0.0
-      batch_discount: 0.0
-  - id: stub-local-b
-    display_name: Stub local B
-    kind: local
+    price: {input_per_m: 0.0, cached_input_per_m: 0.0, output_per_m: 0.0, batch_discount: 0.0}
+  - id: stub-ow-b
+    display_name: Stub Open Weight B
+    kind: open_weight
     provider: stub
     provider_model: stub
-    snapshot_id: stub-local-b-2026-01-01
+    snapshot_id: stub-ow-b-2026-01-01
     enabled: true
     role: primary
-    settings:
-      temperature: 0.0
-      seed: 1234
-      max_output_tokens: 300
-      reasoning: none
-    price:
-      input_per_m: 0.0
-      cached_input_per_m: 0.0
-      output_per_m: 0.0
-      batch_discount: 0.0
+    price: {input_per_m: 0.0, cached_input_per_m: 0.0, output_per_m: 0.0, batch_discount: 0.0}
   - id: stub-api-a
     display_name: Stub API A
     kind: api
@@ -140,11 +105,6 @@ stub_models:
     snapshot_id: stub-api-a-2026-01-01
     enabled: true
     role: primary
-    settings:
-      temperature: 0.0
-      seed: 1234
-      max_output_tokens: 300
-      reasoning: none
     price:
       input_per_m: 1.00
       cached_input_per_m: 0.10
@@ -158,11 +118,6 @@ stub_models:
     snapshot_id: stub-api-b-2026-01-01
     enabled: true
     role: primary
-    settings:
-      temperature: 0.0
-      seed: 1234
-      max_output_tokens: 300
-      reasoning: none
     price:
       input_per_m: 1.00
       cached_input_per_m: 0.25

@@ -32,6 +32,7 @@ def _context(
     now: str | None,
     week: str | None,
     config: str | None,
+    gateway_fallback: bool = False,
 ) -> RunContext:
     return default_context(
         synthetic=synthetic,
@@ -39,6 +40,7 @@ def _context(
         force=force,
         clock=_clock(now, synthetic, week),
         config_path=Path(config) if config else None,
+        gateway_fallback=gateway_fallback,
     )
 
 
@@ -59,8 +61,11 @@ def run_job_cmd(
         None, "--now", help="override the clock (ISO datetime with offset)"
     ),
     config: str | None = typer.Option(None, "--config", help="study YAML path"),
+    gateway_fallback: bool = typer.Option(
+        False, "--gateway-fallback", help="use the configured Slurm endpoint for eligible models"
+    ),
 ) -> None:
-    ctx = _context(synthetic, allow_over_budget, force, now, week, config)
+    ctx = _context(synthetic, allow_over_budget, force, now, week, config, gateway_fallback)
     w = _week_or_current(week, ctx)
     try:
         status = run_named(ctx, job.upper(), w)
@@ -83,9 +88,12 @@ def run_week_cmd(
     now: str | None = typer.Option(None, "--now"),
     jobs: str = typer.Option("", "--jobs", help="comma-separated subset, default all in order"),
     config: str | None = typer.Option(None, "--config", help="study YAML path"),
+    gateway_fallback: bool = typer.Option(
+        False, "--gateway-fallback", help="use the configured Slurm endpoint for eligible models"
+    ),
 ) -> None:
     """Run the jobs in order for one week, stopping at the first failure."""
-    ctx = _context(synthetic, allow_over_budget, force, now, week, config)
+    ctx = _context(synthetic, allow_over_budget, force, now, week, config, gateway_fallback)
     w = _week_or_current(week, ctx)
     sequence = [j.strip().upper() for j in jobs.split(",") if j.strip()] or list(
         ctx.cfg.pipeline.jobs
@@ -98,6 +106,7 @@ def run_week_cmd(
             typer.echo(
                 f"rerun with: portstudy run-job {job} --week {w}"
                 + (" --synthetic" if synthetic else "")
+                + (" --gateway-fallback" if gateway_fallback else "")
             )
             raise typer.Exit(code=1) from exc
         typer.echo(f"{job} {w}: {status.state}")

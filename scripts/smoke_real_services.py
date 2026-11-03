@@ -6,7 +6,8 @@ missing key or package is reported and skipped, never fatal to the others.
 
 Usage: python scripts/smoke_real_services.py [--only alpaca,fred,...] [--ticker AAPL]
 Keys (environment or .env): ALPACA_API_KEY_ID, ALPACA_API_SECRET_KEY, FINNHUB_API_KEY,
-FRED_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY. Ollama needs a running local server.
+FRED_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, ARCTIC_LITELLM_API_KEY,
+ARCTIC_FALLBACK_API_KEY.
 """
 
 from __future__ import annotations
@@ -49,11 +50,58 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--only", default="")
     parser.add_argument("--ticker", default="AAPL")
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     load_dotenv()
     cfg = load_study_config()
     registry = load_model_registry()
     wanted = {s.strip() for s in args.only.split(",") if s.strip()}
+    if args.dry_run:
+        import json
+
+        from portstudy.llm.providers.litellm import LiteLLMProvider
+
+        manifest = load_manifest()
+        prompt = assemble_prompt(
+            "bare",
+            {"ticker": args.ticker, "name": "Example Co", "sector": "Information Technology"},
+            "Example Co reports a routine quarterly update.",
+            cfg,
+            manifest,
+        )
+        for spec in registry.enabled():
+            if spec.kind != "open_weight" or spec.serving != "gateway":
+                continue
+            if wanted and spec.id not in wanted and spec.provider not in wanted:
+                continue
+            provider = LiteLLMProvider(
+                spec.id,
+                spec.provider_model,
+                cfg.llm.gateway.base_url,
+                "ARCTIC_LITELLM_API_KEY",
+            )
+            item = BatchItem(
+                make_custom_id(spec.id, "bare", "smoke", args.ticker),
+                spec.id,
+                "bare",
+                "smoke",
+                args.ticker,
+                prompt,
+            )
+            print(
+                json.dumps(
+                    {
+                        "model": spec.id,
+                        "endpoint": cfg.llm.gateway.base_url,
+                        "payload": provider.build_payload(
+                            item, cfg.llm.settings.get(spec.id, spec.settings)
+                        ),
+                    },
+                    sort_keys=True,
+                )
+            )
+        return
+
     end = dt.date.today() - dt.timedelta(days=1)
     start = end - dt.timedelta(days=10)
 
@@ -143,7 +191,7 @@ def main() -> None:
         def call(spec=spec) -> str:  # type: ignore[no-untyped-def]
             from portstudy.llm.providers.factory import make_provider
 
-            provider = make_provider(spec)
+            provider = make_provider(spec, gateway=cfg.llm.gateway)
             item = BatchItem(
                 make_custom_id(spec.id, "bare", "smoke", args.ticker),
                 spec.id,
@@ -153,7 +201,12 @@ def main() -> None:
                 prompt,
             )
             raw = provider.complete(item, cfg.llm.settings.get(spec.id, spec.settings))
-            parsed = parse_response(raw.text, cfg.llm.rationale_token_cap, raw.stop_reason)
+            parsed = parse_response(
+                raw.text,
+                cfg.llm.rationale_token_cap,
+                raw.stop_reason,
+                reasoning_text=raw.reasoning_text,
+            )
             cost = table.cost_usd(
                 spec.id, raw.tokens_in, raw.tokens_cached, raw.tokens_out, batch=False
             )

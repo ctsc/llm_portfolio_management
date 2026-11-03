@@ -35,7 +35,7 @@ def test_model_registry_accepts_dotted_and_hyphenated_ids() -> None:
 
 
 def test_portfolio_id_round_trips_all_three_forms() -> None:
-    source = RatingSource("stub-local-a", "bare")
+    source = RatingSource("stub-ow-a", "bare")
     steered = PortfolioId.steered("mvo", source)
     q0 = PortfolioId.q0("mvo")
     control = PortfolioId.control("HRP")
@@ -98,14 +98,14 @@ def test_test_config_selects_expected_sources_and_portfolio_count() -> None:
         synthetic=True,
     )
     assert [source.key for source in ctx.sources()] == [
-        "stub-local-a__bare",
-        "stub-local-a__placebo",
-        "stub-local-a__skills_1",
-        "stub-local-a__skills_2",
-        "stub-local-b__bare",
-        "stub-local-b__placebo",
-        "stub-local-b__skills_1",
-        "stub-local-b__skills_2",
+        "stub-ow-a__bare",
+        "stub-ow-a__placebo",
+        "stub-ow-a__skills_1",
+        "stub-ow-a__skills_2",
+        "stub-ow-b__bare",
+        "stub-ow-b__placebo",
+        "stub-ow-b__skills_1",
+        "stub-ow-b__skills_2",
     ]
     assert ctx.portfolio_keys() == [
         "mvo__Q0",
@@ -142,7 +142,7 @@ def test_portfolio_keys_group_q0_controls_and_steered_by_strategy() -> None:
 def test_portstudy_config_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PORTSTUDY_CONFIG", str(TEST_CONFIG))
     cfg = load_study_config()
-    assert cfg.llm.model_ids == ["stub-local-a", "stub-local-b"]
+    assert cfg.llm.model_ids == ["stub-ow-a", "stub-ow-b"]
     assert cfg.strategies.cvar.n_scenarios == 2000
     assert cfg.strategies.resampled.n_draws == 20
     assert cfg.eval.shuffle.n_shuffles == 20

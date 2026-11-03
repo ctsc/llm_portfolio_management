@@ -21,7 +21,6 @@ from portstudy.llm.cost import CostCapExceeded, CostTable, RunningCost, check_bu
 from portstudy.llm.prompts import AssembledPrompt, assemble_prompt, load_manifest
 from portstudy.llm.providers.anthropic_batch import AnthropicBatchProvider
 from portstudy.llm.providers.base import BatchItem, make_custom_id
-from portstudy.llm.providers.ollama import OllamaProvider
 from portstudy.llm.providers.openai_batch import OpenAIBatchProvider
 from portstudy.llm.providers.stub import StubCrash, StubFailures, StubLlmProvider
 from portstudy.llm.runner import WeekRunner, lock_deadline, read_run_status, read_scores
@@ -109,7 +108,7 @@ def test_stub_run_covers_every_task_once_and_second_run_is_cached(
     assert len(tasks) == n_models * n_conf * len(snap.included_tickers)
     assert len({t.item.custom_id for t in tasks}) == len(tasks)
 
-    local = [m.id for m in model_registry.enabled(synthetic=True) if m.kind == "local"]
+    local = [m.id for m in model_registry.enabled(synthetic=True) if m.kind == "open_weight"]
     summary = runner.run_local(local[0])
     assert summary.n_calls == n_conf * len(snap.included_tickers)
     assert summary.n_cached == 0
@@ -149,7 +148,7 @@ def test_invalid_output_injection_counts_rates_and_retries_once(
     model_registry: ModelRegistry,
 ) -> None:
     week, snap = week_snapshot
-    model = "stub-local-a"
+    model = "stub-ow-a"
     bad = set(snap.included_tickers[:20])
     provider = StubLlmProvider(model, failures=StubFailures(always_invalid_tickers=bad))
     runner = _runner(week, snap, study_config, model_registry, work_data_dir, providers={model: provider})
@@ -167,17 +166,17 @@ def test_invalid_output_injection_counts_rates_and_retries_once(
     assert status.invalid_rate == pytest.approx(20 / len(snap.included_tickers))
     assert status.state == "failed" and "invalid_rate" in status.reason
     # Below the threshold the run is ok.
-    provider_ok = StubLlmProvider("stub-local-b", failures=StubFailures(always_invalid_tickers=set(snap.included_tickers[:3])))
-    runner_ok = _runner(week, snap, study_config, model_registry, work_data_dir, providers={"stub-local-b": provider_ok})
-    runner_ok.run_local("stub-local-b")
-    assert runner_ok.assess_run("stub-local-b", "bare", now=dt.datetime(2026, 1, 10, 12, tzinfo=ET)).state == "ok"
-    assert set(read_run_status(week)) >= {f"{model}__bare", "stub-local-b__bare"}
+    provider_ok = StubLlmProvider("stub-ow-b", failures=StubFailures(always_invalid_tickers=set(snap.included_tickers[:3])))
+    runner_ok = _runner(week, snap, study_config, model_registry, work_data_dir, providers={"stub-ow-b": provider_ok})
+    runner_ok.run_local("stub-ow-b")
+    assert runner_ok.assess_run("stub-ow-b", "bare", now=dt.datetime(2026, 1, 10, 12, tzinfo=ET)).state == "ok"
+    assert set(read_run_status(week)) >= {f"{model}__bare", "stub-ow-b__bare"}
 
 
 def test_truncated_outputs_are_flagged(work_data_dir: Path, week_snapshot: tuple[str, Snapshot],
                                        study_config: StudyConfig, model_registry: ModelRegistry) -> None:
     week, snap = week_snapshot
-    model = "stub-local-a"
+    model = "stub-ow-a"
     provider = StubLlmProvider(model, failures=StubFailures(truncated_rate=1.0))
     runner = _runner(week, snap, study_config, model_registry, work_data_dir, providers={model: provider})
     runner.run_local(model)
@@ -189,7 +188,7 @@ def test_crash_then_resume_does_not_repeat_calls(work_data_dir: Path,
                                                  week_snapshot: tuple[str, Snapshot], study_config: StudyConfig,
                                                  model_registry: ModelRegistry) -> None:
     week, snap = week_snapshot
-    model = "stub-local-a"
+    model = "stub-ow-a"
     crashing = StubLlmProvider(model, failures=StubFailures(crash_after_calls=37))
     runner = _runner(week, snap, study_config, model_registry, work_data_dir, providers={model: crashing})
     with pytest.raises(StubCrash):
@@ -300,7 +299,7 @@ def test_cost_table_math(model_registry: ModelRegistry) -> None:
     # stub-api-a: 1.00 in, 0.10 cached, 5.00 out, 50 percent batch discount.
     usd = table.cost_usd("stub-api-a", tokens_in=1_000_000, tokens_cached=500_000, tokens_out=100_000, batch=True)
     assert usd == pytest.approx((500_000 * 1.0 + 500_000 * 0.10 + 100_000 * 5.0) / 1e6 * 0.5)
-    assert table.cost_usd("stub-local-a", 10, 0, 10, False) == 0.0
+    assert table.cost_usd("stub-ow-a", 10, 0, 10, False) == 0.0
 
 
 # Provider payloads (mock transports) -----------------------------------------------------------
@@ -365,23 +364,6 @@ def _no_tools(payload: Any) -> None:
     text = json.dumps(payload).lower()
     for banned in ("\"tools\"", "web_search", "tool_choice", "function"):
         assert banned not in text, banned
-
-
-def test_ollama_payload_has_no_tools_and_keeps_prompt_order(study_config: StudyConfig) -> None:
-    item = _item(study_config)
-    transport = FakeTransport([{"model": "qwen3.5:4b", "message": {"role": "assistant", "content":
-                                '{"low": 0, "likely": 1, "high": 2, "rationale": "r"}'},
-                                "prompt_eval_count": 500, "eval_count": 20, "done_reason": "stop"}])
-    provider = OllamaProvider("qwen3.5-4b", "qwen3.5:4b", transport=transport)
-    settings = LlmSettings(temperature=0.0, seed=1234, max_output_tokens=300, think=False)
-    result = provider.complete(item, settings)
-    payload = transport.calls[0]["payload"]
-    _no_tools(payload)
-    assert payload["think"] is False and payload["format"] == "json"
-    assert payload["options"]["temperature"] == 0.0 and payload["options"]["seed"] == 1234
-    assert payload["messages"][0]["role"] == "system" and payload["messages"][0]["content"] == item.prompt.shared_prefix
-    assert payload["messages"][1]["content"] == item.prompt.stock_part
-    assert result.tokens_in == 500 and result.model_version == "qwen3.5:4b" and result.stop_reason == "stop"
 
 
 def test_anthropic_batch_payload_and_collect(study_config: StudyConfig) -> None:
@@ -460,7 +442,7 @@ def test_full_synthetic_week_all_models(work_data_dir: Path, week_snapshot: tupl
                                                                                   "cost_warn_usd": 1e9})})
     runner = _runner(week, snap, cfg, model_registry, work_data_dir)
     for spec in model_registry.enabled(synthetic=True):
-        if spec.kind == "local":
+        if spec.kind == "open_weight":
             runner.run_local(spec.id)
         else:
             runner.submit_api(spec.id)

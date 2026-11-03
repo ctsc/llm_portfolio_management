@@ -10,6 +10,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -20,7 +22,7 @@ import pandas as pd
 from portstudy import calendar as cal
 from portstudy.config import LlmSettings, ModelRegistry, ModelSpec, StudyConfig
 from portstudy.data.snapshot import Snapshot
-from portstudy.io import read_json, write_csv_atomic, write_json_atomic
+from portstudy.io import read_json, write_csv_atomic, write_json_atomic, write_text_atomic
 from portstudy.llm.cache import LlmCache, cache_key
 from portstudy.llm.cost import CostTable, RunningCost, check_budget, estimate_week_cost
 from portstudy.llm.prompts import PromptManifest, assemble_prompt, load_manifest
@@ -85,6 +87,10 @@ class RunStatus:
     n_invalid: int = 0
     invalid_rate: float = 0.0
     assessed_at: str = ""
+    endpoint: str = ""
+    started_at: str = ""
+    send_seed: bool | None = None
+    json_mode: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -100,6 +106,10 @@ class RunSummary:
     n_retries: int = 0
     cost_usd: float = 0.0
     per_config: dict[str, int] = field(default_factory=dict)
+
+
+class _CallCutoff(RuntimeError):
+    pass
 
 
 def lock_deadline(week_id: str, cfg: StudyConfig) -> dt.datetime:
@@ -125,6 +135,7 @@ class WeekRunner:
         cache: LlmCache | None = None,
         logger: logging.Logger | None = None,
         stub_seed: int = 0,
+        clock: Callable[[], dt.datetime] | None = None,
     ) -> None:
         self.week_id = week_id
         self.cfg = cfg
@@ -136,6 +147,7 @@ class WeekRunner:
         self.log = logger or logging.getLogger("portstudy.llm")
         self.table = CostTable(registry)
         self.stub_seed = stub_seed
+        self.clock = clock
         self._providers: dict[str, LlmProvider] = dict(providers or {})
         self._plans: dict[str, list[Task]] = {}
         self.folder = week_output_dir(week_id) / "llm"
@@ -146,10 +158,30 @@ class WeekRunner:
     def models(self) -> list[ModelSpec]:
         return self.registry.enabled(synthetic=self.synthetic)
 
-    def provider(self, model_id: str) -> LlmProvider:
+    def provider(self, model_id: str, config_id: str | None = None) -> LlmProvider:
         if model_id not in self._providers:
-            self._providers[model_id] = make_provider(self.registry.get(model_id), self.stub_seed)
+            status = (
+                read_run_status(self.week_id).get(f"{model_id}__{config_id}")
+                if config_id
+                else None
+            )
+            self._providers[model_id] = make_provider(
+                self.registry.get(model_id),
+                self.stub_seed,
+                gateway=self.cfg.llm.gateway,
+                week_id=self.week_id,
+                run_started_at=status.started_at if status else None,
+            )
         return self._providers[model_id]
+
+    def _now(self) -> dt.datetime:
+        if self.clock:
+            return self.clock()
+        if self.synthetic:
+            return lock_deadline(self.week_id, self.cfg) - dt.timedelta(
+                minutes=self.cfg.pipeline.lock_margin_minutes + 1
+            )
+        return dt.datetime.now(tz=ET)
 
     def plan_week(self, model: str | None = None) -> list[Task]:
         """Tasks (model, configuration, ticker) for every enabled model and configuration."""
@@ -222,31 +254,8 @@ class WeekRunner:
             self.week_id,
             settings,
             model_id=spec.id,
+            endpoint=spec.serving,
         )
-
-    # One call -----------------------------------------------------------------------------
-
-    def _call_once(
-        self, provider: LlmProvider, item: BatchItem, settings: LlmSettings
-    ) -> RawResult:
-        attempts = max(1, self.cfg.data.retries.attempts)
-        last: Exception | None = None
-        for _ in range(attempts):
-            try:
-                return provider.complete(item, settings)
-            except LlmProviderError as exc:
-                last = exc
-                self.log.warning(
-                    "provider_error",
-                    extra={
-                        "extra_fields": {
-                            "week_id": self.week_id,
-                            "custom_id": item.custom_id,
-                            "error": str(exc),
-                        }
-                    },
-                )
-        return RawResult(custom_id=item.custom_id, text="", error=f"provider_error: {last}")
 
     def _finish(
         self,
@@ -257,7 +266,12 @@ class WeekRunner:
         retries: int,
         is_batch: bool,
     ) -> dict[str, Any]:
-        resp = parse_response(raw.text, self.cfg.llm.rationale_token_cap, raw.stop_reason)
+        resp = parse_response(
+            raw.text,
+            self.cfg.llm.rationale_token_cap,
+            raw.stop_reason,
+            reasoning_text=raw.reasoning_text,
+        )
         if raw.error:
             resp = fallback_response(raw.text, raw.error, INVALID_OUTPUT)
         cost = (
@@ -281,7 +295,7 @@ class WeekRunner:
             "fallback_flag": resp.fallback_flag,
             "extra_keys": resp.extra_keys,
             "had_thinking": resp.had_thinking,
-            "endpoint": "",
+            "endpoint": raw.endpoint or ("api" if spec.kind == "api" else spec.serving),
             "error": resp.error,
             "raw": raw.text,
             "tokens_in": raw.tokens_in,
@@ -294,93 +308,332 @@ class WeekRunner:
             "prompt_file_sha256": task.item.prompt.prompt_file_sha256,
             "from_cache": raw.from_cache,
             "retries": retries,
+            "send_seed": settings.send_seed if raw.send_seed is None else raw.send_seed,
+            "json_mode": settings.json_mode if raw.json_mode is None else raw.json_mode,
         }
         return rec
 
-    def _run_task(
+    # Open-weight run ----------------------------------------------------------------------
+
+    def _archive_source(self, model: str, config_id: str, endpoint: str) -> None:
+        path = self._records_path(model, config_id)
+        if not path.exists():
+            return
+        archive_dir = self.folder / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_dir / f"{model}__{config_id}.{endpoint}.jsonl"
+        records: dict[str, dict[str, Any]] = {}
+        if archive_path.exists():
+            with archive_path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    if line.strip():
+                        record = json.loads(line)
+                        records[str(record["custom_id"])] = record
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    record = json.loads(line)
+                    records[str(record["custom_id"])] = record
+        text = "".join(
+            json.dumps(record, sort_keys=True, default=str) + "\n"
+            for record in records.values()
+        )
+        write_text_atomic(text, archive_path)
+        path.unlink()
+
+    def _prepare_open_weight_sources(
+        self,
+        model: str,
+        spec: ModelSpec,
+        tasks: list[Task],
+    ) -> dict[str, dict[str, dict[str, Any]]]:
+        statuses = read_run_status(self.week_id)
+        now = self._now().isoformat()
+        prepared: dict[str, dict[str, dict[str, Any]]] = {}
+        for conf in self.manifest.enabled():
+            key = f"{model}__{conf.id}"
+            previous = statuses.get(key)
+            records = self._read_records(model, conf.id)
+            previous_endpoint = previous.endpoint if previous else ""
+            if not previous_endpoint:
+                endpoints = {str(record.get("endpoint", "")) for record in records.values()}
+                endpoints.discard("")
+                if len(endpoints) == 1:
+                    previous_endpoint = next(iter(endpoints))
+            if previous_endpoint and previous_endpoint != spec.serving:
+                self._archive_source(model, conf.id, previous_endpoint)
+                records = {}
+            source_tasks = [task for task in tasks if task.config_id == conf.id]
+            self._write_status(
+                RunStatus(
+                    model=model,
+                    config_id=conf.id,
+                    state="incomplete",
+                    reason=f"{len(records)}/{len(source_tasks)} done",
+                    n_tasks=len(source_tasks),
+                    n_done=sum(
+                        task.item.custom_id in records for task in source_tasks
+                    ),
+                    assessed_at=now,
+                    endpoint=spec.serving,
+                    started_at=previous.started_at if previous and previous.started_at else now,
+                    send_seed=(
+                        previous.send_seed
+                        if previous and previous.endpoint == spec.serving
+                        else None
+                    ),
+                    json_mode=(
+                        previous.json_mode
+                        if previous and previous.endpoint == spec.serving
+                        else None
+                    ),
+                )
+            )
+            prepared[conf.id] = records
+        return prepared
+
+    def _record_open_weight_result(
         self,
         task: Task,
         spec: ModelSpec,
         settings: LlmSettings,
-        provider: LlmProvider,
-        seen_versions: set[str],
+        raw: RawResult,
+        retries: int,
+        key: str,
     ) -> dict[str, Any]:
-        key = self._key(spec, task, settings)
-        cached = self.cache.get(key)
-        retries = 0
-        if cached is not None:
-            self.log.info(
-                "cache_hit",
-                extra={"extra_fields": {"week_id": self.week_id, "custom_id": task.item.custom_id}},
-            )
-            raw = cached
-        else:
-            raw = self._call_once(provider, task.item, settings)
-            first = parse_response(raw.text, self.cfg.llm.rationale_token_cap, raw.stop_reason)
-            # Invalid-output guardrail: retry exactly once, then fall back.
-            if (not first.valid or raw.error) and self.cfg.llm.retry_invalid_once:
-                retries = 1
+        self.cache.put(key, raw)
+        record = self._finish(task, spec, settings, raw, retries, is_batch=False)
+        self._append_record(task.model, task.config_id, record)
+        self._update_open_weight_status(task, record)
+        return record
+
+    def _update_open_weight_status(
+        self, task: Task, record: dict[str, Any]
+    ) -> None:
+        statuses = read_run_status(self.week_id)
+        key = f"{task.model}__{task.config_id}"
+        status = statuses.get(key)
+        if status is None:
+            return
+        status.n_done = len(self._read_records(task.model, task.config_id))
+        status.reason = f"{status.n_done}/{status.n_tasks} done"
+        status.endpoint = str(record.get("endpoint") or status.endpoint)
+        status.send_seed = record.get("send_seed")
+        status.json_mode = record.get("json_mode")
+        self._write_status(status)
+
+    def _persist_provider_features(
+        self, model: str, endpoint: str, features: tuple[bool, bool]
+    ) -> None:
+        for status in read_run_status(self.week_id).values():
+            if status.model == model and status.endpoint == endpoint:
+                status.send_seed, status.json_mode = features
+                self._write_status(status)
+
+    @staticmethod
+    def _merge_raw_results(first: RawResult, second: RawResult) -> RawResult:
+        first.tokens_in += second.tokens_in
+        first.tokens_out += second.tokens_out
+        first.tokens_cached += second.tokens_cached
+        first.latency_s += second.latency_s
+        first.text = second.text
+        first.error = second.error
+        first.stop_reason = second.stop_reason
+        first.reasoning_text = second.reasoning_text
+        first.model_version = second.model_version or first.model_version
+        first.endpoint = second.endpoint or first.endpoint
+        first.send_seed = second.send_seed
+        first.json_mode = second.json_mode
+        return first
+
+    def run_open_weight(self, model: str) -> RunSummary:
+        """Run one open-weight model with bounded provider-only workers and main-thread writes."""
+        spec = self.registry.get(model)
+        if spec.kind != "open_weight":
+            raise ValueError(f"{model} is not an open-weight model")
+        tasks = self.plan_week(model)
+        summary = RunSummary(model=model, n_tasks=len(tasks))
+        settings = _settings_for(self.cfg, spec)
+        first_config = tasks[0].config_id if tasks else None
+        provider = self.provider(model, first_config)
+        prior_statuses = read_run_status(self.week_id)
+        prepared = self._prepare_open_weight_sources(model, spec, tasks)
+        set_features = getattr(provider, "set_features", None)
+        if callable(set_features):
+            feature_statuses = [
+                status
+                for status in prior_statuses.values()
+                if status.model == model and status.endpoint == spec.serving
+            ]
+            seed_values = [
+                status.send_seed for status in feature_statuses if status.send_seed is not None
+            ]
+            json_values = [
+                status.json_mode for status in feature_statuses if status.json_mode is not None
+            ]
+            if seed_values or json_values:
+                set_features(
+                    all(seed_values) if seed_values else settings.send_seed,
+                    all(json_values) if json_values else settings.json_mode,
+                )
+        records = {custom_id for source in prepared.values() for custom_id in source}
+        remaining: list[tuple[Task, str]] = []
+        for task in tasks:
+            if task.item.custom_id in records:
+                continue
+            key = self._key(spec, task, settings)
+            cached = self.cache.get(key)
+            if cached is not None:
                 self.log.info(
-                    "invalid_retry",
+                    "cache_hit",
                     extra={
                         "extra_fields": {
                             "week_id": self.week_id,
                             "custom_id": task.item.custom_id,
-                            "error": first.error or raw.error,
+                            "endpoint": spec.serving,
                         }
                     },
                 )
-                second = self._call_once(provider, task.item, settings)
-                raw.tokens_in += second.tokens_in
-                raw.tokens_out += second.tokens_out
-                raw.tokens_cached += second.tokens_cached
-                raw.latency_s += second.latency_s
-                raw.text, raw.error, raw.stop_reason = second.text, second.error, second.stop_reason
-                raw.model_version = second.model_version or raw.model_version
-            self.cache.put(key, raw)
-        if raw.model_version:
-            if seen_versions and raw.model_version not in seen_versions:
-                self.log.warning(
-                    "model_version_changed",
-                    extra={
-                        "extra_fields": {
-                            "week_id": self.week_id,
-                            "model": spec.id,
-                            "seen": sorted(seen_versions),
-                            "returned": raw.model_version,
-                        }
-                    },
+                record = self._finish(task, spec, settings, cached, 0, is_batch=False)
+                self._append_record(model, task.config_id, record)
+                self._update_open_weight_status(task, record)
+                summary.n_cached += 1
+                summary.n_invalid += 0 if record["valid"] else 1
+                summary.cost_usd += float(record["cost_usd"])
+                summary.per_config[task.config_id] = (
+                    summary.per_config.get(task.config_id, 0) + 1
                 )
-            seen_versions.add(raw.model_version)
-        return self._finish(task, spec, settings, raw, retries, is_batch=False)
+            else:
+                remaining.append((task, key))
 
-    # Local run ----------------------------------------------------------------------------
+        cutoff = (
+            dt.datetime.max.replace(tzinfo=dt.UTC)
+            if self.synthetic
+            else lock_deadline(self.week_id, self.cfg)
+            - dt.timedelta(minutes=self.cfg.pipeline.lock_margin_minutes)
+        )
+        set_cutoff = getattr(provider, "set_call_cutoff", None)
+        if callable(set_cutoff):
+            set_cutoff(cutoff, self._now)
+        workers = max(1, self.cfg.llm.concurrency.get(model, 4))
+        pending: dict[Future[RawResult], tuple[Task, str, int, RawResult | None]] = {}
+        versions: set[str] = set()
+        next_index = 0
+        fatal: Exception | None = None
+
+        def call_provider(task: Task) -> RawResult:
+            if self._now() >= cutoff:
+                raise _CallCutoff("J6 cutoff reached before provider call")
+            return provider.complete(task.item, settings)
+
+        def submit(task: Task, key: str, retries: int, first: RawResult | None) -> None:
+            future = executor.submit(call_provider, task)
+            pending[future] = (task, key, retries, first)
+            summary.n_calls += 1
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            while next_index < len(remaining) and len(pending) < workers:
+                if self._now() >= cutoff:
+                    break
+                task, key = remaining[next_index]
+                next_index += 1
+                submit(task, key, 0, None)
+
+            while pending:
+                completed, _ = wait(pending, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    task, key, retries, first = pending.pop(future)
+                    try:
+                        raw = future.result()
+                    except _CallCutoff:
+                        continue
+                    except LlmProviderError as exc:
+                        features = (
+                            getattr(provider, "send_seed", None),
+                            getattr(provider, "json_mode", None),
+                        )
+                        if isinstance(features[0], bool) and isinstance(features[1], bool):
+                            self._persist_provider_features(
+                                model, spec.serving, (features[0], features[1])
+                            )
+                        self.log.warning(
+                            "provider_error",
+                            extra={
+                                "extra_fields": {
+                                    "week_id": self.week_id,
+                                    "custom_id": task.item.custom_id,
+                                    "error": str(exc),
+                                }
+                            },
+                        )
+                        continue
+                    except Exception as exc:
+                        fatal = exc
+                        continue
+
+                    if retries == 0:
+                        response = parse_response(
+                            raw.text,
+                            self.cfg.llm.rationale_token_cap,
+                            raw.stop_reason,
+                            reasoning_text=raw.reasoning_text,
+                        )
+                        if (
+                            (not response.valid or raw.error)
+                            and self.cfg.llm.retry_invalid_once
+                            and fatal is None
+                            and self._now() < cutoff
+                        ):
+                            submit(task, key, 1, raw)
+                            continue
+                    else:
+                        assert first is not None
+                        raw = self._merge_raw_results(first, raw)
+
+                    if raw.model_version:
+                        if versions and raw.model_version not in versions:
+                            self.log.warning(
+                                "model_version_changed",
+                                extra={
+                                    "extra_fields": {
+                                        "week_id": self.week_id,
+                                        "model": model,
+                                        "seen": sorted(versions),
+                                        "returned": raw.model_version,
+                                    }
+                                },
+                            )
+                        versions.add(raw.model_version)
+                    record = self._record_open_weight_result(
+                        task, spec, settings, raw, retries, key
+                    )
+                    summary.n_invalid += 0 if record["valid"] else 1
+                    summary.cost_usd += float(record["cost_usd"])
+                    summary.n_retries += retries
+                    summary.per_config[task.config_id] = (
+                        summary.per_config.get(task.config_id, 0) + 1
+                    )
+
+                if fatal is None:
+                    while (
+                        next_index < len(remaining)
+                        and len(pending) < workers
+                        and self._now() < cutoff
+                    ):
+                        task, key = remaining[next_index]
+                        next_index += 1
+                        submit(task, key, 0, None)
+
+            for conf in self.manifest.enabled():
+                self._record_cost(model, conf.id)
+            self.write_scores()
+            if fatal is not None:
+                raise fatal
+        return summary
 
     def run_local(self, model: str) -> RunSummary:
-        """Resumable sequential run for one model, grouped by configuration, cache first."""
-        spec = self.registry.get(model)
-        settings = _settings_for(self.cfg, spec)
-        provider = self.provider(model)
-        tasks = self.plan_week(model)
-        summary = RunSummary(model=model, n_tasks=len(tasks))
-        seen_versions: set[str] = set()
-        for conf in self.manifest.enabled():
-            done = self._read_records(model, conf.id)
-            for task in (t for t in tasks if t.config_id == conf.id):
-                if task.item.custom_id in done:
-                    summary.per_config[conf.id] = summary.per_config.get(conf.id, 0) + 1
-                    continue
-                rec = self._run_task(task, spec, settings, provider, seen_versions)
-                self._append_record(model, conf.id, rec)
-                summary.n_calls += 0 if rec["from_cache"] else 1
-                summary.n_cached += 1 if rec["from_cache"] else 0
-                summary.n_invalid += 0 if rec["valid"] else 1
-                summary.n_retries += int(rec["retries"])
-                summary.cost_usd += float(rec["cost_usd"])
-                summary.per_config[conf.id] = summary.per_config.get(conf.id, 0) + 1
-            self._record_cost(model, conf.id)
-        self.write_scores()
-        return summary
+        """Compatibility alias for the open-weight runner."""
+        return self.run_open_weight(model)
 
     # Batch run ----------------------------------------------------------------------------
 
@@ -612,6 +865,34 @@ class WeekRunner:
         done = [recs[t.item.custom_id] for t in tasks if t.item.custom_id in recs]
         n_invalid = sum(1 for r in done if not r["valid"])
         current = now or dt.datetime.now(tz=ET)
+        source_status = read_run_status(self.week_id).get(f"{model}__{config_id}")
+        endpoints = {str(record.get("endpoint", "")) for record in done}
+        endpoints.discard("")
+        if len(endpoints) > 1:
+            self.log.warning(
+                "mixed_endpoints_for_source",
+                extra={
+                    "extra_fields": {
+                        "week_id": self.week_id,
+                        "model": model,
+                        "config_id": config_id,
+                        "endpoints": sorted(endpoints),
+                    }
+                },
+            )
+        endpoint = (
+            next(iter(endpoints))
+            if len(endpoints) == 1
+            else ("mixed" if endpoints else ("api" if spec.kind == "api" else spec.serving))
+        )
+        send_seed = next(
+            (record["send_seed"] for record in done if record.get("send_seed") is not None),
+            source_status.send_seed if source_status else None,
+        )
+        json_mode = next(
+            (record["json_mode"] for record in done if record.get("json_mode") is not None),
+            source_status.json_mode if source_status else None,
+        )
         status = RunStatus(
             model=model,
             config_id=config_id,
@@ -621,6 +902,10 @@ class WeekRunner:
             n_invalid=n_invalid,
             invalid_rate=(n_invalid / len(done)) if done else 0.0,
             assessed_at=current.isoformat(),
+            endpoint=endpoint,
+            started_at=source_status.started_at if source_status else current.isoformat(),
+            send_seed=send_seed,
+            json_mode=json_mode,
         )
         if len(done) < len(tasks):
             if current >= (deadline or lock_deadline(self.week_id, self.cfg)):
@@ -628,7 +913,7 @@ class WeekRunner:
                 status.reason = (
                     "batch_not_ready_by_lock"
                     if spec.kind == "api"
-                    else "local_not_finished_by_lock"
+                    else "open_weight_not_finished_by_lock"
                 )
             else:
                 status.state = "incomplete"

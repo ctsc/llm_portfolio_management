@@ -1,5 +1,5 @@
 llm:
-  model_ids: [stub-local-a, stub-local-b]
+  model_ids: [stub-ow-a, stub-ow-b]
   prompt_ids: [bare, placebo, skills_1, skills_2]
 
 synthetic:

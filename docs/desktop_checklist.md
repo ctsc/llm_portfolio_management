@@ -8,10 +8,11 @@ warning when started on a Saturday).
 
 - [ ] Power: plugged in; Windows power plan set so the machine never sleeps while the script runs.
 - [ ] Windows Update paused for the weekend (Settings, Windows Update, Pause updates).
-- [ ] Ollama is running (`ollama list` shows the tags from `config/models.yaml`).
-- [ ] GPU is free: no other process holds VRAM (`nvidia-smi`). The RTX 3050 has 6 GB.
+- [ ] ARCTIC LiteLLM gateway URL and `ARCTIC_LITELLM_API_KEY` are provisioned.
+- [ ] If using `--gateway-fallback`, `data/runtime/fallback_endpoint.json` contains a fresh
+      `base_url` and optional matching `week_id`; `ARCTIC_FALLBACK_API_KEY` may be empty.
 - [ ] `.env` on the desktop holds the keys named in `docs/config_reference.md`
-      (Anthropic, OpenAI, Alpaca, Finnhub, FRED). Never commit this file.
+      (ARCTIC, Anthropic, OpenAI, Alpaca, Finnhub, FRED). Never commit this file.
 - [ ] Spending caps are set in the Anthropic and OpenAI dashboards.
 - [ ] `vendor/kronos` is at the pinned commit and the Kronos weights are downloaded, if
       `baseline.forecaster` is `kronos`.

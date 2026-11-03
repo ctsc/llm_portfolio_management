@@ -44,8 +44,8 @@ def test_report_builds_on_synthetic_run(pipeline_dir: Path, study_config: StudyC
     assert metrics["total_cost_usd"].gt(0).all()
     # Rerunning a shuffle hits the cache and gives the identical result.
     weeks = data.weeks
-    first = one_shuffle(cfg, "mvo__stub-local-a__skills_1", weeks, cfg.eval.shuffle.seed, 0)
-    again = one_shuffle(cfg, "mvo__stub-local-a__skills_1", weeks, cfg.eval.shuffle.seed, 0)
+    first = one_shuffle(cfg, "mvo__stub-ow-a__skills_1", weeks, cfg.eval.shuffle.seed, 0)
+    again = one_shuffle(cfg, "mvo__stub-ow-a__skills_1", weeks, cfg.eval.shuffle.seed, 0)
     assert first == again
     dist = shuffle_portfolio(cfg, "mvo__Q0", weeks, n_shuffles=2, seed=cfg.eval.shuffle.seed)
     assert len(dist) == 2 and dist["total_return"].notna().all()

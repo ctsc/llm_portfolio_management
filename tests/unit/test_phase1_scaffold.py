@@ -58,8 +58,13 @@ def test_config_rejects_bad_decision_status(tmp_path: Path) -> None:
 
 def test_model_registry_loads(model_registry: ModelRegistry) -> None:
     enabled = model_registry.enabled()
-    assert {m.id for m in enabled} >= {"qwen3.5-4b", "phi4-mini", "claude-haiku-5.5", "gpt-6-luna"}
-    assert model_registry.get("llama3.2-3b").enabled is False
+    assert {m.id for m in enabled} >= {
+        "gemma-4-31b",
+        "minimax-m2.7",
+        "claude-haiku-5.5",
+        "gpt-6-luna",
+    }
+    assert model_registry.get("llama-3.2-3b").enabled is False
     stubs = model_registry.enabled(synthetic=True)
     assert len(stubs) == 4
     assert all(m.provider == "stub" for m in stubs)

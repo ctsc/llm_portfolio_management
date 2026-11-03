@@ -13,6 +13,7 @@ environment activated. Add `--synthetic` to any command to work on the synthetic
 | Snapshot | `data/snapshots/<week>/` (CSV files plus `manifest.json`) |
 | Baseline, prior, covariance | `data/outputs/<week>/baseline.csv`, `prior.csv`, `sigma_matrix.csv` |
 | LLM calls | `data/outputs/<week>/llm/<model>__<config>.jsonl` (one line per call), `llm_scores.csv`, `run_status.json`, `cost_log.csv` |
+| Archived endpoint records | `data/outputs/<week>/llm/archive/<source>.gateway.jsonl` |
 | Batch handles | `data/outputs/<week>/llm/batch_<model>__<config>.json` (deleted once collected) |
 | Fallback plan and log | `data/outputs/<week>/fallback_plan.json` (J6), `fallback_log.json` (J7) |
 | Weights | `data/outputs/<week>/weights/<portfolio>.csv`, `.meta.json`, `locked.json` |
@@ -36,6 +37,7 @@ resumes it (every job is idempotent and resumable).
 
 ```
 portstudy run-job J4 --week 2026-W46
+portstudy run-job J4 --week 2026-W46 --gateway-fallback   # eligible models only
 portstudy run-job J7 --week 2026-W46 --force      # rerun even if done with the same inputs
 ```
 
@@ -49,7 +51,7 @@ portstudy run-job J7 --week 2026-W46 --force      # rerun even if done with the 
 | J1 snapshot (data provider down, a check with rule `halt`) | No snapshot. If still failing at the lock, J6 writes `no_rebalance`: every portfolio holds last week's positions, stops still run. | Check the provider status page and the key in `.env`; rerun J1. For a `halt` issue read `issues.csv` in the partial logs and decide whether the stock should be dropped (`data.checks` rules in `study.yaml`). |
 | J2 baseline (Kronos, covariance) | Same as J1: `no_rebalance` for all. | Rerun J2. If Kronos cannot load, set `baseline.forecaster: stub` for the week and log the change. |
 | J3 API submit (`CostCapExceeded`) | Batches not submitted. The API portfolios will trade their strategy's Q0 weights (`fallback_q0`). | Read the projected total in the log line. Either run `portstudy run-job J3 --week ... --allow-over-budget` (the week is logged as over budget, decision D3) or accept the fallback. |
-| J4 local inference (crash, Ollama down) | Partial records are saved after every call. If not finished by the lock margin, those portfolios trade their strategy's Q0 (`fallback_q0`). | Start Ollama, rerun J4; it skips finished calls. |
+| J4 open-weight inference (crash or gateway unavailable) | Partial records are saved as calls complete. If not finished by the lock margin, those portfolios trade their strategy's Q0 (`fallback_q0`). | Rerun J4 to resume. To switch eligible sources, provision a fresh fallback endpoint file and use `--gateway-fallback`; gateway records are archived and the source restarts on the fallback. |
 | J5 API collect (`pending`) | Batches not back yet. `run_weekend.py` polls until the lock margin (Monday 8:30 am ET by default). | Wait, or rerun J5 later. After the margin J6 labels the batch failed and the portfolios trade their strategy's Q0. |
 | J6 validate (`runs still incomplete before the lock margin`) | Nothing written yet. | Finish J4 or J5 first, or wait for the margin. |
 | J6 marks `invalid_rate` failures | That rating source trades its strategy's Q0 weights for the week (decision N1). | Nothing to do for the week; investigate the model's raw answers in the jsonl records. If `invalid_truncated` dominates, raise `max_output_tokens` for that model in `llm.settings`. |

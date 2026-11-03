@@ -65,6 +65,7 @@ def _week_runner(ctx: RunContext, week_id: str) -> WeekRunner:
         cache=LlmCache(),
         logger=ctx.log("llm"),
         stub_seed=ctx.stub_seed,
+        clock=ctx.now,
     )
 
 
@@ -153,6 +154,7 @@ def _llm_inputs(ctx: RunContext, week_id: str) -> str:
         {
             "snapshot": _snapshot_hash(week_id),
             "cfg": _config_hash(ctx),
+            "registry": ctx.run_registry().model_dump(),
             "prompts": hash_paths([repo_root() / "config" / "prompts_manifest.yaml"]),
         }
     )
@@ -170,7 +172,7 @@ def J3_api_submit(ctx: RunContext, week_id: str) -> JobStatus:
     return run_job(week_id, "J3", _llm_inputs(ctx, week_id), fn, force=ctx.force)
 
 
-def J4_local_infer(ctx: RunContext, week_id: str) -> JobStatus:
+def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
     def fn() -> dict[str, Any]:
         # Kronos (inside J2) must be finished first: enforced with the status file, not time.
         if read_status(week_id, "J2").state != "done":
@@ -179,8 +181,8 @@ def J4_local_infer(ctx: RunContext, week_id: str) -> JobStatus:
             )
         runner = _week_runner(ctx, week_id)
         out: dict[str, Any] = {}
-        for model in ctx.local_models():
-            s = runner.run_local(model)
+        for model in ctx.open_weight_models():
+            s = runner.run_open_weight(model)
             out[model] = {"n_calls": s.n_calls, "n_cached": s.n_cached, "n_invalid": s.n_invalid}
         return out
 
@@ -600,7 +602,7 @@ JOBS = {
     "J1": J1_snapshot,
     "J2": J2_baseline,
     "J3": J3_api_submit,
-    "J4": J4_local_infer,
+    "J4": J4_open_weight_infer,
     "J5": J5_api_collect,
     "J6": J6_validate,
     "J7": J7_weights,

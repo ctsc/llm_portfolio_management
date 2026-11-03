@@ -98,6 +98,7 @@ class StubLlmProvider(LlmProvider):
         model_skill: float = 1.0,
     ) -> None:
         self.model_id = model_id
+        self.rng_model_id = model_id.replace("stub-ow-", "stub-local-", 1)
         self.seed = seed
         self.noise_by_config = dict(DEFAULT_NOISE, **(noise_by_config or {}))
         # Default version matches the registry convention `<model_id>-2026-01-01`.
@@ -112,7 +113,7 @@ class StubLlmProvider(LlmProvider):
 
     def answer_for(self, item: BatchItem) -> tuple[int, int, int, str]:
         """Deterministic (low, likely, high, rationale) for an item."""
-        rng = _rng(self.seed, self.model_id, item.config_id, item.week_id, item.ticker)
+        rng = _rng(self.seed, self.rng_model_id, item.config_id, item.week_id, item.ticker)
         net = sentiment_from_text(item.prompt.full_text)
         noise_sd = self.noise_by_config.get(item.config_id, DEFAULT_NOISE["bare"])
         signal = self.model_skill * 1.5 * net
@@ -126,7 +127,7 @@ class StubLlmProvider(LlmProvider):
         return low, likely, high, rationale
 
     def _text_for(self, item: BatchItem, settings: LlmSettings) -> tuple[str, str | None]:
-        rng = _rng(self.seed, "fail", self.model_id, item.config_id, item.week_id, item.ticker)
+        rng = _rng(self.seed, "fail", self.rng_model_id, item.config_id, item.week_id, item.ticker)
         low, likely, high, rationale = self.answer_for(item)
         payload = json.dumps({"low": low, "likely": likely, "high": high, "rationale": rationale})
         if item.ticker in self.failures.always_invalid_tickers:
@@ -147,7 +148,7 @@ class StubLlmProvider(LlmProvider):
             and self.calls > self.failures.crash_after_calls
         ):
             raise StubCrash(f"injected crash after {self.failures.crash_after_calls} calls")
-        rng = _rng(self.seed, "timeout", self.model_id, item.custom_id, str(self.calls))
+        rng = _rng(self.seed, "timeout", self.rng_model_id, item.custom_id, str(self.calls))
         if rng.random() < self.failures.timeout_rate:
             raise LlmProviderError("injected timeout")
         start = time.perf_counter()

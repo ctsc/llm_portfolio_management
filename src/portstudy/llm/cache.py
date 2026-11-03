@@ -1,7 +1,7 @@
 """On-disk cache of raw LLM results.
 
-Key: sha256(model_version, prompt_hash, ticker, week_id, settings). A hit costs nothing and
-is logged by the runner. Files live under data/cache/llm/<key[:2]>/<key>.json.
+Key: sha256(model_version, prompt_hash, ticker, week_id, settings, endpoint). A hit costs nothing
+and is logged by the runner. Files live under data/cache/llm/<key[:2]>/<key>.json.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ def cache_key(
     week_id: str,
     settings: LlmSettings,
     model_id: str = "",
+    endpoint: str = "",
 ) -> str:
     # The model id is included so two models that report the same version string never share
     # an entry.
@@ -33,6 +34,7 @@ def cache_key(
             "ticker": ticker,
             "week_id": week_id,
             "settings": settings.model_dump(),
+            "endpoint": endpoint,
         }
     )
 

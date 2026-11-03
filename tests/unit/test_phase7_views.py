@@ -207,7 +207,7 @@ def test_views_build_for_every_portfolio_over_synthetic_weeks(work_data_dir: Pat
         prior = build_prior(w, cfg.risk, risk, snap.reference).set_index("ticker")
         runner = WeekRunner(w, cfg, model_registry, snap, synthetic=True, cache=LlmCache(work_data_dir / "cache"))
         for spec in model_registry.enabled(synthetic=True):
-            if spec.kind == "local":
+            if spec.kind == "open_weight":
                 runner.run_local(spec.id)
             else:
                 runner.submit_api(spec.id)

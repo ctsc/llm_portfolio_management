@@ -139,13 +139,13 @@ def week_inputs(work_data_dir: Path, study_config: StudyConfig, model_registry: 
     base = build_baseline(w, cfg, snap)
     risk = build_risk_model(w, cfg.risk, snap, tickers=list(base["ticker"]))
     build_prior(w, cfg.risk, risk, snap.reference)
-    # stub-local-b answers nothing valid, to exercise the all-invalid rule.
-    providers = {"stub-local-b": StubLlmProvider("stub-local-b", failures=StubFailures(
+    # stub-ow-b answers nothing valid, to exercise the all-invalid rule.
+    providers = {"stub-ow-b": StubLlmProvider("stub-ow-b", failures=StubFailures(
         always_invalid_tickers=set(snap.included_tickers)))}
     runner = WeekRunner(w, cfg, model_registry, snap, synthetic=True, providers=providers,
                         cache=LlmCache(work_data_dir / "cache"))
-    runner.run_local("stub-local-a")
-    runner.run_local("stub-local-b")
+    runner.run_local("stub-ow-a")
+    runner.run_local("stub-ow-b")
     return w, WeekInputs.load(w), cfg
 
 
@@ -156,24 +156,24 @@ def test_build_weights_every_portfolio_and_q0_rules(week_inputs: tuple[str, Week
     assert read_weights(w, "mvo__Q0")["weight"].sum() == pytest.approx(1.0, abs=1e-8)
     assert not q0.use_llm_view
     # Normal portfolio with an LLM view differs from Q0.
-    p = build_weights(w, "stub-local-a", "skills_1", cfg, ic_b=0.02, ic_l=0.03, inputs=inputs)
+    p = build_weights(w, "stub-ow-a", "skills_1", cfg, ic_b=0.02, ic_l=0.03, inputs=inputs)
     assert p.use_llm_view and p.n_llm_view == len(inputs.tickers)
     assert not np.allclose(p.weights.to_numpy(), q0.weights.to_numpy())
     assert (p.weights <= cfg.optimizer.max_weight + 1e-9).all()
-    saved_ok = read_weights(w, "mvo__stub-local-a__skills_1")
+    saved_ok = read_weights(w, "mvo__stub-ow-a__skills_1")
     assert saved_ok["has_llm_view"].all() and saved_ok["z_L"].notna().all()
     # IC_L == 0: use_llm_view False and the weights equal Q0's exactly.
-    z = build_weights(w, "stub-local-a", "skills_1", cfg, ic_b=0.02, ic_l=0.0, inputs=inputs)
+    z = build_weights(w, "stub-ow-a", "skills_1", cfg, ic_b=0.02, ic_l=0.0, inputs=inputs)
     assert not z.use_llm_view and "weights_equal_q0" in z.notes
     pd.testing.assert_series_equal(z.weights, q0.weights)
     pd.testing.assert_series_equal(z.mu_bl, q0.mu_bl)
     # Every stock invalid: no LLM view rows, weights equal Q0's.
-    inv = build_weights(w, "stub-local-b", "bare", cfg, ic_b=0.02, ic_l=0.03, inputs=inputs)
-    assert inv.n_invalid == len(inputs.scores_for("stub-local-b", "bare"))
+    inv = build_weights(w, "stub-ow-b", "bare", cfg, ic_b=0.02, ic_l=0.03, inputs=inputs)
+    assert inv.n_invalid == len(inputs.scores_for("stub-ow-b", "bare"))
     assert not inv.use_llm_view
     pd.testing.assert_series_equal(inv.weights, q0.weights)
-    saved = read_weights(w, "mvo__stub-local-b__bare")
+    saved = read_weights(w, "mvo__stub-ow-b__bare")
     assert saved["z_L"].isna().all() and not saved["has_llm_view"].any()
     # Deterministic.
-    again = build_weights(w, "stub-local-a", "skills_1", cfg, ic_b=0.02, ic_l=0.03, inputs=inputs)
+    again = build_weights(w, "stub-ow-a", "skills_1", cfg, ic_b=0.02, ic_l=0.03, inputs=inputs)
     pd.testing.assert_series_equal(again.weights, p.weights)

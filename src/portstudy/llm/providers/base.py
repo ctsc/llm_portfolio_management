@@ -1,4 +1,4 @@
-"""LLM provider interface shared by the stub, Ollama, and the two batch API adapters."""
+"""LLM provider interface shared by the stub and API adapters."""
 
 from __future__ import annotations
 
@@ -36,6 +36,10 @@ class RawResult:
     error: str | None = None
     stop_reason: str | None = None  # "max_tokens" marks a truncated answer
     from_cache: bool = False
+    reasoning_text: str | None = None
+    endpoint: str = ""
+    send_seed: bool | None = None
+    json_mode: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +52,10 @@ class RawResult:
             "model_version": self.model_version,
             "error": self.error,
             "stop_reason": self.stop_reason,
+            "reasoning_text": self.reasoning_text,
+            "endpoint": self.endpoint,
+            "send_seed": self.send_seed,
+            "json_mode": self.json_mode,
         }
 
     @classmethod
@@ -62,6 +70,10 @@ class RawResult:
             model_version=str(d.get("model_version", "")),
             error=d.get("error"),
             stop_reason=d.get("stop_reason"),
+            reasoning_text=d.get("reasoning_text"),
+            endpoint=str(d.get("endpoint", "")),
+            send_seed=d.get("send_seed"),
+            json_mode=d.get("json_mode"),
         )
 
 

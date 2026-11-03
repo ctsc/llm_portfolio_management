@@ -312,3 +312,43 @@ Choices made while unattended:
 - Used equal-length neutral text with distinct configuration labels so the placeholders remain independently hashed and cached while the real texts are unavailable.
 - Set stub noise to 3.0 for both controls and 1.2, 1.0, 0.8, 0.6, and 0.4 for skills_1 through skills_5, respectively, to meet the required distinct lower-noise progression.
 - Applied the C4 token cap to enabled skills and placebo files because the plan requires every checked file to remain under the cap.
+
+## v2 phase 4: ARCTIC LiteLLM provider and model registry
+
+Built:
+- Added the injectable-transport LiteLLM chat-completions provider, bearer authentication, JSON and seed payload flags, response parsing, retry-after-aware retries, immediate VPN guidance for 401/403, and run-scoped capability downgrade.
+- Added bounded open-weight execution with main-thread record writes, resume and cache support, endpoint identity in cache keys, per-source endpoint status, J6 cutoff checks, endpoint archives, and full source restart after endpoint switching.
+- Added gateway and fallback configuration, eligibility and registry validation, model registry updates, the `J4_open_weight_infer` implementation, and `--gateway-fallback` CLI and weekend options.
+- Updated cost, secret, and smoke scripts. Smoke `--dry-run` prints gateway payloads without calling data services or model endpoints.
+- Updated README and the relevant runbook, desktop, config-reference, and design documentation. Removed the Phase 4-listed Ollama provider and its payload test.
+- Added `tests/unit/test_v2_phase4_litellm.py` for mocked provider behavior, concurrency, resume, endpoint switch, and registry validation. All HTTP in the tests is mocked.
+
+Changed v1 tests and reasons:
+- `tests/unit/test_phase1_scaffold.py`: updated model registry expectations to the D1 model list.
+- `tests/unit/test_phase6_llm.py`: migrated stub IDs and open-weight kind checks; removed the Ollama payload test because Phase 4 replaces it with LiteLLM.
+- `tests/e2e/test_full_run_synthetic.py`, `tests/integration/test_phase10_pipeline.py`, `tests/integration/test_phase11_report.py`, `tests/unit/test_phase7_views.py`, `tests/unit/test_phase8_optimize.py`, and `tests/unit/test_v2_phase1_config_identity.py`: migrated renamed stub IDs.
+
+UNVERIFIED:
+- The actual ARCTIC gateway URL and gateway authentication behavior were not available in the repository. `llm.gateway.base_url` remains empty rather than inventing an endpoint.
+- ARCTIC support for `seed`, `response_format`, model identifiers, returned model version behavior, and reasoning fields has not been verified against a live service. The plan defaults for seed and JSON mode are enabled and capability downgrade is implemented.
+- The fallback endpoint JSON format (`base_url` or `url`, optional `week_id`) and file-mtime freshness rule are implementation choices, not confirmed ARCTIC or Slurm requirements.
+- No new dependency was needed; `httpx` and `tenacity` were already declared.
+
+Tests and checks:
+- Full pytest: 223 passed, 3 warnings in 583.69 seconds. The warnings are NumPy empty-slice warnings from the synthetic report test.
+- `ruff check src tests scripts` and `mypy src scripts` passed. After formatting the new provider, its targeted Ruff check passed.
+- Manifest refresh, placebo-length, banned-word, secret, dry-run smoke, and yamllint checks passed. The smoke dry run printed planned gateway payloads and made no requests.
+- Targeted `ruff format --check` reports 11 changed files from the known 27-file baseline that would be reformatted. The new LiteLLM provider and Phase 4 test are formatted; baseline files were left unchanged.
+- `git diff --check` and LF line-ending checks passed. No Ollama or Qwen references remain in `src/` or `config/`.
+
+Skipped:
+- No real data, paid API calls, ARCTIC requests, or fallback endpoint requests were made.
+- Phase 5 was not started.
+
+Choices made while unattended:
+- Kept the gateway URL empty until the provisioned value is known.
+- Used the endpoint file's modification time compared with the source run's recorded start time to reject stale fallback metadata. An optional matching week ID is also checked.
+- Applied the run-scoped disabled state across resume by persisting seed and JSON-mode flags in source status and call records.
+- Used four workers for the gateway models and set test-only stubs to one worker so synthetic failure injection remains deterministic.
+- Derived a synthetic runner's default clock from its source-week schedule so historical synthetic status does not depend on the machine's current date. Synthetic open-weight stubs are not constrained by the live wall-clock cutoff.
+- Preserved the prior stub randomness stream while renaming `stub-local-*` to `stub-ow-*`, so registry renames do not change unrelated synthetic portfolio fixtures.

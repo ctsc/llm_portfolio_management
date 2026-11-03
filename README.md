@@ -46,7 +46,7 @@ The planned strategies are MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K,
 ```
                  Friday 16:00 ET cutoff                              Monday 09:00 ET lock
                           |                                                   |
-  J1 snapshot ──> J2 baseline + risk ──> J3 submit API batches ──> J4 local models
+  J1 snapshot ──> J2 baseline + risk ──> J3 submit API batches ──> J4 open-weight models
                                                  |                       |
                                           J5 collect batches ──> J6 validate (N1 failure rule)
                                                                          |
@@ -94,8 +94,8 @@ Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_c
 
 | Command | Purpose |
 |---|---|
-| `python scripts/run_weekend.py [--week W] [--synthetic] [--dry-run] [--allow-over-budget] [--config PATH]` | The weekly run: catch-up replay and backup, J1 to J6, batch polling, J7, J9 |
-| `portstudy run-job J4 --week W [--force] [--config PATH]` | Run or rerun one job |
+| `python scripts/run_weekend.py [--week W] [--synthetic] [--dry-run] [--allow-over-budget] [--gateway-fallback] [--config PATH]` | The weekly run: catch-up replay and backup, J1 to J6, batch polling, J7, J9 |
+| `portstudy run-job J4 --week W [--force] [--gateway-fallback] [--config PATH]` | Run or rerun open-weight inference |
 | `portstudy run-week --week W` | All jobs in order, stopping at the first failure |
 | `portstudy status --week W` | State, timestamps, and error of every job |
 | `portstudy replay` | Rebuild every portfolio from the ledger and rescore closed weeks |
@@ -106,7 +106,7 @@ Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_c
 | `python scripts/estimate_cost.py` | Projected API cost from logged token counts |
 | `python scripts/refresh_manifest.py --check\|--write` | Prompt file hashes; a prompt edited without a version bump fails |
 | `python scripts/check_placebo_length.py` | Skills within 5 percent and placebo within 2 percent of the enabled skills mean for every tokenizer |
-| `python scripts/smoke_real_services.py` | One tiny real call per data service and model (needs keys) |
+| `python scripts/smoke_real_services.py [--dry-run]` | Tiny real calls per service and enabled model; dry-run prints gateway payloads only |
 
 Add `--synthetic` to any pipeline command to use the synthetic world and stub LLM.
 
@@ -125,7 +125,7 @@ src/portstudy/
   baseline/             momentum, forecasters (stub and Kronos), combine into z_b
   risk/                 Ledoit-Wolf covariance, market-cap prior
   llm/                  prompt assembly, validation, cache, cost guard, runner,
-                        providers (stub, ollama, anthropic_batch, openai_batch)
+                        providers (stub, litellm, anthropic_batch, openai_batch)
   views/                rank IC store and trailing IC, residualization, view construction
   optimize/             Black-Litterman, cvxpy mean-variance, weight files
   sim/                  ledger-driven simulator with stops, trade and daily records
@@ -220,3 +220,14 @@ License: MIT.
 - **DECISION(P1), prompt length tolerances**: keep each enabled skills file within 5 percent of the skills mean and placebo within 2 percent of that mean, controlling for prompt length.
 - **Equal-length neutral skills placeholders (chosen during build)**: use equal-length text with distinct configuration labels so each placeholder has its own prompt hash until the researcher replaces them.
 - **Stub noise progression (chosen during build)**: use `3.0` for both controls and `1.2`, `1.0`, `0.8`, `0.6`, and `0.4` for `skills_1` to `skills_5` to create distinct synthetic skill effects below the controls.
+- **DECISION(D1), open-weight registry**: enable Gemma 4 31B and MiniMax M2.7 through LiteLLM, keep requested unprovisioned models disabled, and retain the two API models so the registry matches the study plan.
+- **DECISION(D2), fallback serving**: use the gateway by default and switch eligible sources to the configured Slurm endpoint only when explicitly requested, preserving one endpoint per source-week.
+- **DECISION(D3), gateway pricing**: gateway calls have zero listed price, while API prices continue through the existing cost guard.
+- **DECISION(N1), open-weight timing**: use bounded workers with a default concurrency of four and stop starting provider requests at the lock margin.
+- **Synthetic cutoff clock (chosen during build)**: derive a synthetic runner's default time from its source week so historical synthetic status is date-independent; live provider calls retain the wall-clock J6 cutoff.
+- **Stable stub randomness across renamed open-weight IDs (chosen during build)**: preserve the previous synthetic output stream when `stub-local-*` IDs become `stub-ow-*`, avoiding unrelated fixture drift.
+- **Stub concurrency (chosen during build)**: set test-only open-weight stubs to one worker for deterministic failure injection; the gateway models use four workers and the concurrency tests exercise four workers directly.
+- **Seed and JSON mode defaults**: send both optional fields by default and disable a rejected field for the rest of the run; actual ARCTIC support is unverified.
+- **ARCTIC endpoint placeholder (chosen during build)**: keep the configured gateway URL empty until the provisioned endpoint is supplied rather than inventing a hostname.
+- **Fallback endpoint metadata (chosen during build)**: read `base_url` or `url` from the configured JSON file, accept an optional week ID, and reject files older than the source run start.
+- **Reuse `httpx` and `tenacity` (chosen during build)**: both are already project dependencies, so Phase 4 adds no package dependency.
