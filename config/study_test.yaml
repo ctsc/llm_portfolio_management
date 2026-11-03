@@ -1,0 +1,18 @@
+llm:
+  model_ids: [stub-local-a, stub-local-b]
+  prompt_ids: [bare, skills, placebo]
+
+synthetic:
+  n_tickers: 120
+
+strategies:
+  enabled: [mvo]
+  controls: []
+  cvar:
+    n_scenarios: 2000
+  resampled:
+    n_draws: 20
+
+eval:
+  shuffle:
+    n_shuffles: 20

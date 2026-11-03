@@ -31,6 +31,7 @@ from portstudy.eval.shuffle import shuffle_test  # noqa: E402
 from portstudy.io import write_csv_atomic, write_text_atomic  # noqa: E402
 from portstudy.paths import report_dir  # noqa: E402
 from portstudy.pipeline.context import RunContext  # noqa: E402
+from portstudy.types import PortfolioId  # noqa: E402
 
 
 def _md_table(df: pd.DataFrame, cols: list[str] | None = None, floatfmt: str = ".4f") -> str:
@@ -105,8 +106,8 @@ def _fig_equity(data: EvalData, folder: Path) -> None:
             pd.to_datetime(daily["date"]),
             daily["value"],
             label=key,
-            color="black" if key == "Q0" else None,
-            linewidth=2 if key == "Q0" else 0.8,
+            color="black" if PortfolioId.parse(key).is_q0 else None,
+            linewidth=2 if PortfolioId.parse(key).is_q0 else 0.8,
             alpha=0.9,
         )
     ax.set_ylabel("portfolio value")

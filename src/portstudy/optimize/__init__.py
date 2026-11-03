@@ -24,7 +24,7 @@ from portstudy.optimize.mean_variance import solve_mean_variance
 from portstudy.paths import week_output_dir
 from portstudy.risk.covariance import RiskModel, read_risk_model
 from portstudy.risk.prior import read_prior
-from portstudy.types import PortfolioId
+from portstudy.types import PortfolioId, RatingSource, StrategyName
 from portstudy.views.build import Views, build_views, views_frame
 from portstudy.views.ic import ICStore, trailing_ic
 from portstudy.views.residualize import residualize, valid_scores
@@ -228,13 +228,14 @@ def build_q0_weights(
     inputs: WeekInputs | None = None,
     previous_week: str | None = None,
     logger: logging.Logger | None = None,
+    strategy: StrategyName = "mvo",
 ) -> Weights:
     log = logger or logging.getLogger("portstudy.optimize")
     inp = inputs or WeekInputs.load(week_id)
     views = build_views(
-        inp.pi(), inp.sigma_vec(), inp.z_b(), ic_b, cfg.views, label="Q0", logger=log
+        inp.pi(), inp.sigma_vec(), inp.z_b(), ic_b, cfg.views, label=f"{strategy}__Q0", logger=log
     )
-    return _optimize(PortfolioId.q0().key, inp, views, cfg, True, previous_week, {}, log)
+    return _optimize(PortfolioId.q0(strategy).key, inp, views, cfg, True, previous_week, {}, log)
 
 
 def build_weights(
@@ -247,11 +248,12 @@ def build_weights(
     inputs: WeekInputs | None = None,
     previous_week: str | None = None,
     logger: logging.Logger | None = None,
+    strategy: StrategyName = "mvo",
 ) -> Weights:
     """Residualize, build views, Black-Litterman, mean-variance for one LLM portfolio."""
     log = logger or logging.getLogger("portstudy.optimize")
     inp = inputs or WeekInputs.load(week_id)
-    key = PortfolioId(model, config_id).key
+    key = PortfolioId.steered(strategy, RatingSource(model, config_id)).key
     scores = inp.scores_for(model, config_id)
     valid = valid_scores(scores)
     n_invalid = int(len(scores) - len(valid))

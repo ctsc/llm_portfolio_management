@@ -2,7 +2,7 @@
 
 All settings live in `config/study.yaml` (typed by `src/portstudy/config.py`, unknown keys
 rejected), `config/models.yaml`, and `config/prompts_manifest.yaml`. The `decision` column
-gives the id from `PLAN.md` section 0.3 where one applies; code tags each use with
+gives the id from `PLAN2.md` section 0.3 where one applies; code tags each use with
 `DECISION(<id>)`.
 
 ## Environment variables
@@ -11,6 +11,7 @@ gives the id from `PLAN.md` section 0.3 where one applies; code tags each use wi
 |---|---|
 | `PORTSTUDY_DATA_DIR` | Root of every data folder (default `./data`). |
 | `PORTSTUDY_ROOT` | Repository root override (default: the checkout holding `src/`). |
+| `PORTSTUDY_CONFIG` | Study YAML path (default `config/study.yaml`; CLI `--config` takes precedence). |
 | `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY` | Alpaca bars and news. |
 | `FINNHUB_API_KEY` | Finnhub earnings calendar. |
 | `FRED_API_KEY` | FRED DTB3 series. |
@@ -27,7 +28,6 @@ Keys go in a `.env` file on the desktop only; `scripts/smoke_real_services.py` l
 | `size` | 100 | Stocks in the study | B4 |
 | `source` | sp500 | Member list source (Wikipedia S&P 500 table) | B2 |
 | `sectors` | 11 | GICS sectors | B2 |
-| `per_sector` | 9 | Top stocks per sector by 60-day average dollar volume, plus one extra | B2 |
 | `min_history_days` | 300 | Minimum trading days before a stock can be picked or kept | |
 | `dollar_volume_window_days` | 60 | Window for the ranking | |
 | `extra_tickers` | [] | Hand-added stocks; each replaces the lowest pick in its sector | |
@@ -104,6 +104,7 @@ Keys go in a `.env` file on the desktop only; `scripts/smoke_real_services.py` l
 | `batch_retry_count` | 1 | Resubmissions of failed batch items | |
 | `api_poll_seconds` | 300 | J5 polling interval in `run_weekend.py` | |
 | `settings_default`, `settings.<model>` | temperature 0, seed 1234, max_output_tokens 300, reasoning none | Per-model overrides of `models.yaml` settings | |
+| `model_ids`, `prompt_ids` | [] | Empty selects all enabled models and prompts; lists restrict the source set | |
 
 ### views
 
@@ -121,6 +122,18 @@ Keys go in a `.env` file on the desktop only; `scripts/smoke_real_services.py` l
 
 `optimizer.max_weight` 0.05, `min_stocks` 20, `solvers` [OSQP, CLARABEL];
 `simulator.initial_value` 100000, `cost_bps` 10, `stop_loss` -0.08, `take_profit` 0.15.
+
+### strategies
+
+Phase 1 enables only `mvo` and no controls. `cvar` defaults to 10,000 scenarios, beta 0.95,
+lambda 1.0 (`DECISION(S4)`), seed 7, and solvers CLARABEL and HIGHS. `robust` uses kappa 1.0
+(`DECISION(S5)`) and CLARABEL. `resampled` uses 200 draws, seed 7, and a 0.10 maximum failed
+share. `topk.k` defaults to 20 and HRP linkage to `single`. Validation requires
+`1 / strategies.topk.k <= optimizer.max_weight` and
+`optimizer.min_stocks >= ceil(1 / optimizer.max_weight)`.
+
+`config/study_test.yaml` selects two stub models, the three v1 prompt configurations, 2,000
+CVaR scenarios, 20 resampled draws, 20 shuffles, and 120 synthetic tickers.
 
 ### pipeline
 

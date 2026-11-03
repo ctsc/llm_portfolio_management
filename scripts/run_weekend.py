@@ -19,6 +19,7 @@ import argparse
 import datetime as dt
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from portstudy import calendar as cal
@@ -27,6 +28,7 @@ from portstudy.pipeline import fallback as fb
 from portstudy.pipeline.context import RunContext, default_context, synthetic_clock
 from portstudy.pipeline.jobs import current_week, read_weights_lock, run_named, weeks_with_weights
 from portstudy.pipeline.status import JobFailed, read_status
+from portstudy.types import PortfolioId
 
 FALLBACK_HINTS = {
     "J1": "data failure: every portfolio holds last week's positions (no_rebalance)",
@@ -132,7 +134,7 @@ def print_summary(week: str) -> None:
         return
     for name, digest in sorted(lock["files"].items()):
         key = name[:-4]
-        status = fb.week_status_for(week, key) if key != "Q0" else "normal"
+        status = fb.week_status_for(week, key) if not PortfolioId.parse(key).is_q0 else "normal"
         print(f"{key:32s} {status:14s} {name:40s} {digest[:16]}")
     print(f"locked_at: {lock.get('locked_at')}")
 
@@ -143,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--synthetic", action="store_true")
     parser.add_argument("--allow-over-budget", action="store_true")
+    parser.add_argument("--config", default=None, help="study YAML path")
     parser.add_argument("--now", default=None, help="override the clock, ISO datetime with offset")
     parser.add_argument("--poll-seconds", type=int, default=None)
     args = parser.parse_args(argv)
@@ -154,7 +157,10 @@ def main(argv: list[str] | None = None) -> int:
     elif args.synthetic and args.week:
         clock = synthetic_clock(args.week)
     ctx = default_context(
-        synthetic=args.synthetic, allow_over_budget=args.allow_over_budget, clock=clock
+        synthetic=args.synthetic,
+        allow_over_budget=args.allow_over_budget,
+        clock=clock,
+        config_path=Path(args.config) if args.config else None,
     )
     week = args.week or current_week(ctx.now())
     poll = (

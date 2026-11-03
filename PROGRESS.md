@@ -209,3 +209,35 @@ Built:
 - `scripts/smoke_real_services.py` (prepared for Phase 17 B4): one tiny real call per data service and per enabled model, printing status, cost, and latency; loads `.env`.
 
 Done-when: the README demo (three weekend runs, `portstudy status`, `portstudy eval --synthetic --skip-shuffle`) was followed in a fresh Python 3.11 virtual environment created from the README alone; every step succeeded. Note: the system `python` on this desktop is 3.14, so the venv must be created with the 3.11 interpreter (`uv python` install); the README states the 3.11 requirement.
+
+## v2 phase 1: strategy dimension, identity, and config
+
+Built:
+- Added frozen rating-source and strategy-aware portfolio identities for steered portfolios, each strategy's Q0, and standalone controls.
+- Added strategy config models, Top-K and optimizer validation, registry ID validation, `PORTSTUDY_CONFIG`, and `--config` for context-creating CLI commands and `run_weekend.py`.
+- Added `config/study_test.yaml`, source and portfolio key methods in `RunContext`, and strategy-aware keys throughout jobs, optimizers, evaluation readers, and summaries.
+- Updated stale README and design, runbook, config-reference, and decision documentation. Added the required `## Design choices` section.
+- Adjusted the banned-word checker to skip the supplied `PLAN2.md`, which contains policy examples and remains untouched.
+
+Tests:
+- v1 baseline before edits: pytest had 141 passed, 2 failed, and 3 warnings in 319.08 seconds (321 seconds wrapper time). One failure could not find `ruff` because `.venv/bin` was not on PATH; the other found a banned-word example in `PLAN2.md:34`.
+- Baseline Ruff check, mypy, manifest check, placebo-length check, secrets check, and yamllint passed. Ruff format check reported 27 files needing formatting. The banned-word script failed on `PLAN2.md`.
+- Final full pytest: 168 passed with 3 warnings and exit code 0. The repository's double-quiet invocation did not report elapsed time.
+- Final `ruff check src tests scripts` and `mypy src scripts` passed.
+- Final secret, banned-word, manifest, placebo-length, and yamllint checks passed.
+- `ruff format --check src tests scripts` still reports 27 files would be reformatted, matching the v1 baseline; no unrelated files were formatted.
+
+Changed v1 tests and reasons:
+- `tests/unit/test_phase8_optimize.py`: portfolio identity now includes the strategy prefix.
+- `tests/integration/test_phase10_pipeline.py`, `tests/integration/test_phase11_report.py`, and `tests/e2e/test_full_run_synthetic.py`: expectations use strategy-specific Q0 and steered keys; the duplicate manual Q0 insertion was removed because `portfolio_keys()` now includes it.
+
+UNVERIFIED:
+- No new real-service behavior was added. Existing v1 items requiring real-service smoke tests remain unresolved and are listed in their prior entries.
+
+Skipped:
+- Phases 2 through 14 are outside this handoff. No real data, paid APIs, brokers, Slurm, or external services were used.
+
+Choices made while unattended:
+- CVaR and resampled strategy seeds are 7, matching the existing Kronos seed for deterministic defaults.
+- Added `llm.model_ids` and `llm.prompt_ids` selectors so the test config can select two stub models and a fixed prompt subset without changing study defaults.
+- Excluded `PLAN2.md` from the banned-word scan because it contains required examples of the rules being checked; the plan file remains unchanged.

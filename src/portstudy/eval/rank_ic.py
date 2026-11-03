@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 import pandas as pd
 
-from portstudy.types import PortfolioId
+from portstudy.types import RatingSource
 from portstudy.views.ic import ICStore
 
 SIGNALS = ["baseline", "llm_raw", "llm_resid", "combined"]
@@ -21,8 +21,8 @@ def ic_wide(store: ICStore, signal: str, portfolios: list[str]) -> pd.DataFrame:
         return s.to_frame("baseline")
     cols = {}
     for key in portfolios:
-        pid = PortfolioId.parse(key)
-        sub = df[(df["model"] == pid.model) & (df["config_id"] == pid.config_id)]
+        source = RatingSource.parse(key)
+        sub = df[(df["model"] == source.model) & (df["config_id"] == source.config_id)]
         cols[key] = sub.set_index("week_id")["rank_ic"].astype(float)
     return pd.DataFrame(cols).sort_index()
 

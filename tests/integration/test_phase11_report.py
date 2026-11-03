@@ -23,7 +23,7 @@ def test_report_builds_on_synthetic_run(pipeline_dir: Path, study_config: StudyC
                      data_providers=synthetic_bundle(world))
     data = load_eval_data(cfg, ctx.portfolio_keys())
     assert len(data.weeks) == PIPELINE_WEEKS
-    assert set(data.weekly_returns.columns) == {"Q0", *ctx.portfolio_keys()}
+    assert set(data.weekly_returns.columns) == set(ctx.portfolio_keys())
     assert data.statuses.eq("normal").all().all()
     folder = run_eval(ctx, skip_shuffle=False, n_shuffles=3, folder=pipeline_dir / "outputs" / "report")
     expected = ["report.md", "h1_ic_gap.csv", "h2_ic_gap.csv", "h2_portfolio_vs_q0_clean.csv",
@@ -36,16 +36,16 @@ def test_report_builds_on_synthetic_run(pipeline_dir: Path, study_config: StudyC
     md = (folder / "report.md").read_text(encoding="utf-8")
     assert "Minimum detectable gap" in md and "Fallback counts" in md and "inconclusive" in md
     shuffle = pd.read_csv(folder / "h5_shuffle.csv")
-    assert len(shuffle) == 1 + len(ctx.portfolio_keys()) and (shuffle["n_shuffles"] == 3).all()
+    assert len(shuffle) == len(ctx.portfolio_keys()) and (shuffle["n_shuffles"] == 3).all()
     assert shuffle["p_total_return"].between(0, 1).all()
     assert (shuffle["p_total_return_holm"] >= shuffle["p_total_return"] - 1e-12).all()
     metrics = pd.read_csv(folder / "portfolio_metrics_as_traded.csv")
-    assert set(metrics["portfolio"]) == {"Q0", *ctx.portfolio_keys()}
+    assert set(metrics["portfolio"]) == set(ctx.portfolio_keys())
     assert metrics["total_cost_usd"].gt(0).all()
     # Rerunning a shuffle hits the cache and gives the identical result.
     weeks = data.weeks
-    first = one_shuffle(cfg, "stub-local-a__skills", weeks, cfg.eval.shuffle.seed, 0)
-    again = one_shuffle(cfg, "stub-local-a__skills", weeks, cfg.eval.shuffle.seed, 0)
+    first = one_shuffle(cfg, "mvo__stub-local-a__skills", weeks, cfg.eval.shuffle.seed, 0)
+    again = one_shuffle(cfg, "mvo__stub-local-a__skills", weeks, cfg.eval.shuffle.seed, 0)
     assert first == again
-    dist = shuffle_portfolio(cfg, "Q0", weeks, n_shuffles=2, seed=cfg.eval.shuffle.seed)
+    dist = shuffle_portfolio(cfg, "mvo__Q0", weeks, n_shuffles=2, seed=cfg.eval.shuffle.seed)
     assert len(dist) == 2 and dist["total_return"].notna().all()

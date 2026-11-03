@@ -6,12 +6,14 @@ which keeps its nominal size at 20 to 30 weeks; the Newey-West p (`p_nw`) is rep
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 
 from portstudy.eval.data import EvalData, max_drawdown, sharpe
 from portstudy.eval.tests import holm, paired_summary, rank_ic_series
-from portstudy.types import PortfolioId
+from portstudy.types import PortfolioId, RatingSource, StrategyName
 
 
 def _gap_rows(data: EvalData, gaps: dict[str, pd.Series], family: str, label: str) -> pd.DataFrame:
@@ -36,7 +38,7 @@ def h1_llm_raw_vs_baseline(data: EvalData) -> pd.DataFrame:
     """H1: weekly gap IC_llm_raw - IC_baseline per model and configuration (one Holm family)."""
     base = data.ic["baseline"]["baseline"]
     raw = data.ic["llm_raw"]
-    gaps = {k: (raw[k] - base).dropna() for k in data.portfolios if k in raw}
+    gaps = {k: (raw[k] - base).dropna() for k in data.sources if k in raw}
     return _gap_rows(data, gaps, "H1_ic_gap", "llm_raw minus baseline")
 
 
@@ -44,15 +46,15 @@ def h2_combined_vs_baseline(data: EvalData) -> pd.DataFrame:
     """H2 (IC): weekly gap IC_combined - IC_baseline (E3: combined = ranked BL tilt)."""
     base = data.ic["baseline"]["baseline"]
     comb = data.ic["combined"]
-    gaps = {k: (comb[k] - base).dropna() for k in data.portfolios if k in comb}
+    gaps = {k: (comb[k] - base).dropna() for k in data.sources if k in comb}
     return _gap_rows(data, gaps, "H2_ic_gap", "combined minus baseline")
 
 
 def portfolio_metrics(data: EvalData, clean_only: bool) -> pd.DataFrame:
     rows = []
-    for key in ["Q0", *data.portfolios]:
+    for key in data.portfolio_keys:
         weekly = data.weekly_returns[key] if key in data.weekly_returns else pd.Series(dtype=float)
-        if clean_only and key != "Q0":
+        if clean_only and not PortfolioId.parse(key).is_q0:
             weekly = weekly[data.clean_mask(key).reindex(weekly.index).fillna(False)]
         daily = data.daily_values.get(key, pd.DataFrame())
         trades = data.trades.get(key, pd.DataFrame())
@@ -82,12 +84,15 @@ def portfolio_metrics(data: EvalData, clean_only: bool) -> pd.DataFrame:
 
 def h2_portfolio_vs_q0(data: EvalData, clean_only: bool = True) -> pd.DataFrame:
     """H2 (portfolios): paired weekly return difference against Q0 (one Holm family)."""
-    q0 = data.weekly_returns["Q0"]
     gaps = {}
     for key in data.portfolios:
         if key not in data.weekly_returns:
             continue
-        gap = data.weekly_returns[key] - q0
+        strategy = cast(StrategyName, PortfolioId.parse(key).strategy)
+        q0_key = PortfolioId.q0(strategy).key
+        if q0_key not in data.weekly_returns:
+            continue
+        gap = data.weekly_returns[key] - data.weekly_returns[q0_key]
         if clean_only:
             gap = gap[data.clean_mask(key).reindex(gap.index).fillna(False)]
         gaps[key] = gap.dropna()
@@ -106,9 +111,9 @@ def h3_skills_vs_controls(data: EvalData, signal: str = "llm_raw") -> pd.DataFra
     """
     table = data.ic[signal]
     by_model: dict[str, dict[str, str]] = {}
-    for key in data.portfolios:
-        pid = PortfolioId.parse(key)
-        by_model.setdefault(pid.model, {})[pid.config_id] = key
+    for key in data.sources:
+        source = RatingSource.parse(key)
+        by_model.setdefault(source.model, {})[source.config_id] = key
     gaps: dict[str, pd.Series] = {}
     for model, confs in by_model.items():
         for conf, key in confs.items():
@@ -130,7 +135,7 @@ def h4_splits(data: EvalData) -> dict[str, pd.DataFrame]:
     out: dict[str, pd.DataFrame] = {}
     base = data.ic["baseline"]["baseline"]
     raw = data.ic["llm_raw"]
-    gap_all = pd.DataFrame({k: raw[k] - base for k in data.portfolios if k in raw})
+    gap_all = pd.DataFrame({k: raw[k] - base for k in data.sources if k in raw})
 
     def split_rows(name: str, mask: pd.Series, label_true: str, label_false: str) -> pd.DataFrame:
         frames = []
@@ -216,7 +221,7 @@ def earnings_exposure(data: EvalData) -> pd.DataFrame:
     from portstudy.io import read_csv
     from portstudy.optimize import weights_dir
 
-    for key in ["Q0", *data.portfolios]:
+    for key in data.portfolio_keys:
         weight_in, weight_total = 0.0, 0.0
         for w in data.weeks:
             path = weights_dir(w) / f"{key}.csv"

@@ -1,7 +1,7 @@
 # LLM Enhanced Quantitative Portfolio Management 
 
-**Do LLM "skills files" add anything to a quant stock-picking baseline?**
-A weekly, fully reproducible research pipeline that holds the optimizer and risk guardrails fixed and measures whether language-model stock views, with and without a specialized skills file, improve on a momentum-plus-forecast baseline.
+**Do LLM ratings improve portfolio strategies over a quant-only baseline?**
+A weekly, fully reproducible research pipeline tests whether language-model ratings given bare, specialized-skills, or placebo prompts improve five optimization strategies while holding views, covariance, and guardrails fixed.
 
 Everything in this repository runs offline on a seeded synthetic market with a stub LLM. The real data and model services sit behind the same interfaces and are switched on with keys when the live study starts.
 
@@ -18,6 +18,7 @@ Everything in this repository runs offline on a seeded synthetic market with a s
 7. [Testing and quality gates](#testing-and-quality-gates)
 8. [Going live](#going-live)
 9. [Documentation](#documentation)
+10. [Design choices](#design-choices)
 
 ---
 
@@ -32,11 +33,11 @@ Each week, for 100 sector-balanced S&P 500 stocks:
 | **LLM views** | Every model rates every stock from its ticker, name, sector, and the week's news, under three prompt configurations: `bare`, `skills`, and a length-matched `placebo`. One stock per call, temperature 0, JSON output only. |
 | **Residualize** | LLM scores are regressed on `z_b`; the standardized residual `z_L` is the part of the view the baseline did not already know. |
 | **Black-Litterman** | Baseline and LLM views enter as stacked identity views, scaled by trailing rank IC and the model's stated confidence. |
-| **Optimize** | Long-only mean-variance with a 5 percent cap. `Q0` is the same pipeline with the baseline view only. |
+| **Optimize** | Phase 1 enables MVO with a 5 percent cap. Its baseline-only portfolio is `mvo__Q0`; a steered portfolio is `mvo__<model>__<prompt-id>`. |
 | **Simulate** | Monday-open rebalance at raw ledger prices, 10 bps costs, daily stop-loss (-8%) and take-profit (+15%), dividends and splits handled. |
 | **Evaluate** | Weekly rank IC gaps (H1 to H3), pre-registered splits (H4), factor regressions and a shuffled-ratings test (H5), all with Holm correction. |
 
-Thirteen portfolios trade side by side: 4 models x 3 configurations plus `Q0`. A null result is a valid result; the evaluation reports the minimum detectable gap and never tunes toward a positive finding.
+The planned strategies are MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, with HRP and equal weight as controls. Portfolio identity separates the rating source (`<model>__<prompt-id>`) from the portfolio using it. Rank IC is stored once per source. Phase 1 enables MVO only and no controls; with the current four-model registry and three enabled prompt configurations, the default run writes one `mvo__Q0` plus 12 steered portfolios. The test config selects two stub models and the same three prompt configurations. A null result is a valid result; the evaluation reports the minimum detectable gap and never tunes toward a positive finding.
 
 ---
 
@@ -49,14 +50,14 @@ Thirteen portfolios trade side by side: 4 models x 3 configurations plus `Q0`. A
                                                  |                       |
                                           J5 collect batches ──> J6 validate (N1 failure rule)
                                                                          |
-                                                              J7 weights (BL + MV, Q0, fallbacks)
+                                                              J7 weights (BL + MVO, strategy Q0, fallbacks)
                                                                          |
             next weekend: J8 replay from the price ledger + score rank IC ──> J9 dated CSV backup
 ```
 
 - **One hand-run script.** `scripts/run_weekend.py` runs the jobs in order, polls batches with a countdown, and resumes where it stopped. No scheduler.
 - **Every job is idempotent.** Status files record inputs hashes; a finished job with unchanged inputs is skipped.
-- **Labeled fallbacks.** A model that fails the week (invalid-output rate above 15 percent, or not finished by the lock) trades the `Q0` weights, tagged `fallback_q0`, and that week is excluded from its clean-weeks statistics.
+- **Labeled fallbacks.** A source that fails the week (invalid-output rate above 15 percent, or not finished by the lock) trades its strategy's Q0 weights, tagged `fallback_q0`, and that week is excluded from its clean-weeks statistics.
 - **History cannot drift.** The simulator reads only an append-only raw price ledger, so past fills and stops never change when a provider re-adjusts its data.
 - **No look-ahead.** Snapshots are frozen at the cutoff; news after 16:00 ET is dropped strictly; the IC that scales a view only uses weeks whose return window has already closed.
 
@@ -83,7 +84,7 @@ portstudy status --week 2026-W04 --synthetic
 portstudy eval --synthetic --skip-shuffle
 ```
 
-Each run ends with a per-portfolio summary (status, weights file, hash). The report lands in `data/outputs/report/report.md` with CSV tables and PNG figures beside it. Drop `--skip-shuffle` to run the shuffled-ratings test (500 shuffles per portfolio by default; lower `eval.shuffle.n_shuffles` to try it quickly).
+Each run ends with a per-portfolio summary (status, weights file, hash). The report lands in `data/outputs/report/report.md` with CSV tables and PNG figures beside it. Drop `--skip-shuffle` to run the shuffled-ratings test (500 shuffles per portfolio by default; lower `eval.shuffle.n_shuffles` to try it quickly). Select another study file with `--config config/study_test.yaml` or `PORTSTUDY_CONFIG=config/study_test.yaml`.
 
 Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_calendars), `.[api]` (anthropic, openai, tiktoken), `.[ml]` (torch, transformers for the Kronos forecaster). The core imports and tests without them.
 
@@ -93,8 +94,8 @@ Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_c
 
 | Command | Purpose |
 |---|---|
-| `python scripts/run_weekend.py [--week W] [--synthetic] [--dry-run] [--allow-over-budget]` | The weekly run: catch-up replay and backup, J1 to J6, batch polling, J7, J9 |
-| `portstudy run-job J4 --week W [--force]` | Run or rerun one job |
+| `python scripts/run_weekend.py [--week W] [--synthetic] [--dry-run] [--allow-over-budget] [--config PATH]` | The weekly run: catch-up replay and backup, J1 to J6, batch polling, J7, J9 |
+| `portstudy run-job J4 --week W [--force] [--config PATH]` | Run or rerun one job |
 | `portstudy run-week --week W` | All jobs in order, stopping at the first failure |
 | `portstudy status --week W` | State, timestamps, and error of every job |
 | `portstudy replay` | Rebuild every portfolio from the ledger and rescore closed weeks |
@@ -114,7 +115,7 @@ Add `--synthetic` to any pipeline command to use the synthetic world and stub LL
 ## Repository layout
 
 ```
-config/                 study.yaml (every setting and study decision), models.yaml, prompts_manifest.yaml
+config/                 study.yaml, study_test.yaml, models.yaml, prompts_manifest.yaml
 prompts/                base_instructions.md, skills/ and placebo/ (placeholders until the live study)
 src/portstudy/
   calendar.py           NYSE calendar, cutoff and trade dates, ISO week labels
@@ -136,7 +137,7 @@ tests/                  unit/  integration/  e2e/
 docs/                   runbook, config reference, open questions, design, GitLab setup,
                         desktop checklist
 data/                   (gitignored) ledger/ snapshots/ outputs/ logs/ portfolios/ backups/ exports/
-PLAN.md                 the phased build plan and study decisions
+PLAN2.md                 the current phased build plan and study decisions
 PROGRESS.md             build log, one entry per phase
 ```
 
@@ -156,6 +157,7 @@ PROGRESS.md             build log, one entry per phase
 
 ```bash
 ruff check src tests scripts
+ruff format --check src tests scripts
 mypy src scripts
 pytest tests/unit tests/integration      # about 10 minutes
 pytest tests/e2e                         # 25 synthetic weeks end to end, about 7 minutes
@@ -179,7 +181,7 @@ GitLab CI (`.gitlab-ci.yml`) runs lint, tests, and the repository checks on ever
 
 ## Going live
 
-The live study needs accounts, keys, a desktop GPU, the real skills file, and a frozen stock list. The ordered checklist is Phase 17 of `PLAN.md`; `docs/desktop_checklist.md` covers each weekend; `docs/runbook.md` covers bad Saturdays. Items that cannot be verified offline are marked `UNVERIFIED` in code and listed in `PROGRESS.md`; `scripts/smoke_real_services.py` exercises each one with a real key.
+The live study needs accounts, keys, a desktop GPU, the real skills files, and a frozen stock list. The ordered checklist is Phase 15 of `PLAN2.md`; `docs/desktop_checklist.md` covers each weekend; `docs/runbook.md` covers bad Saturdays. Items that cannot be verified offline are marked `UNVERIFIED` in code and listed in `PROGRESS.md`; `scripts/smoke_real_services.py` exercises each one with a real key.
 
 ---
 
@@ -187,7 +189,7 @@ The live study needs accounts, keys, a desktop GPU, the real skills file, and a 
 
 | File | Contents |
 |---|---|
-| `PLAN.md` | Phased build plan, study decisions, formula sheet |
+| `PLAN2.md` | Current phased build plan and study decisions |
 | `PROGRESS.md` | What was built in each phase, tests, open items |
 | `docs/design.md` | One section per pipeline stage with the exact formulas |
 | `docs/config_reference.md` | Every config key with default, meaning, and decision id |
@@ -197,3 +199,15 @@ The live study needs accounts, keys, a desktop GPU, the real skills file, and a 
 | `docs/desktop_checklist.md` | Before, during, and after each weekend run |
 
 License: MIT.
+
+## Design choices
+
+- **DECISION(S4), Mean-CVaR lambda = 1.0** (`strategies.cvar.lam`): expected return and tail loss use weekly-return units, so equal weighting avoids tuning against past returns.
+- **DECISION(S3), Mean-CVaR scenarios** (`strategies.cvar.n_scenarios`, `strategies.cvar.beta`): 10,000 posterior scenarios at a 0.95 tail level define a reproducible weekly tail-risk objective.
+- **DECISION(S5), Robust MVO kappa = 1.0** (`strategies.robust.kappa`): a one-standard-deviation ellipsoid is a neutral uncertainty radius that is not fit to past returns.
+- **DECISION(S6), Resampled MVO draws** (`strategies.resampled.n_draws`): 200 draws balance Monte Carlo stability with a bounded number of solver runs.
+- **DECISION(S7), Top-K** (`strategies.topk.k`): selecting 20 names gives a fixed, interpretable equal-weight comparator.
+- **DECISION(S1), strategy-aware portfolio keys**: a strategy, source, Q0, or control has an unambiguous identity, while source-level IC remains shared across strategies.
+- **Config selectors for models and prompt IDs (chosen during build)**: `llm.model_ids` and `llm.prompt_ids` make the small offline test configuration reproducible without changing the default study.
+- **Strategy seeds of 7 (chosen during build)**: reuses the existing Kronos seed for deterministic defaults where PLAN2 does not prescribe strategy-specific seeds.
+- **Exclude `PLAN2.md` from the banned-word scan (chosen during build)**: it contains the rules and examples that the scanner is designed to enforce, and remains untouched.

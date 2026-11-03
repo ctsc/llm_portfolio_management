@@ -15,6 +15,7 @@ import json
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -30,7 +31,7 @@ from portstudy.paths import outputs_dir
 from portstudy.pipeline import fallback as fb
 from portstudy.sim import PriceBook, WeekPlan, ledger_book, replay
 from portstudy.sim.records import daily_frame, read_daily
-from portstudy.types import PortfolioId
+from portstudy.types import PortfolioId, StrategyName
 from portstudy.views.build import build_views
 from portstudy.views.residualize import residualize, valid_scores
 
@@ -60,7 +61,8 @@ def _load_states(cfg: StudyConfig, portfolio: str, weeks: list[str]) -> list[Wee
             states.append(WeekState(w, "no_rebalance", None, 0.0, 0.0, False, None, None))
             continue
         stored = read_weights(w, portfolio).set_index("ticker")["weight"].astype(float)
-        q0 = read_weights(w, "Q0").set_index("ticker")["weight"].astype(float)
+        q0_key = PortfolioId.q0(cast(StrategyName, pid.strategy)).key
+        q0 = read_weights(w, q0_key).set_index("ticker")["weight"].astype(float)
         meta = read_weights_meta(w, portfolio)
         inputs = WeekInputs.load(w) if status == "normal" else None
         scores = (
@@ -121,7 +123,7 @@ def _plans_for_shuffle(
 ) -> list[WeekPlan]:
     digest = hashlib.sha256(f"{seed}:{portfolio}:{index}".encode()).digest()
     rng = np.random.default_rng(int.from_bytes(digest[:8], "little"))
-    is_q0 = portfolio == "Q0"
+    is_q0 = PortfolioId.parse(portfolio).is_q0
     plans: list[WeekPlan] = []
     for st in states:
         if st.status == "no_rebalance" or st.inputs is None:
@@ -217,7 +219,14 @@ def shuffle_test(
     """Every portfolio plus Q0; p = (1 + count at or above real) / (n + 1); Holm across all."""
     rows = []
     dists = []
-    for key in ["Q0", *portfolios]:
+    strategies = dict.fromkeys(
+        PortfolioId.parse(key).strategy
+        for key in portfolios
+        if not PortfolioId.parse(key).is_control
+    )
+    q0_keys = [PortfolioId.q0(cast(StrategyName, strategy)).key for strategy in strategies]
+    keys = q0_keys + [key for key in portfolios if not PortfolioId.parse(key).is_control]
+    for key in keys:
         dist = shuffle_portfolio(cfg, key, weeks, n_shuffles, seed, processes)
         dists.append(dist)
         real = real_metrics(cfg, key, weeks)

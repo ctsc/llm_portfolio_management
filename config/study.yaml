@@ -1,11 +1,10 @@
 # Study configuration: every setting and every deferred decision lives here.
-# Decision IDs (D1, B2, ...) refer to section 0.3 of PLAN.md. Code tags each use with DECISION(<ID>).
+# Decision IDs refer to section 0.3 of PLAN2.md. Code tags each use with DECISION(<ID>).
 
 universe:
   size: 100                       # DECISION(B4)
   source: sp500                   # DECISION(B2): sector balanced, drawn from the S&P 500
   sectors: 11
-  per_sector: 9
   min_history_days: 300
   dollar_volume_window_days: 60
   extra_tickers: []
@@ -100,6 +99,8 @@ llm:
   retry_invalid_once: true
   batch_retry_count: 1
   api_poll_seconds: 300
+  model_ids: []
+  prompt_ids: []
   settings_default:
     temperature: 0.0
     seed: 1234
@@ -121,6 +122,27 @@ optimizer:
   max_weight: 0.05
   min_stocks: 20
   solvers: [OSQP, CLARABEL]
+
+strategies:
+  enabled: [mvo]
+  controls: []
+  cvar:
+    n_scenarios: 10000             # DECISION(S3)
+    beta: 0.95                     # DECISION(S3)
+    lam: 1.0                       # DECISION(S4)
+    seed: 7
+    solvers: [CLARABEL, HIGHS]
+  robust:
+    kappa: 1.0                    # DECISION(S5)
+    solvers: [CLARABEL]
+  resampled:
+    n_draws: 200                   # DECISION(S6)
+    seed: 7
+    max_failed_share: 0.10
+  topk:
+    k: 20                          # DECISION(S7)
+  hrp:
+    linkage: single
 
 simulator:
   initial_value: 100000
@@ -161,7 +183,13 @@ backup:
 
 decisions:
   - id: D1
-    value: "local: qwen3.5-4b (thinking off), phi4-mini; fallback llama3.2-3b; api: claude-haiku-5.5, gpt-6-luna (reasoning none)"
+    value: >-
+      ARCTIC LiteLLM gateway: Gemma 4 31B, MiniMax M2.7; requested deployments: Gemma 4 E4B,
+      Phi-4 Mini 3.8B, Llama 3.2 3B; API: one or two of Claude Haiku 5.5, GPT-6 Luna. No Qwen or
+      DeepSeek. No local GPU.
+    status: confirmed
+  - id: D2
+    value: "gateway outage uses Carter's Slurm GPU jobs; otherwise that model's week is missed and excluded from its tests"
     status: confirmed
   - id: D3
     value: 50.0
@@ -170,13 +198,16 @@ decisions:
     value: 0.0
     status: confirmed
   - id: B1
-    value: [bare, skills, placebo]
+    value: "bare, placebo, and 4 to 5 similar-length specialized skills files; one placebo matched to mean skills length"
     status: confirmed
   - id: B2
     value: sp500_sector_balanced
     status: confirmed
   - id: B4
-    value: 100
+    value: "100 to 300, set after ARCTIC allocation is known"
+    status: confirmed
+  - id: C3
+    value: "JSON low, likely, high integers in [-5, 5], rationale; low <= likely <= high; no confidence field"
     status: confirmed
   - id: A2
     value: week_after_pilot
@@ -202,8 +233,41 @@ decisions:
   - id: C7
     value: 150
     status: provisional
+  - id: E1
+    value: "width = high - low; c = clip(1 - width/10, 0.1, 1); Omega_L,ii = tau Sigma_ii / c"
+    status: confirmed
   - id: E2
-    value: llm_resid
+    value: residualized_likely_score
+    status: confirmed
+  - id: E6
+    value: "Kronos 20-path spread mapping K1"
+    status: confirmed
+  - id: K1
+    value: "s_i=sd of 20 five-day return paths; r_i=clip(s_i/median(s),0.25,4); Omega_b,ii=tau Sigma_ii r_i"
+    status: confirmed
+  - id: S1
+    value: "MVO, Mean-CVaR, Robust MVO, Resampled MVO, Top-K; each has its own Q0"
+    status: confirmed
+  - id: S2
+    value: "HRP and equal weight controls; no LLM view, Q0, or shuffle test"
+    status: confirmed
+  - id: S3
+    value: "10,000 Monte Carlo scenarios from the BL posterior; beta=0.95"
+    status: confirmed
+  - id: S4
+    value: 1.0
+    status: confirmed
+  - id: S5
+    value: "kappa=1.0, ellipsoid from BL posterior covariance of the mean"
+    status: confirmed
+  - id: S6
+    value: 200
+    status: confirmed
+  - id: S7
+    value: "K=20, equal weights"
+    status: confirmed
+  - id: G1
+    value: "5% cap, no shorts, 10 bps cost, -8% stop-loss, +15% take-profit, weekly rebalance"
     status: confirmed
   - id: E3
     value: bl_tilt
@@ -215,10 +279,16 @@ decisions:
     value: study_only
     status: confirmed
   - id: G3
-    value: paired_weekly_holm_placebo_control
+    value: "each skills file vs bare and placebo per model, plus H3b range-width test"
+    status: confirmed
+  - id: G3b
+    value: "per source-week median width split; rank IC narrow minus wide"
+    status: confirmed
+  - id: P1
+    value: "each skills file within 5% of mean skills length; placebo within 2%"
     status: confirmed
   - id: G4
-    value: [market_direction, volatility, earnings_week]
+    value: "strategy ranking by mean weekly gap vs own Q0, plus v1 market, volatility, earnings splits"
     status: confirmed
   - id: G5
     value: daily
@@ -226,11 +296,14 @@ decisions:
   - id: G6
     value: 500
     status: confirmed
-  - id: N1
-    value: "invalid_rate>0.15 or local not done by lock or batch not ready by lock"
+  - id: G7
+    value: "IC tests as v1; portfolio return and shuffle tests one family per strategy"
     status: confirmed
   - id: N2
-    value: manual_weekend_script
+    value: "Carter runs one submit script by hand on ARCTIC; no scheduler"
+    status: confirmed
+  - id: N1
+    value: "invalid_rate>0.15 or local not done by lock or batch not ready by lock"
     status: confirmed
   - id: N3
     value: csv_weekly_download

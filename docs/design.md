@@ -1,7 +1,15 @@
 # Design: one page per pipeline stage
 
-The formulas below are copied from the appendix of `PLAN.md` so the code and the spec cannot
-drift. Each stage names the module that implements it.
+The formulas below describe the v1 pipeline stages retained in Phase 1. `PLAN2.md` is the
+current specification and phases 2 onward replace the formulas they change. Each stage names
+the module that implements it.
+
+## Source and portfolio identities (`types.py`)
+
+A rating source is `<model>__<prompt-id>` and is independent of the strategy using its ratings.
+Strategy-steered portfolios use `<strategy>__<model>__<prompt-id>`, each strategy's baseline-only
+portfolio uses `<strategy>__Q0`, and controls use `HRP` or `EW`. Phase 1 enables MVO only and
+does not enable controls. IC history is recorded per rating source rather than per portfolio.
 
 ## Week alignment (`calendar.py`)
 
@@ -109,7 +117,7 @@ re-adjusts history.
 
 ## Fallback policy (`pipeline/fallback.py`)
 
-A failed (model, configuration) trades the Q0 weights with `decision_source = fallback_q0` and
+A failed source trades the corresponding strategy's Q0 weights with `decision_source = fallback_q0` and
 the week is marked `fallback` for that portfolio. A data or baseline failure holds every
 portfolio (`no_rebalance`). `clean_weeks` returns the normal weeks for IC history and tests.
 
@@ -119,11 +127,12 @@ portfolio (`no_rebalance`). `clean_weeks` returns the normal weeks for IC histor
 Min detectable gap: 2.8 * sd / sqrt(T)
 ```
 
-H1: `IC_llm_raw - IC_baseline` per portfolio (win above the tie band, loss below, else tie).
-H2: `IC_combined - IC_baseline` with combined = ranked BL tilt (E3); portfolio weekly return
-minus Q0. H3: skills vs bare and skills vs placebo per model, Holm across the family (G3).
+H1: `IC_llm_raw - IC_baseline` per rating source (win above the tie band, loss below, else tie).
+H2: `IC_combined - IC_baseline` with combined = ranked BL tilt (E3); strategy weekly return
+minus its Q0. H3: skills vs bare and skills vs placebo per model, Holm across the family (G3).
 H4: splits by market direction, volatility, and earnings week, exploratory (G4). H5: factor
-regression on daily returns (G5) and the shuffled-ratings test over every portfolio plus Q0
+regression on daily returns (G5) and the shuffled-ratings test over every steered portfolio and
+each strategy's Q0
 with view strength held fixed (G6). The primary paired p-value is the exact sign-flip
 permutation; Newey-West is reported beside it. Gaps below the minimum detectable gap are
 inconclusive, not evidence of no effect. A null result is acceptable.

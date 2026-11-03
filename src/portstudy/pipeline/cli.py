@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from collections.abc import Callable
+from pathlib import Path
 
 import typer
 
@@ -25,13 +26,19 @@ def _clock(now: str | None, synthetic: bool, week: str | None) -> Callable[[], d
 
 
 def _context(
-    synthetic: bool, allow_over_budget: bool, force: bool, now: str | None, week: str | None
+    synthetic: bool,
+    allow_over_budget: bool,
+    force: bool,
+    now: str | None,
+    week: str | None,
+    config: str | None,
 ) -> RunContext:
     return default_context(
         synthetic=synthetic,
         allow_over_budget=allow_over_budget,
         force=force,
         clock=_clock(now, synthetic, week),
+        config_path=Path(config) if config else None,
     )
 
 
@@ -51,8 +58,9 @@ def run_job_cmd(
     now: str | None = typer.Option(
         None, "--now", help="override the clock (ISO datetime with offset)"
     ),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
 ) -> None:
-    ctx = _context(synthetic, allow_over_budget, force, now, week)
+    ctx = _context(synthetic, allow_over_budget, force, now, week, config)
     w = _week_or_current(week, ctx)
     try:
         status = run_named(ctx, job.upper(), w)
@@ -74,9 +82,10 @@ def run_week_cmd(
     force: bool = typer.Option(False, "--force"),
     now: str | None = typer.Option(None, "--now"),
     jobs: str = typer.Option("", "--jobs", help="comma-separated subset, default all in order"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
 ) -> None:
     """Run the jobs in order for one week, stopping at the first failure."""
-    ctx = _context(synthetic, allow_over_budget, force, now, week)
+    ctx = _context(synthetic, allow_over_budget, force, now, week, config)
     w = _week_or_current(week, ctx)
     sequence = [j.strip().upper() for j in jobs.split(",") if j.strip()] or list(
         ctx.cfg.pipeline.jobs
@@ -101,8 +110,9 @@ def run_week_cmd(
 def status_cmd(
     week: str | None = typer.Option(None, "--week"),
     synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
 ) -> None:
-    ctx = _context(synthetic, False, False, None, week)
+    ctx = _context(synthetic, False, False, None, week, config)
     w = _week_or_current(week, ctx)
     for job, st in all_statuses(w).items():
         line = f"{job:3s} {st.state:8s}"
@@ -121,10 +131,11 @@ def replay_cmd(
         None, "--week", help="replay through this week (default: latest)"
     ),
     synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
 ) -> None:
     from portstudy.pipeline.jobs import weeks_with_weights
 
-    ctx = _context(synthetic, False, True, None, week)
+    ctx = _context(synthetic, False, True, None, week, config)
     weeks = weeks_with_weights()
     if not weeks:
         typer.echo("no locked weights found")
@@ -139,10 +150,11 @@ def backup_cmd(
     week: str | None = typer.Option(None, "--week"),
     synthetic: bool = typer.Option(False, "--synthetic"),
     dry_run: bool = typer.Option(False, "--dry-run"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
 ) -> None:
     from portstudy.backup import run_backup
 
-    ctx = _context(synthetic, False, True, None, week)
+    ctx = _context(synthetic, False, True, None, week, config)
     w = _week_or_current(week, ctx)
     path = run_backup(w, ctx.cfg, dry_run=dry_run, logger=ctx.log("backup"))
     typer.echo(f"backup folder: {path}")
@@ -152,13 +164,14 @@ def backup_cmd(
 def eval_cmd(
     synthetic: bool = typer.Option(False, "--synthetic"),
     skip_shuffle: bool = typer.Option(False, "--skip-shuffle", help="skip the slow shuffle test"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
 ) -> None:
     try:
         from portstudy.eval.report import run_eval
     except ImportError as exc:  # Phase 11 adds the evaluation engine
         typer.echo(f"evaluation engine not available: {exc}")
         raise typer.Exit(code=1) from exc
-    ctx = _context(synthetic, False, True, None, None)
+    ctx = _context(synthetic, False, True, None, None, config)
     out = run_eval(ctx, skip_shuffle=skip_shuffle)
     typer.echo(f"report written to {out}")
 

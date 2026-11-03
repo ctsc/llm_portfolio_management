@@ -1,7 +1,8 @@
 # Runbook: for a human on a bad Saturday
 
 Everything below assumes the repository root as the working directory and the virtual
-environment activated. Add `--synthetic` to any command to work on the synthetic world.
+environment activated. Add `--synthetic` to any command to work on the synthetic world. Use
+`--config PATH` to select a study file, or set `PORTSTUDY_CONFIG` for the default.
 
 ## 1. Where things are
 
@@ -47,11 +48,11 @@ portstudy run-job J7 --week 2026-W46 --force      # rerun even if done with the 
 |---|---|---|
 | J1 snapshot (data provider down, a check with rule `halt`) | No snapshot. If still failing at the lock, J6 writes `no_rebalance`: every portfolio holds last week's positions, stops still run. | Check the provider status page and the key in `.env`; rerun J1. For a `halt` issue read `issues.csv` in the partial logs and decide whether the stock should be dropped (`data.checks` rules in `study.yaml`). |
 | J2 baseline (Kronos, covariance) | Same as J1: `no_rebalance` for all. | Rerun J2. If Kronos cannot load, set `baseline.forecaster: stub` for the week and log the change. |
-| J3 API submit (`CostCapExceeded`) | Batches not submitted. The API portfolios will trade Q0 weights (`fallback_q0`). | Read the projected total in the log line. Either run `portstudy run-job J3 --week ... --allow-over-budget` (the week is logged as over budget, decision D3) or accept the fallback. |
-| J4 local inference (crash, Ollama down) | Partial records are saved after every call. If not finished by the lock margin, those portfolios trade Q0 (`fallback_q0`). | Start Ollama, rerun J4; it skips finished calls. |
-| J5 API collect (`pending`) | Batches not back yet. `run_weekend.py` polls until the lock margin (Monday 8:30 am ET by default). | Wait, or rerun J5 later. After the margin J6 labels the batch failed and the portfolios trade Q0. |
+| J3 API submit (`CostCapExceeded`) | Batches not submitted. The API portfolios will trade their strategy's Q0 weights (`fallback_q0`). | Read the projected total in the log line. Either run `portstudy run-job J3 --week ... --allow-over-budget` (the week is logged as over budget, decision D3) or accept the fallback. |
+| J4 local inference (crash, Ollama down) | Partial records are saved after every call. If not finished by the lock margin, those portfolios trade their strategy's Q0 (`fallback_q0`). | Start Ollama, rerun J4; it skips finished calls. |
+| J5 API collect (`pending`) | Batches not back yet. `run_weekend.py` polls until the lock margin (Monday 8:30 am ET by default). | Wait, or rerun J5 later. After the margin J6 labels the batch failed and the portfolios trade their strategy's Q0. |
 | J6 validate (`runs still incomplete before the lock margin`) | Nothing written yet. | Finish J4 or J5 first, or wait for the margin. |
-| J6 marks `invalid_rate` failures | That (model, configuration) trades Q0 weights for the week (decision N1). | Nothing to do for the week; investigate the model's raw answers in the jsonl records. If `invalid_truncated` dominates, raise `max_output_tokens` for that model in `llm.settings`. |
+| J6 marks `invalid_rate` failures | That rating source trades its strategy's Q0 weights for the week (decision N1). | Nothing to do for the week; investigate the model's raw answers in the jsonl records. If `invalid_truncated` dominates, raise `max_output_tokens` for that model in `llm.settings`. |
 | J7 weights (`LockViolation`) | Weights not written because the clock is past Monday 9:00 am ET. | Too late for the week: the simulator holds positions (`no_rebalance`). Record what happened. Never backdate the clock. |
 | J7 `solver_failed` | The portfolio keeps last week's weights with the flag. | Check `sigma_matrix.csv` for a bad stock; rerun J7 with `--force` after fixing the data. |
 | J8 replay and score | Results lag. | Rerun J8 any time; it rebuilds every portfolio from the ledger and rescores every closed week. |
@@ -82,5 +83,5 @@ folder is also possible, but keep a copy first.
 Models and code never edit prompt files. If a human changes a prompt, bump its `version` in
 `config/prompts_manifest.yaml`, rename the file to carry the version, run
 `python scripts/refresh_manifest.py --write`, commit, and note the change in the analysis.
-Any change to a `decisions.*` value after the live start must be logged and versioned the same
-way (see `docs/open_questions.md`).
+Use `config/study_test.yaml` for a small offline run. Any change to a `decisions.*` value after
+the live start must be logged and versioned the same way (see `docs/open_questions.md`).

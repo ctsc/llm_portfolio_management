@@ -47,6 +47,8 @@ def sharpe(weekly: pd.Series, periods: int = 52) -> float:
 class EvalData:
     cfg: StudyConfig
     portfolios: list[str]
+    sources: list[str]
+    portfolio_keys: list[str]
     weeks: list[str]
     pilot_week: str | None
     ic: dict[str, pd.DataFrame]
@@ -120,9 +122,12 @@ def _stock_week_table(weeks: list[str], portfolios: list[str]) -> pd.DataFrame:
         scores = read_scores(w)
         for key in portfolios:
             pid = PortfolioId.parse(key)
+            source = pid.source
+            if source is None:
+                continue
             sub = scores[
-                (scores["model"] == pid.model)
-                & (scores["config_id"] == pid.config_id)
+                (scores["model"] == source.model)
+                & (scores["config_id"] == source.config_id)
                 & scores["valid"]
             ]
             base[key] = sub.set_index("ticker")["score"].reindex(base.index).astype(float)
@@ -139,9 +144,19 @@ def load_eval_data(
     pilot = cfg.timing.pilot_week
     # The pilot week never counts toward results.
     weeks_used = [w for w in all_weeks if w != pilot]
-    keys = ["Q0", *portfolios]
+    keys = list(dict.fromkeys(portfolios))
+    source_portfolios = [key for key in keys if PortfolioId.parse(key).source is not None]
+    portfolio_by_source: dict[str, str] = {}
+    for key in source_portfolios:
+        source = PortfolioId.parse(key).source
+        if source is not None:
+            portfolio_by_source.setdefault(source.key, key)
     store = ICStore()
-    ic = ic_tables(store, portfolios, clean_weeks=lambda p: fb.clean_weeks(p, weeks_used))
+    ic = ic_tables(
+        store,
+        list(portfolio_by_source),
+        clean_weeks=lambda source: fb.clean_weeks(portfolio_by_source[source], weeks_used),
+    )
     for signal in ic:
         ic[signal] = ic[signal][ic[signal].index.isin(weeks_used)]
     daily = {k: read_daily(k) for k in keys}
@@ -154,7 +169,9 @@ def load_eval_data(
     spy_weekly, spy_vol = _spy_series(weeks_used)
     return EvalData(
         cfg=cfg,
-        portfolios=portfolios,
+        portfolios=source_portfolios,
+        sources=list(portfolio_by_source),
+        portfolio_keys=keys,
         weeks=weeks_used,
         pilot_week=pilot,
         ic=ic,
@@ -164,5 +181,5 @@ def load_eval_data(
         statuses=statuses,
         spy_weekly=spy_weekly,
         spy_vol20=spy_vol,
-        stock_week=_stock_week_table(weeks_used, portfolios),
+        stock_week=_stock_week_table(weeks_used, source_portfolios),
     )

@@ -6,6 +6,7 @@ import datetime as dt
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from portstudy.config import (
@@ -18,6 +19,7 @@ from portstudy.data.providers.base import ProviderBundle
 from portstudy.llm.prompts import PromptManifest, load_manifest
 from portstudy.llm.providers.base import LlmProvider
 from portstudy.logging_setup import get_logger
+from portstudy.types import RatingSource
 
 ET = ZoneInfo("America/New_York")
 
@@ -58,19 +60,82 @@ class RunContext:
         return self.data_providers
 
     def models(self) -> list[str]:
-        return [m.id for m in self.registry.enabled(synthetic=self.synthetic)]
+        available = self.registry.enabled(synthetic=self.synthetic)
+        selected = self.cfg.llm.model_ids
+        if not selected:
+            return [m.id for m in available]
+        available_by_id = {m.id: m for m in available}
+        missing = [model_id for model_id in selected if model_id not in available_by_id]
+        if missing:
+            raise ValueError(f"configured models are unavailable: {missing}")
+        return selected
+
+    def prompt_ids(self) -> list[str]:
+        available = self.manifest.enabled()
+        selected = self.cfg.llm.prompt_ids
+        if not selected:
+            return [prompt.id for prompt in available]
+        available_by_id = {prompt.id: prompt for prompt in available}
+        missing = [prompt_id for prompt_id in selected if prompt_id not in available_by_id]
+        if missing:
+            raise ValueError(f"configured prompt ids are unavailable: {missing}")
+        return selected
+
+    def run_registry(self) -> ModelRegistry:
+        selected = set(self.models())
+        return self.registry.model_copy(
+            update={
+                "models": [model for model in self.registry.models if model.id in selected],
+                "stub_models": [
+                    model for model in self.registry.stub_models if model.id in selected
+                ],
+            }
+        )
+
+    def run_manifest(self) -> PromptManifest:
+        selected = set(self.prompt_ids())
+        return self.manifest.model_copy(
+            update={
+                "configurations": [
+                    prompt for prompt in self.manifest.configurations if prompt.id in selected
+                ]
+            }
+        )
 
     def local_models(self) -> list[str]:
-        return [m.id for m in self.registry.enabled(synthetic=self.synthetic) if m.kind == "local"]
+        return [
+            model_id for model_id in self.models() if self.registry.get(model_id).kind == "local"
+        ]
 
     def api_models(self) -> list[str]:
-        return [m.id for m in self.registry.enabled(synthetic=self.synthetic) if m.kind == "api"]
+        return [model_id for model_id in self.models() if self.registry.get(model_id).kind == "api"]
 
-    def portfolio_keys(self) -> list[str]:
+    def sources(self) -> list[RatingSource]:
+        return [
+            RatingSource(model, prompt) for model in self.models() for prompt in self.prompt_ids()
+        ]
+
+    def steered_keys(self) -> list[str]:
         from portstudy.types import PortfolioId
 
-        keys = [PortfolioId(m, c.id).key for m in self.models() for c in self.manifest.enabled()]
-        return keys
+        return [
+            PortfolioId.steered(strategy, source).key
+            for strategy in self.cfg.strategies.enabled
+            for source in self.sources()
+        ]
+
+    def q0_keys(self) -> list[str]:
+        from portstudy.types import PortfolioId
+
+        return [PortfolioId.q0(strategy).key for strategy in self.cfg.strategies.enabled]
+
+    def control_keys(self) -> list[str]:
+        from portstudy.types import PortfolioId
+
+        return [PortfolioId.control(name).key for name in self.cfg.strategies.controls]
+
+    def portfolio_keys(self) -> list[str]:
+        return self.q0_keys() + self.control_keys() + self.steered_keys()
 
 
 def default_context(
@@ -78,9 +143,10 @@ def default_context(
     allow_over_budget: bool = False,
     force: bool = False,
     clock: Callable[[], dt.datetime] | None = None,
+    config_path: Path | None = None,
 ) -> RunContext:
     return RunContext(
-        cfg=load_study_config(),
+        cfg=load_study_config(config_path),
         registry=load_model_registry(),
         manifest=load_manifest(),
         synthetic=synthetic,

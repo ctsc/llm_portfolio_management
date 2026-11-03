@@ -1,7 +1,7 @@
 """Fail if the repository contains an em dash or the banned word for experimental conditions.
 
-Scans tracked text files (code, docs, config, prompts). `PLAN.md` states the rules themselves
-and is excluded; so is this script, whose patterns would otherwise match.
+Scans tracked text files (code, docs, config, prompts). `PLAN.md` and `PLAN2.md` state the rules
+themselves and are excluded; so is this script, whose patterns would otherwise match.
 Usage: python scripts/check_banned_words.py [paths...]
 """
 
@@ -25,7 +25,7 @@ SKIP_DIRS = {
     "htmlcov",
     "portstudy.egg-info",
 }
-SKIP_FILES = {"PLAN.md", Path(__file__).name}
+SKIP_FILES = {"PLAN.md", "PLAN2.md", Path(__file__).name}
 
 EM_DASH = "\u2014"
 # The banned condition word, built from parts so this file does not contain it literally.

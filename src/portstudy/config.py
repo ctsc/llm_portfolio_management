@@ -1,6 +1,6 @@
 """Typed study configuration loaded from config/study.yaml and config/models.yaml.
 
-Unknown keys are an error. Every deferred decision from PLAN.md section 0.3 is listed
+Unknown keys are an error. Every study decision from PLAN2.md section 0.3 is listed
 under `decisions` with an id, a value, and a status of confirmed or provisional.
 """
 
@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from math import ceil
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from portstudy.types import ControlName, StrategyName
 
 CheckRule = Literal["skip_stock", "forward_fill", "halt"]
 
@@ -25,7 +28,6 @@ class UniverseConfig(StrictModel):
     size: int = 100
     source: str = "sp500"
     sectors: int = 11
-    per_sector: int = 9
     min_history_days: int = 300
     dollar_volume_window_days: int = 60
     extra_tickers: list[str] = Field(default_factory=list)
@@ -155,6 +157,8 @@ class LlmConfig(StrictModel):
     retry_invalid_once: bool = True
     batch_retry_count: int = 1
     api_poll_seconds: int = 300
+    model_ids: list[str] = Field(default_factory=list)
+    prompt_ids: list[str] = Field(default_factory=list)
     settings_default: LlmSettings = LlmSettings()
     settings: dict[str, LlmSettings] = Field(default_factory=dict)
 
@@ -177,6 +181,47 @@ class OptimizerConfig(StrictModel):
     max_weight: float = 0.05
     min_stocks: int = 20
     solvers: list[str] = Field(default_factory=lambda: ["OSQP", "CLARABEL"])
+
+
+class CvarConfig(StrictModel):
+    n_scenarios: int = 10000
+    beta: float = 0.95
+    lam: float = 1.0
+    seed: int = 7
+    solvers: list[str] = Field(default_factory=lambda: ["CLARABEL", "HIGHS"])
+
+
+class RobustConfig(StrictModel):
+    kappa: float = 1.0
+    solvers: list[str] = Field(default_factory=lambda: ["CLARABEL"])
+
+
+class ResampledConfig(StrictModel):
+    n_draws: int = 200
+    seed: int = 7
+    max_failed_share: float = 0.10
+
+
+class TopKConfig(StrictModel):
+    k: int = 20
+
+
+class HrpConfig(StrictModel):
+    linkage: Literal["single", "complete", "average", "ward"] = "single"
+
+
+def _default_enabled_strategies() -> list[StrategyName]:
+    return ["mvo"]
+
+
+class StrategiesConfig(StrictModel):
+    enabled: list[StrategyName] = Field(default_factory=_default_enabled_strategies)
+    controls: list[ControlName] = Field(default_factory=list)
+    cvar: CvarConfig = CvarConfig()
+    robust: RobustConfig = RobustConfig()
+    resampled: ResampledConfig = ResampledConfig()
+    topk: TopKConfig = TopKConfig()
+    hrp: HrpConfig = HrpConfig()
 
 
 class SimulatorConfig(StrictModel):
@@ -249,6 +294,7 @@ class StudyConfig(StrictModel):
     llm: LlmConfig = LlmConfig()
     views: ViewsConfig = ViewsConfig()
     optimizer: OptimizerConfig = OptimizerConfig()
+    strategies: StrategiesConfig = StrategiesConfig()
     simulator: SimulatorConfig = SimulatorConfig()
     pipeline: PipelineConfig = PipelineConfig()
     eval: EvalConfig = EvalConfig()
@@ -262,6 +308,19 @@ class StudyConfig(StrictModel):
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate decision ids")
         return value
+
+    @model_validator(mode="after")
+    def _validate_optimizer_and_topk(self) -> StudyConfig:
+        max_weight = self.optimizer.max_weight
+        if not 0 < max_weight <= 1:
+            raise ValueError("optimizer.max_weight must be in (0, 1]")
+        if self.strategies.topk.k <= 0:
+            raise ValueError("strategies.topk.k must be positive")
+        if 1 / self.strategies.topk.k > max_weight:
+            raise ValueError("1 / strategies.topk.k must not exceed optimizer.max_weight")
+        if self.optimizer.min_stocks < ceil(1 / max_weight):
+            raise ValueError("optimizer.min_stocks must be at least ceil(1 / max_weight)")
+        return self
 
     def decision(self, decision_id: str) -> Decision:
         for d in self.decisions:
@@ -299,6 +358,10 @@ class ModelRegistry(StrictModel):
         ids = [m.id for m in self.models + self.stub_models]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate model ids in registry")
+        reserved = {"Q0", "HRP", "EW"}
+        invalid = [model_id for model_id in ids if "__" in model_id or model_id in reserved]
+        if invalid:
+            raise ValueError(f"invalid or reserved model ids: {invalid}")
         return self
 
     def enabled(self, synthetic: bool = False) -> list[ModelSpec]:
@@ -334,7 +397,11 @@ def _read_yaml(path: Path) -> dict[str, Any]:
 
 def load_study_config(path: Path | None = None) -> StudyConfig:
     """Load and validate study.yaml. Unknown keys raise a validation error."""
-    cfg_path = path or repo_root() / "config" / "study.yaml"
+    cfg_path = path or (
+        Path(os.environ["PORTSTUDY_CONFIG"])
+        if os.environ.get("PORTSTUDY_CONFIG")
+        else repo_root() / "config" / "study.yaml"
+    )
     return StudyConfig.model_validate(_read_yaml(cfg_path))
 
 

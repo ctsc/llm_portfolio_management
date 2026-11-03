@@ -11,35 +11,91 @@ WeekId = str
 Ticker = str
 
 TradeReason = Literal["rebalance", "stop_loss", "take_profit", "forced_exit"]
-DecisionSource = Literal["llm", "fallback_q0", "hold", "q0"]
+DecisionSource = Literal["llm", "fallback_q0", "hold", "q0", "control"]
 WeekStatus = Literal["normal", "fallback", "no_rebalance"]
+StrategyName = Literal["mvo", "cvar", "robust", "resampled", "topk"]
+ControlName = Literal["HRP", "EW"]
 
 
 @dataclass(frozen=True)
-class PortfolioId:
-    """A portfolio is one (model, configuration) pair, or Q0 for the quant baseline view."""
-
+class RatingSource:
     model: str
     config_id: str
 
     @property
     def key(self) -> str:
-        return "Q0" if self.model == "Q0" else f"{self.model}__{self.config_id}"
+        return f"{self.model}__{self.config_id}"
 
     @classmethod
-    def q0(cls) -> PortfolioId:
-        return cls(model="Q0", config_id="q0")
+    def parse(cls, key: str) -> RatingSource:
+        parts = key.split("__")
+        if len(parts) != 2 or not all(parts):
+            raise ValueError(f"invalid rating source key: {key}")
+        model, config_id = parts
+        if model in ("Q0", "HRP", "EW"):
+            raise ValueError(f"reserved model id in rating source key: {key}")
+        return cls(model, config_id)
+
+
+@dataclass(frozen=True)
+class PortfolioId:
+    """A portfolio is a strategy and rating source, a strategy Q0, or a control."""
+
+    strategy: str
+    model: str
+    config_id: str
+
+    @classmethod
+    def steered(cls, strategy: StrategyName, source: RatingSource) -> PortfolioId:
+        return cls(strategy, source.model, source.config_id)
+
+    @classmethod
+    def q0(cls, strategy: StrategyName) -> PortfolioId:
+        return cls(strategy, "Q0", "")
+
+    @classmethod
+    def control(cls, name: ControlName) -> PortfolioId:
+        return cls(name, "", "")
+
+    @property
+    def key(self) -> str:
+        if self.is_control:
+            return self.strategy
+        if self.is_q0:
+            return f"{self.strategy}__Q0"
+        return f"{self.strategy}__{self.model}__{self.config_id}"
 
     @classmethod
     def parse(cls, key: str) -> PortfolioId:
-        if key == "Q0":
-            return cls.q0()
-        model, config_id = key.split("__", 1)
-        return cls(model=model, config_id=config_id)
+        if key in ("HRP", "EW"):
+            return cls.control(key)  # type: ignore[arg-type]
+        parts = key.split("__")
+        strategies = ("mvo", "cvar", "robust", "resampled", "topk")
+        if len(parts) == 2 and parts[0] in strategies and parts[1] == "Q0":
+            return cls.q0(parts[0])  # type: ignore[arg-type]
+        if (
+            len(parts) == 3
+            and parts[0] in strategies
+            and all(parts[1:])
+            and parts[1] not in ("Q0", "HRP", "EW")
+        ):
+            source = RatingSource(parts[1], parts[2])
+            return cls.steered(parts[0], source)  # type: ignore[arg-type]
+        raise ValueError(f"invalid portfolio key: {key}")
 
     @property
     def is_q0(self) -> bool:
-        return self.model == "Q0"
+        return self.model == "Q0" and not self.config_id and self.strategy not in ("HRP", "EW")
+
+    @property
+    def is_control(self) -> bool:
+        return self.strategy in ("HRP", "EW") and not self.model and not self.config_id
+
+    @property
+    def source(self) -> RatingSource | None:
+        if self.is_q0 or self.is_control:
+            return None
+        return RatingSource(self.model, self.config_id)
 
 
 @dataclass(frozen=True)

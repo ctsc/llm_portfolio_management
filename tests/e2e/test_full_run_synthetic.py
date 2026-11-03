@@ -56,7 +56,7 @@ def test_full_run_synthetic(e2e_dir: Path, study_config: StudyConfig, model_regi
                             world: SyntheticWorld, e2e_weeks: list[str]) -> None:
     cfg = generous_budget(study_config)
     before_prompts = _prompt_hashes()
-    keys = ["Q0", *WeekendRunner(cfg, model_registry, world).context(e2e_weeks[0]).portfolio_keys()]
+    keys = WeekendRunner(cfg, model_registry, world).context(e2e_weeks[0]).portfolio_keys()
     assert len(keys) == 13
     for w in e2e_weeks:
         snap = read_snapshot(w)
@@ -140,22 +140,22 @@ def test_failure_week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_con
 
     manifest = load_manifest()
     for conf in manifest.enabled():
-        assert fb.week_status_for(weeks[1], f"stub-local-a__{conf.id}") == "normal"
-        assert fb.week_status_for(weeks[2], f"stub-local-b__{conf.id}") == "fallback"
-        assert fb.week_status_for(weeks[3], f"stub-api-a__{conf.id}") == "fallback"
-        assert fb.week_status_for(weeks[3], f"stub-api-b__{conf.id}") == "normal"
-    assert fb.week_status_for(weeks[4], "Q0") == "no_rebalance"
-    daily = read_daily("stub-local-b__skills")
+        assert fb.week_status_for(weeks[1], f"mvo__stub-local-a__{conf.id}") == "normal"
+        assert fb.week_status_for(weeks[2], f"mvo__stub-local-b__{conf.id}") == "fallback"
+        assert fb.week_status_for(weeks[3], f"mvo__stub-api-a__{conf.id}") == "fallback"
+        assert fb.week_status_for(weeks[3], f"mvo__stub-api-b__{conf.id}") == "normal"
+    assert fb.week_status_for(weeks[4], "mvo__Q0") == "no_rebalance"
+    daily = read_daily("mvo__stub-local-b__skills")
     assert set(daily.loc[daily["week_id"] == weeks[2], "week_status"]) == {"fallback"}
     assert set(daily.loc[daily["week_id"] == weeks[4], "week_status"]) == {"no_rebalance"}
-    trades = read_trades("stub-local-b__skills")
+    trades = read_trades("mvo__stub-local-b__skills")
     assert (trades.loc[trades["week_id"] == weeks[2], "decision_source"] == "fallback_q0").all()
     assert not ((trades["week_id"] == weeks[4]) & (trades["reason"] == "rebalance")).any()
     data = load_eval_data(cfg, runner.context(weeks[5]).portfolio_keys(), weeks=weeks)
     counts = data.fallback_counts().set_index("portfolio")
-    assert counts.loc["stub-local-b__skills", "fallback"] == 1 and counts.loc["stub-local-b__skills", "no_rebalance"] == 1
-    assert counts.loc["stub-api-b__bare", "fallback"] == 0
-    assert fb.clean_weeks("stub-local-b__skills", weeks) == [weeks[0], weeks[1], weeks[3], weeks[5]]
+    assert counts.loc["mvo__stub-local-b__skills", "fallback"] == 1 and counts.loc["mvo__stub-local-b__skills", "no_rebalance"] == 1
+    assert counts.loc["mvo__stub-api-b__bare", "fallback"] == 0
+    assert fb.clean_weeks("mvo__stub-local-b__skills", weeks) == [weeks[0], weeks[1], weeks[3], weeks[5]]
 
 
 def test_resume_equals_uninterrupted_run(e2e_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

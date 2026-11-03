@@ -153,14 +153,14 @@ def test_build_weights_every_portfolio_and_q0_rules(week_inputs: tuple[str, Week
     w, inputs, cfg = week_inputs
     q0 = build_q0_weights(w, cfg, ic_b=0.02, inputs=inputs)
     assert q0.weights.sum() == pytest.approx(1.0, abs=1e-8)
-    assert read_weights(w, "Q0")["weight"].sum() == pytest.approx(1.0, abs=1e-8)
+    assert read_weights(w, "mvo__Q0")["weight"].sum() == pytest.approx(1.0, abs=1e-8)
     assert not q0.use_llm_view
     # Normal portfolio with an LLM view differs from Q0.
     p = build_weights(w, "stub-local-a", "skills", cfg, ic_b=0.02, ic_l=0.03, inputs=inputs)
     assert p.use_llm_view and p.n_llm_view == len(inputs.tickers)
     assert not np.allclose(p.weights.to_numpy(), q0.weights.to_numpy())
     assert (p.weights <= cfg.optimizer.max_weight + 1e-9).all()
-    saved_ok = read_weights(w, "stub-local-a__skills")
+    saved_ok = read_weights(w, "mvo__stub-local-a__skills")
     assert saved_ok["has_llm_view"].all() and saved_ok["z_L"].notna().all()
     # IC_L == 0: use_llm_view False and the weights equal Q0's exactly.
     z = build_weights(w, "stub-local-a", "skills", cfg, ic_b=0.02, ic_l=0.0, inputs=inputs)
@@ -172,7 +172,7 @@ def test_build_weights_every_portfolio_and_q0_rules(week_inputs: tuple[str, Week
     assert inv.n_invalid == len(inputs.scores_for("stub-local-b", "bare"))
     assert not inv.use_llm_view
     pd.testing.assert_series_equal(inv.weights, q0.weights)
-    saved = read_weights(w, "stub-local-b__bare")
+    saved = read_weights(w, "mvo__stub-local-b__bare")
     assert saved["z_L"].isna().all() and not saved["has_llm_view"].any()
     # Deterministic.
     again = build_weights(w, "stub-local-a", "skills", cfg, ic_b=0.02, ic_l=0.03, inputs=inputs)

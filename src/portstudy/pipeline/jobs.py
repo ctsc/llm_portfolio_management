@@ -46,8 +46,8 @@ def _config_hash(ctx: RunContext) -> str:
     return stable_hash(
         {
             "study": ctx.cfg.model_dump(),
-            "models": ctx.registry.model_dump(),
-            "manifest": ctx.manifest.model_dump(),
+            "models": ctx.run_registry().model_dump(),
+            "manifest": ctx.run_manifest().model_dump(),
             "synthetic": ctx.synthetic,
         }
     )
@@ -57,10 +57,10 @@ def _week_runner(ctx: RunContext, week_id: str) -> WeekRunner:
     return WeekRunner(
         week_id,
         ctx.cfg,
-        ctx.registry,
+        ctx.run_registry(),
         read_snapshot(week_id),
         synthetic=ctx.synthetic,
-        manifest=ctx.manifest,
+        manifest=ctx.run_manifest(),
         providers=ctx.llm_providers or None,
         cache=LlmCache(),
         logger=ctx.log("llm"),
@@ -232,10 +232,10 @@ def J6_validate(ctx: RunContext, week_id: str) -> JobStatus:
             minutes=ctx.cfg.pipeline.lock_margin_minutes
         )
         incomplete: list[str] = []
-        for model in ctx.models():
-            for conf in ctx.manifest.enabled():
-                status = runner.assess_run(model, conf.id, now=now, deadline=deadline)
-                key = PortfolioId(model, conf.id).key
+        for source in ctx.sources():
+            status = runner.assess_run(source.model, source.config_id, now=now, deadline=deadline)
+            for strategy in ctx.cfg.strategies.enabled:
+                key = PortfolioId.steered(strategy, source).key
                 if status.state == "ok":
                     plan.statuses[key] = "normal"
                 elif status.state == "failed":
@@ -310,25 +310,30 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
         inputs_week = WeekInputs.load(week_id)
         store = ICStore()
         ic_b, _ = portfolio_ics(week_id, ctx.cfg, store, ctx.live_start_week)
-        q0 = build_q0_weights(
-            week_id,
-            ctx.cfg,
-            ic_b,
-            inputs=inputs_week,
-            previous_week=_previous_week_with_weights(week_id, "Q0"),
-            logger=log,
-        )
-        summary: dict[str, Any] = {"Q0": {"ic_b": ic_b, "solver": q0.solver}}
-        for model in ctx.models():
-            for conf in ctx.manifest.enabled():
-                key = PortfolioId(model, conf.id).key
+        summary: dict[str, Any] = {}
+        for strategy in ctx.cfg.strategies.enabled:
+            q0_key = PortfolioId.q0(strategy).key
+            q0 = build_q0_weights(
+                week_id,
+                ctx.cfg,
+                ic_b,
+                inputs=inputs_week,
+                previous_week=_previous_week_with_weights(week_id, q0_key),
+                logger=log,
+                strategy=strategy,
+            )
+            summary[q0_key] = {"ic_b": ic_b, "solver": q0.solver}
+        for source in ctx.sources():
+            for strategy in ctx.cfg.strategies.enabled:
+                key = PortfolioId.steered(strategy, source).key
+                q0_key = PortfolioId.q0(strategy).key
                 status = plan.status_for(key)
                 if status == "fallback":
                     # Trade the Q0 weights, labeled as a fallback.
                     write_csv_atomic(
-                        read_weights(week_id, "Q0"), weights_dir(week_id) / f"{key}.csv"
+                        read_weights(week_id, q0_key), weights_dir(week_id) / f"{key}.csv"
                     )
-                    meta = read_json(weights_dir(week_id) / "Q0.meta.json")
+                    meta = read_json(weights_dir(week_id) / f"{q0_key}.meta.json")
                     meta.update(
                         {
                             "portfolio": key,
@@ -353,20 +358,21 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                     ctx.cfg,
                     store,
                     ctx.live_start_week,
-                    model,
-                    conf.id,
+                    source.model,
+                    source.config_id,
                     fallback_weeks=fb.fallback_weeks(key),
                 )
                 w = build_weights(
                     week_id,
-                    model,
-                    conf.id,
+                    source.model,
+                    source.config_id,
                     ctx.cfg,
                     ic_b,
                     ic_l,
                     inputs=inputs_week,
                     previous_week=_previous_week_with_weights(week_id, key),
                     logger=log,
+                    strategy=strategy,
                 )
                 summary[key] = {
                     "ic_l": ic_l,
@@ -417,7 +423,7 @@ def weeks_with_weights() -> list[str]:
 
 def build_plans(ctx: RunContext, weeks: list[str]) -> dict[str, list[WeekPlan]]:
     """Weekly plans per portfolio from the stored weights and fallback logs."""
-    keys = ["Q0", *ctx.portfolio_keys()]
+    keys = ctx.portfolio_keys()
     plans: dict[str, list[WeekPlan]] = {k: [] for k in keys}
     for w in weeks:
         for key in keys:
@@ -427,7 +433,16 @@ def build_plans(ctx: RunContext, weeks: list[str]) -> dict[str, list[WeekPlan]]:
                 plans[key].append(WeekPlan(w, None, "hold", "no_rebalance"))
                 continue
             weights = read_csv(path).set_index("ticker")["weight"].astype(float)
-            source = "q0" if key == "Q0" else ("fallback_q0" if status == "fallback" else "llm")
+            pid = PortfolioId.parse(key)
+            source = (
+                "q0"
+                if pid.is_q0
+                else "control"
+                if pid.is_control
+                else "fallback_q0"
+                if status == "fallback"
+                else "llm"
+            )
             plans[key].append(WeekPlan(w, weights, source, status))  # type: ignore[arg-type]
     return plans
 
@@ -458,31 +473,37 @@ def update_ic_history(ctx: RunContext, weeks: list[str], book: PriceBook) -> int
             }
         )
         scores = read_scores(w)
-        for key in ctx.portfolio_keys():
-            pid = PortfolioId.parse(key)
-            sub = scores[(scores["model"] == pid.model) & (scores["config_id"] == pid.config_id)]
+        for source in ctx.sources():
+            sub = scores[
+                (scores["model"] == source.model) & (scores["config_id"] == source.config_id)
+            ]
             if len(sub):
                 v = valid_scores(sub).set_index("ticker")["score"]
                 rows.append(
                     {
                         "week_id": w,
                         "signal": "llm_raw",
-                        "model": pid.model,
-                        "config_id": pid.config_id,
+                        "model": source.model,
+                        "config_id": source.config_id,
                         "rank_ic": rank_ic(v, rets),
                         "n_stocks": len(v),
                     }
                 )
-            wpath = weights_dir(w) / f"{key}.csv"
-            if wpath.exists():
+            strategy = ctx.cfg.strategies.enabled[0] if ctx.cfg.strategies.enabled else None
+            wpath = (
+                weights_dir(w) / f"{PortfolioId.steered(strategy, source).key}.csv"
+                if strategy is not None
+                else None
+            )
+            if wpath is not None and wpath.exists():
                 wdf = read_csv(wpath).set_index("ticker")
                 z_l = wdf["z_L"].dropna() if "z_L" in wdf else pd.Series(dtype=float)
                 rows.append(
                     {
                         "week_id": w,
                         "signal": "llm_resid",
-                        "model": pid.model,
-                        "config_id": pid.config_id,
+                        "model": source.model,
+                        "config_id": source.config_id,
                         "rank_ic": rank_ic(z_l, rets) if len(z_l) else float("nan"),
                         "n_stocks": len(z_l),
                     }
@@ -491,8 +512,8 @@ def update_ic_history(ctx: RunContext, weeks: list[str], book: PriceBook) -> int
                     {
                         "week_id": w,
                         "signal": "combined",
-                        "model": pid.model,
-                        "config_id": pid.config_id,
+                        "model": source.model,
+                        "config_id": source.config_id,
                         "rank_ic": rank_ic(wdf["tilt"], rets),
                         "n_stocks": int(wdf["tilt"].notna().sum()),
                     }

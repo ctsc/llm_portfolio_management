@@ -62,8 +62,8 @@ def test_every_job_runs_alone_and_rerun_is_idempotent(pipeline_dir: Path, study_
     scores = read_scores(inject_week)
     n_models, n_conf = len(model_registry.enabled(synthetic=True)), len(load_manifest().enabled())
     assert len(scores) == n_models * n_conf * 100 and not scores.duplicated(["model", "config_id", "ticker"]).any()
-    trades_before = {k: len(read_trades(k)) for k in ["Q0", *ctx.portfolio_keys()]}
-    daily_before = read_daily("Q0")
+    trades_before = {k: len(read_trades(k)) for k in ctx.portfolio_keys()}
+    daily_before = read_daily("mvo__Q0")
     # Second pass: deterministic jobs are skipped, forced ones re-run without duplicating anything.
     second = run_week(make_ctx(cfg, model_registry, world, inject_week), inject_week)
     assert second["J1"] == "skipped" and second["J2"] == "skipped" and second["J4"] == "skipped"
@@ -71,8 +71,8 @@ def test_every_job_runs_alone_and_rerun_is_idempotent(pipeline_dir: Path, study_
     assert len(read_scores(inject_week)) == len(scores)
     for k, n in trades_before.items():
         assert len(read_trades(k)) == n
-    assert not read_daily("Q0").duplicated(["date", "portfolio_id"]).any()
-    assert len(read_daily("Q0")) == len(daily_before)
+    assert not read_daily("mvo__Q0").duplicated(["date", "portfolio_id"]).any()
+    assert len(read_daily("mvo__Q0")) == len(daily_before)
     # Status files exist for every job with timestamps and hashes.
     for job, st in all_statuses(inject_week).items():
         assert st.state in ("done", "skipped") and st.started_at and st.inputs_hash, job
@@ -96,7 +96,7 @@ def test_j4_crash_then_resume(pipeline_dir: Path, study_config: StudyConfig, mod
     assert healthy.calls == 300 - 50
     rest = run_week(ctx2, inject_week, ["J5", "J6", "J7"])
     assert all(s == "done" for s in rest.values())
-    assert fb.week_status_for(inject_week, "stub-local-a__bare") == "normal"
+    assert fb.week_status_for(inject_week, "mvo__stub-local-a__bare") == "normal"
 
 
 def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_config: StudyConfig,
@@ -117,33 +117,33 @@ def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_
     plan = fb.read_plan(inject_week)
     assert plan is not None
     for conf in load_manifest().enabled():
-        assert plan.status_for(f"stub-api-a__{conf.id}") == "fallback"
-        assert plan.reasons[f"stub-api-a__{conf.id}"] == "batch_not_ready_by_lock"
-        assert plan.status_for(f"stub-api-b__{conf.id}") == "normal"
+        assert plan.status_for(f"mvo__stub-api-a__{conf.id}") == "fallback"
+        assert plan.reasons[f"mvo__stub-api-a__{conf.id}"] == "batch_not_ready_by_lock"
+        assert plan.status_for(f"mvo__stub-api-b__{conf.id}") == "normal"
     assert run_named(late, "J7", inject_week).state == "done"
-    q0 = read_weights(inject_week, "Q0")
-    fbw = read_weights(inject_week, "stub-api-a__bare")
+    q0 = read_weights(inject_week, "mvo__Q0")
+    fbw = read_weights(inject_week, "mvo__stub-api-a__bare")
     pd.testing.assert_frame_equal(q0, fbw)
-    meta = read_weights_meta(inject_week, "stub-api-a__bare")
+    meta = read_weights_meta(inject_week, "mvo__stub-api-a__bare")
     assert meta["fallback"] is True and meta["decision_source"] == "fallback_q0"
-    assert fb.week_status_for(inject_week, "stub-api-a__bare") == "fallback"
-    assert fb.week_status_for(inject_week, "stub-api-b__bare") == "normal"
+    assert fb.week_status_for(inject_week, "mvo__stub-api-a__bare") == "fallback"
+    assert fb.week_status_for(inject_week, "mvo__stub-api-b__bare") == "normal"
     # Excluded from clean weeks and from the trailing IC, but present in the as-traded records.
     weeks = cal.week_range(study_config.synthetic.first_week, PIPELINE_WEEKS + 1)
-    assert fb.clean_weeks("stub-api-a__bare", weeks) == weeks[:PIPELINE_WEEKS]
-    assert fb.fallback_weeks("stub-api-a__bare") == {inject_week}
+    assert fb.clean_weeks("mvo__stub-api-a__bare", weeks) == weeks[:PIPELINE_WEEKS]
+    assert fb.fallback_weeks("mvo__stub-api-a__bare") == {inject_week}
     store = ICStore()
     store.upsert([{"week_id": w, "signal": "llm_resid", "model": "stub-api-a", "config_id": "bare",
                    "rank_ic": 0.9 if w == inject_week else 0.1, "n_stocks": 100} for w in cal.week_range(weeks[0], 12)])
     later = cal.week_range(weeks[0], 12)[9]
     with_excl = trailing_ic(store, "llm_resid", later, cfg.views, weeks[0], "stub-api-a", "bare",
-                            fallback_weeks=fb.fallback_weeks("stub-api-a__bare"))
+                            fallback_weeks=fb.fallback_weeks("mvo__stub-api-a__bare"))
     assert with_excl == pytest.approx(0.1)
     assert run_named(late, "J8", inject_week).state == "done"
-    trades = read_trades("stub-api-a__bare")
+    trades = read_trades("mvo__stub-api-a__bare")
     wk = trades[trades["week_id"] == inject_week]
     assert len(wk) > 0 and (wk["decision_source"] == "fallback_q0").all()
-    daily = read_daily("stub-api-a__bare")
+    daily = read_daily("mvo__stub-api-a__bare")
     assert (daily.loc[daily["week_id"] == inject_week, "week_status"] == "fallback").all()
 
 
@@ -174,10 +174,13 @@ def test_invalid_rate_above_threshold_falls_back(pipeline_dir: Path, study_confi
     plan = fb.read_plan(inject_week)
     assert plan is not None
     for conf in load_manifest().enabled():
-        assert plan.status_for(f"stub-local-b__{conf.id}") == "fallback"
-        assert "invalid_rate" in plan.reasons[f"stub-local-b__{conf.id}"]
-        assert plan.status_for(f"stub-local-a__{conf.id}") == "normal"
-    pd.testing.assert_frame_equal(read_weights(inject_week, "Q0"), read_weights(inject_week, "stub-local-b__skills"))
+        assert plan.status_for(f"mvo__stub-local-b__{conf.id}") == "fallback"
+        assert "invalid_rate" in plan.reasons[f"mvo__stub-local-b__{conf.id}"]
+        assert plan.status_for(f"mvo__stub-local-a__{conf.id}") == "normal"
+    pd.testing.assert_frame_equal(
+        read_weights(inject_week, "mvo__Q0"),
+        read_weights(inject_week, "mvo__stub-local-b__skills"),
+    )
     log = fb.read_log(inject_week)
     assert sum(1 for e in log if e["status"] == "fallback") == len(load_manifest().enabled())
 
@@ -204,15 +207,15 @@ def test_j1_data_failure_gives_no_rebalance(pipeline_dir: Path, study_config: St
     assert plan is not None and plan.no_rebalance and plan.no_rebalance_reason == "baseline_unavailable"
     assert run_named(ctx, "J7", inject_week).state == "done"
     assert fb.read_log(inject_week) == [{"portfolio": "*", "status": "no_rebalance", "reason": "baseline_unavailable"}]
-    assert fb.week_status_for(inject_week, "Q0") == "no_rebalance"
+    assert fb.week_status_for(inject_week, "mvo__Q0") == "no_rebalance"
     plans = build_plans(ctx, cal.week_range(study_config.synthetic.first_week, PIPELINE_WEEKS + 1))
-    assert plans["Q0"][-1].weights is None and plans["Q0"][-1].week_status == "no_rebalance"
+    assert plans["mvo__Q0"][-1].weights is None and plans["mvo__Q0"][-1].week_status == "no_rebalance"
     # The replay still runs: positions are held, stops still apply, records are labeled.
     healthy = make_ctx(cfg, model_registry, world, inject_week)
     assert run_named(healthy, "J8", inject_week).state == "done"
-    daily = read_daily("Q0")
+    daily = read_daily("mvo__Q0")
     assert (daily.loc[daily["week_id"] == inject_week, "week_status"] == "no_rebalance").all()
-    trades = read_trades("Q0")
+    trades = read_trades("mvo__Q0")
     assert not ((trades["week_id"] == inject_week) & (trades["reason"] == "rebalance")).any()
 
 
