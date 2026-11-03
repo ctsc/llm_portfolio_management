@@ -93,6 +93,9 @@ class WeekInputs:
     def z_b(self) -> pd.Series:
         return self.baseline.loc[self.tickers, "z_b"].astype(float)
 
+    def k_sd(self) -> pd.Series:
+        return self.baseline.loc[self.tickers, "k_sd"].astype(float)
+
     def pi(self) -> pd.Series:
         return self.prior.loc[self.tickers, "pi"].astype(float)
 

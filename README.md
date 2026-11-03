@@ -28,16 +28,16 @@ Each week, for 100 sector-balanced S&P 500 stocks:
 
 | Step | What happens |
 |---|---|
-| **Quant baseline** | Momentum features (12-1, 3-month, 1-month reversal) plus a 5-day price forecast are rank-averaged into `z_b`. |
+| **Quant baseline** | Momentum features (12-1, 3-month, 1-month reversal) plus a 5-day price forecast are rank-averaged into `z_b`; the path spread `k_sd` is retained for baseline-view uncertainty. |
 | **Risk model** | Ledoit-Wolf covariance on 252 daily returns, scaled to weekly; market-cap prior `pi = delta Sigma w_mkt`. |
 | **LLM views** | Every model rates every stock from its ticker, name, sector, and the week's news, under `bare`, `placebo`, and `skills_1` through `skills_5` prompt configurations. Skills and placebo files are length-matched to the enabled skills mean. One stock per call, temperature 0, JSON output only. |
 | **Residualize** | LLM likely ratings are regressed on `z_b`; the standardized residual `z_L` is the part of the view the baseline did not already know. |
 | **Black-Litterman** | Baseline and LLM views enter as stacked identity views, scaled by trailing rank IC and range-derived certainty. |
-| **Optimize** | Phase 1 enables MVO with a 5 percent cap. Its baseline-only portfolio is `mvo__Q0`; a steered portfolio is `mvo__<model>__<prompt-id>`. |
+| **Optimize** | v2 phase 1 enables MVO with a 5 percent cap. Its baseline-only portfolio is `mvo__Q0`; a steered portfolio is `mvo__<model>__<prompt-id>`. |
 | **Simulate** | Monday-open rebalance at raw ledger prices, 10 bps costs, daily stop-loss (-8%) and take-profit (+15%), dividends and splits handled. |
 | **Evaluate** | Weekly rank IC gaps (H1 to H3), pre-registered splits (H4), factor regressions and a shuffled-ratings test (H5), all with Holm correction. |
 
-The planned strategies are MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, with HRP and equal weight as controls. Portfolio identity separates the rating source (`<model>__<prompt-id>`) from the portfolio using it. Rank IC is stored once per source. Phase 1 enables MVO only and no controls; with the current four-model registry and six enabled prompt configurations, the default run writes one `mvo__Q0` plus 24 steered portfolios. `skills_5` is disabled by default. The test config selects two stub models and `bare`, `placebo`, `skills_1`, and `skills_2`. A null result is a valid result; the evaluation reports the minimum detectable gap and never tunes toward a positive finding.
+The planned strategies are MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, with HRP and equal weight as controls. Portfolio identity separates the rating source (`<model>__<prompt-id>`) from the portfolio using it. Rank IC is stored once per source. v2 phase 1 enables MVO only and no controls; with the current four-model registry and six enabled prompt configurations, the default run writes one `mvo__Q0` plus 24 steered portfolios. `skills_5` is disabled by default. The test config selects two stub models and `bare`, `placebo`, `skills_1`, and `skills_2`. A null result is a valid result; the evaluation reports the minimum detectable gap and never tunes toward a positive finding.
 
 ---
 
@@ -122,7 +122,7 @@ src/portstudy/
   config.py             strict pydantic config; unknown keys are errors
   data/                 providers (synthetic, alpaca, yfinance, finnhub, fred, wikipedia),
                         checks, append-only ledger, frozen snapshots, universe builder
-  baseline/             momentum, forecasters (stub and Kronos), combine into z_b
+  baseline/             momentum, forecasters (stub and Kronos), combine into z_b and k_sd
   risk/                 Ledoit-Wolf covariance, market-cap prior
   llm/                  prompt assembly, validation, cache, cost guard, runner,
                         providers (stub, litellm, anthropic_batch, openai_batch)
@@ -181,7 +181,7 @@ GitLab CI (`.gitlab-ci.yml`) runs lint, tests, and the repository checks on ever
 
 ## Going live
 
-The live study needs accounts, keys, a desktop GPU, the real skills files, and a frozen stock list. The ordered checklist is Phase 15 of `PLAN2.md`; `docs/desktop_checklist.md` covers each weekend; `docs/runbook.md` covers bad Saturdays. Items that cannot be verified offline are marked `UNVERIFIED` in code and listed in `PROGRESS.md`; `scripts/smoke_real_services.py` exercises each one with a real key.
+The live study needs accounts, keys, a desktop GPU, the real skills files, and a frozen stock list. The ordered checklist is v2 phase 15 of `PLAN2.md`; `docs/desktop_checklist.md` covers each weekend; `docs/runbook.md` covers bad Saturdays. Items that cannot be verified offline are marked `UNVERIFIED` in code and listed in `PROGRESS.md`; `scripts/smoke_real_services.py` exercises each one with a real key.
 
 ---
 
@@ -208,13 +208,17 @@ License: MIT.
 - **DECISION(S6), Resampled MVO draws** (`strategies.resampled.n_draws`): 200 draws balance Monte Carlo stability with a bounded number of solver runs.
 - **DECISION(S7), Top-K** (`strategies.topk.k`): selecting 20 names gives a fixed, interpretable equal-weight comparator.
 - **DECISION(S1), strategy-aware portfolio keys**: a strategy, source, Q0, or control has an unambiguous identity, while source-level IC remains shared across strategies.
+- **DECISION(K1), Kronos spread to baseline uncertainty** (`views.kronos_spread_clip`): `Omega_b,ii = tau Sigma_ii clip(s_i / median(s), 0.25, 4)`. Scaling by the median keeps average baseline uncertainty at the v1 level, so spread shifts trust between stocks. The clip stops one unusual forecast from making a view almost certain or almost ignored.
+- **Seeded stub spread (chosen during build)**: use a lognormal with median 1 percent and log sigma 0.5; a separate stream seeded by `stub_seed + 1` preserves the existing `k` samples.
+- **Kronos sample adapter (chosen during build)**: use `predict_paths` when exposed and otherwise make repeated `sample_count=1` calls, matching the current upstream documentation that multi-sample outputs are averaged.
+- **No valid Kronos paths (chosen during build)**: set `k` and `k_sd` to NaN so baseline combination excludes the ticker instead of inventing a return.
 - **Config selectors for models and prompt IDs (chosen during build)**: `llm.model_ids` and `llm.prompt_ids` make the small offline test configuration reproducible without changing the default study.
 - **Strategy seeds of 7 (chosen during build)**: reuses the existing Kronos seed for deterministic defaults where PLAN2 does not prescribe strategy-specific seeds.
 - **Exclude `PLAN2.md` from the banned-word scan (chosen during build)**: it contains the rules and examples that the scanner is designed to enforce, and remains untouched.
 - **DECISION(C3), range output**: the model reports low, likely, and high integer ratings, making uncertainty explicit without adding a separate confidence field.
 - **DECISION(E1), range-derived certainty**: `clip(1 - width / 10, 0.1, 1.0)` lets wider rating ranges contribute less to the LLM view.
 - **Stub range width (chosen during build)**: half-width follows the absolute sampled noise with a minimum of one, so noisier synthetic ratings have wider ranges.
-- **Range certainty adapter (chosen during build)**: apply width-derived certainty at the optimizer boundary to preserve the existing view-builder interface until Phase 6.
+- **Range certainty adapter (chosen during build)**: apply width-derived certainty at the optimizer boundary to preserve the existing view-builder interface until v2 phase 6.
 - **Empty endpoint metadata (chosen during build)**: keep the output column stable until a provider exposes the resolved serving endpoint.
 - **DECISION(B1), prompt configurations**: compare `bare`, `placebo`, and five named skills prompts, with `skills_5` disabled by default, so skills sources can be added without changing discovery code.
 - **DECISION(P1), prompt length tolerances**: keep each enabled skills file within 5 percent of the skills mean and placebo within 2 percent of that mean, controlling for prompt length.
@@ -230,4 +234,4 @@ License: MIT.
 - **Seed and JSON mode defaults**: send both optional fields by default and disable a rejected field for the rest of the run; actual ARCTIC support is unverified.
 - **ARCTIC endpoint placeholder (chosen during build)**: keep the configured gateway URL empty until the provisioned endpoint is supplied rather than inventing a hostname.
 - **Fallback endpoint metadata (chosen during build)**: read `base_url` or `url` from the configured JSON file, accept an optional week ID, and reject files older than the source run start.
-- **Reuse `httpx` and `tenacity` (chosen during build)**: both are already project dependencies, so Phase 4 adds no package dependency.
+- **Reuse `httpx` and `tenacity` (chosen during build)**: both are already project dependencies, so v2 phase 4 adds no package dependency.

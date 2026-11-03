@@ -71,7 +71,7 @@ Keys go in a `.env` file on the desktop only; `scripts/smoke_real_services.py` l
 |---|---|---|---|
 | `forecaster` | stub | `stub` or `kronos` | |
 | `momentum_lookbacks.long/skip/medium/short` | 252/21/63/21 | M12_1, M3, R1 windows | |
-| `kronos.repo_commit` | UNPINNED | Pinned `vendor/kronos` commit (Phase 17) | |
+| `kronos.repo_commit` | UNPINNED | Pinned `vendor/kronos` commit (v1 phase 17) | |
 | `kronos.model_id`, `kronos.tokenizer_id` | NeoQuasar/Kronos-base, NeoQuasar/Kronos-Tokenizer-base | Hugging Face ids | |
 | `kronos.context_candles`, `horizon`, `n_samples`, `temperature`, `top_p`, `seed` | 252, 5, 20, 1.0, 0.9, 7 | Sampling settings | |
 | `kronos.input_prices` | adjusted | Adjusted OHLCV in | E4 |
@@ -126,7 +126,7 @@ Keys go in a `.env` file on the desktop only; `scripts/smoke_real_services.py` l
 
 ### strategies
 
-Phase 1 enables only `mvo` and no controls. `cvar` defaults to 10,000 scenarios, beta 0.95,
+v2 phase 1 enables only `mvo` and no controls. `cvar` defaults to 10,000 scenarios, beta 0.95,
 lambda 1.0 (`DECISION(S4)`), seed 7, and solvers CLARABEL and HIGHS. `robust` uses kappa 1.0
 (`DECISION(S5)`) and CLARABEL. `resampled` uses 200 draws, seed 7, and a 0.10 maximum failed
 share. `topk.k` defaults to 20 and HRP linkage to `single`. Validation requires

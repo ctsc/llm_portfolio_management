@@ -61,15 +61,25 @@ def test_rank_u_handles_ties() -> None:
 
 def test_combine_zb_is_standardized_and_deterministic() -> None:
     rng = np.random.default_rng(0)
-    mom = pd.DataFrame({"ticker": [f"T{i}" for i in range(50)], "M12_1": 0.0, "M3": 0.0, "R1": 0.0,
-                        "m": rng.random(50)})
-    k = pd.Series(rng.normal(size=50), index=mom["ticker"])
-    out = combine(mom, k)
+    mom = pd.DataFrame(
+        {
+            "ticker": [f"T{i}" for i in range(50)],
+            "M12_1": 0.0,
+            "M3": 0.0,
+            "R1": 0.0,
+            "m": rng.random(50),
+        }
+    )
+    forecast = pd.DataFrame(
+        {"k": rng.normal(size=50), "k_sd": rng.lognormal(size=50)},
+        index=pd.Index(mom["ticker"], name="ticker"),
+    )
+    out = combine(mom, forecast)
     assert out["z_b"].mean() == pytest.approx(0.0, abs=1e-12)
     assert out["z_b"].std(ddof=1) == pytest.approx(1.0)
-    pd.testing.assert_frame_equal(out, combine(mom, k))
+    pd.testing.assert_frame_equal(out, combine(mom, forecast))
     # Tickers missing a forecast are dropped from the baseline.
-    out2 = combine(mom, k.drop("T3"))
+    out2 = combine(mom, forecast.drop("T3"))
     assert "T3" not in set(out2["ticker"]) and len(out2) == 49
 
 
@@ -78,12 +88,13 @@ def test_stub_forecaster_is_seeded() -> None:
     data = {c: pd.DataFrame({"open": wide[c], "high": wide[c], "low": wide[c], "close": wide[c],
                              "volume": 1.0}) for c in wide.columns}
     fc = StubForecaster()
-    k1 = fc.forecast_return(data, seed=3)
-    k2 = fc.forecast_return(data, seed=3)
-    k3 = fc.forecast_return(data, seed=4)
-    pd.testing.assert_series_equal(k1, k2)
-    assert not np.allclose(k1.to_numpy(), k3.to_numpy())
-    assert k1["A"] > k1["C"]  # rising stock has positive drift
+    k1 = fc.forecast(data, seed=3)
+    k2 = fc.forecast(data, seed=3)
+    k3 = fc.forecast(data, seed=4)
+    pd.testing.assert_frame_equal(k1, k2)
+    assert not np.allclose(k1["k"].to_numpy(), k3["k"].to_numpy())
+    assert k1.loc["A", "k"] > k1.loc["C", "k"]  # rising stock has positive drift
+    assert (k1["k_sd"] > 0).all()
 
 
 def test_make_forecaster_from_config(study_config: StudyConfig) -> None:
@@ -103,6 +114,7 @@ def test_baseline_builds_for_all_weeks_and_is_deterministic(snapshot_data_dir: P
         pd.testing.assert_frame_equal(first, second)
         pd.testing.assert_frame_equal(first, read_baseline(w), check_dtype=False)
         assert len(first) >= 90
+        assert "k_sd" in first and first["k_sd"].notna().all()
         assert first["z_b"].mean() == pytest.approx(0.0, abs=1e-9)
         assert set(first["ticker"]) <= set(snap.included_tickers)
         # Rank IC of z_b against the realized Monday-to-Monday return.

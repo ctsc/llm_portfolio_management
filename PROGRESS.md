@@ -247,7 +247,7 @@ Choices made while unattended:
 Built:
 - Replaced the scalar response schema with ordered `low`, `likely`, and `high` integer ratings, strict validation, first-object parsing, thinking-block handling, extra-key logging, and fallback metadata.
 - Updated score records and downstream readers to store `low`, `likely`, `high`, and `width`. Residualization uses `likely`; shuffle evaluation permutes the range columns together.
-- Derived view certainty from width using DECISION(E1), retained the Phase 6 view-builder interface, and updated optimizer weight output.
+- Derived view certainty from width using DECISION(E1), retained the v2 phase 6 view-builder interface, and updated optimizer weight output.
 - Updated the deterministic stub so likely ratings use the v1 signal plus noise and range width follows sampled noise. Updated the base prompt and refreshed its manifest hash.
 - Updated README, design, and config-reference docs for the range schema and width-derived certainty.
 - Updated `scripts/smoke_real_services.py` to report `likely` from the new response type. The script was not run against real services.
@@ -269,12 +269,12 @@ UNVERIFIED:
 - No new unverified items were introduced. Real-provider behavior remains unverified because this phase was kept offline.
 
 Skipped:
-- Phase 3 was not started, as requested.
+- v2 phase 3 was not started, as requested.
 - No real services or paid APIs were called.
 
 Choices made while unattended:
 - Stub half-width is `max(1, ceil(abs(noise)))`, so synthetic uncertainty follows the sampled noise while retaining a nonzero interval.
-- Width-derived certainty is applied at the optimizer boundary; the existing view-builder interface remains until Phase 6.
+- Width-derived certainty is applied at the optimizer boundary; the existing view-builder interface remains until v2 phase 6.
 - The `endpoint` output field is empty because `RawResult` does not yet expose a resolved serving endpoint; the column is retained for the later serving implementation.
 
 ## v2 phase 3: prompt manifest and skills placeholders
@@ -289,7 +289,7 @@ Tests and checks:
 - Full pytest: 207 passed, 3 warnings in 487.05 seconds. The warnings are NumPy empty-slice warnings from the synthetic report test.
 - `ruff check src tests scripts` and `mypy src scripts` passed.
 - Manifest refresh check, placebo-length check, banned-word check, secret check, and yamllint passed.
-- Targeted `ruff format --check` reports seven existing v1 files that would be reformatted. They are part of the known 27-file baseline and were left unchanged: the synthetic e2e test, Phase 10 and Phase 11 integration tests, and the Phase 5, Phase 6, Phase 8, and Phase 11 unit tests. The new Phase 3 test and the other checked files pass.
+- Targeted `ruff format --check` reports seven existing v1 files that would be reformatted. They are part of the known 27-file baseline and were left unchanged: the synthetic e2e test, Phase 10 and Phase 11 integration tests, and the Phase 5, Phase 6, Phase 8, and Phase 11 unit tests. The new v2 phase 3 test and the other checked files pass.
 - `git diff --check` and LF line-ending checks passed.
 
 Changed v1 tests and reasons:
@@ -305,7 +305,7 @@ UNVERIFIED:
 - No real-provider behavior was added or exercised. Live services remain outside the offline scope.
 
 Skipped:
-- Phase 4 and later phases were not started.
+- v2 phase 4 and later phases were not started.
 - No real data, paid APIs, brokers, or external services were used.
 
 Choices made while unattended:
@@ -320,12 +320,12 @@ Built:
 - Added bounded open-weight execution with main-thread record writes, resume and cache support, endpoint identity in cache keys, per-source endpoint status, J6 cutoff checks, endpoint archives, and full source restart after endpoint switching.
 - Added gateway and fallback configuration, eligibility and registry validation, model registry updates, the `J4_open_weight_infer` implementation, and `--gateway-fallback` CLI and weekend options.
 - Updated cost, secret, and smoke scripts. Smoke `--dry-run` prints gateway payloads without calling data services or model endpoints.
-- Updated README and the relevant runbook, desktop, config-reference, and design documentation. Removed the Phase 4-listed Ollama provider and its payload test.
+- Updated README and the relevant runbook, desktop, config-reference, and design documentation. Removed the v2 phase 4-listed Ollama provider and its payload test.
 - Added `tests/unit/test_v2_phase4_litellm.py` for mocked provider behavior, concurrency, resume, endpoint switch, and registry validation. All HTTP in the tests is mocked.
 
 Changed v1 tests and reasons:
 - `tests/unit/test_phase1_scaffold.py`: updated model registry expectations to the D1 model list.
-- `tests/unit/test_phase6_llm.py`: migrated stub IDs and open-weight kind checks; removed the Ollama payload test because Phase 4 replaces it with LiteLLM.
+- `tests/unit/test_phase6_llm.py`: migrated stub IDs and open-weight kind checks; removed the Ollama payload test because v2 phase 4 replaces it with LiteLLM.
 - `tests/e2e/test_full_run_synthetic.py`, `tests/integration/test_phase10_pipeline.py`, `tests/integration/test_phase11_report.py`, `tests/unit/test_phase7_views.py`, `tests/unit/test_phase8_optimize.py`, and `tests/unit/test_v2_phase1_config_identity.py`: migrated renamed stub IDs.
 
 UNVERIFIED:
@@ -338,12 +338,12 @@ Tests and checks:
 - Full pytest: 223 passed, 3 warnings in 583.69 seconds. The warnings are NumPy empty-slice warnings from the synthetic report test.
 - `ruff check src tests scripts` and `mypy src scripts` passed. After formatting the new provider, its targeted Ruff check passed.
 - Manifest refresh, placebo-length, banned-word, secret, dry-run smoke, and yamllint checks passed. The smoke dry run printed planned gateway payloads and made no requests.
-- Targeted `ruff format --check` reports 11 changed files from the known 27-file baseline that would be reformatted. The new LiteLLM provider and Phase 4 test are formatted; baseline files were left unchanged.
+- Targeted `ruff format --check` reports 11 changed files from the known 27-file baseline that would be reformatted. The new LiteLLM provider and v2 phase 4 test are formatted; baseline files were left unchanged.
 - `git diff --check` and LF line-ending checks passed. No Ollama or Qwen references remain in `src/` or `config/`.
 
 Skipped:
 - No real data, paid API calls, ARCTIC requests, or fallback endpoint requests were made.
-- Phase 5 was not started.
+- v2 phase 5 was not started.
 
 Choices made while unattended:
 - Kept the gateway URL empty until the provisioned value is known.
@@ -352,3 +352,36 @@ Choices made while unattended:
 - Used four workers for the gateway models and set test-only stubs to one worker so synthetic failure injection remains deterministic.
 - Derived a synthetic runner's default clock from its source-week schedule so historical synthetic status does not depend on the machine's current date. Synthetic open-weight stubs are not constrained by the live wall-clock cutoff.
 - Preserved the prior stub randomness stream while renaming `stub-local-*` to `stub-ow-*`, so registry renames do not change unrelated synthetic portfolio fixtures.
+
+## v2 phase 5: Kronos path spread
+
+Built:
+- Changed `ForecastProvider.forecast` to return per-ticker `k` and `k_sd`. `k` remains the mean forecast return; `k_sd` is the sample standard deviation with `ddof=1`.
+- Added optional `predict_paths` support and the repeated single-sample fallback with seeds `seed + j`. Sampling-path selection is logged once per forecast call with an `UNVERIFIED` tag.
+- Added path validation and logging for non-positive closes. Invalid paths are dropped; `k_sd` stays NaN with fewer than two valid paths, and both fields are NaN when no paths remain.
+- Preserved the v1 stub `k` sequence and added a seeded lognormal `k_sd`. Added `k_sd` to `baseline.csv` and `WeekInputs.k_sd()`. Baseline rows with missing `k_sd` remain present.
+- Documented DECISION(K1) in the README and the baseline formula and spread output in `docs/design.md`. DECISION(K1) view-uncertainty application is for v2 phase 6; this phase only adds the input field.
+- Clarified v1 and v2 phase references in README and the affected design, config-reference, open-questions, and GitLab setup docs.
+
+Tests and checks:
+- Full pytest: 228 passed, 3 warnings. The warnings are the existing NumPy empty-slice warnings from the synthetic report test.
+- `ruff check src tests scripts` passed. `mypy src scripts` passed with no issues in 80 source files.
+- Targeted v2 phase 5 tests passed. `ruff format --check` passed for the changed source files and the new v2 phase 5 test. `tests/unit/test_phase3_baseline.py` remains unformatted within the known 27-file v1 baseline and was not bulk-formatted.
+- Manifest refresh, placebo-length, banned-word, secret, and yamllint checks passed. `scripts/smoke_real_services.py --dry-run` printed planned payloads and made no requests.
+- `git diff --check` and LF line-ending checks passed.
+
+Changed v1 tests and reasons:
+- `tests/unit/test_phase3_baseline.py`: migrated direct calls to the renamed forecast API and DataFrame input for `combine`, and asserted `k_sd` is present in every synthetic-week baseline.
+
+UNVERIFIED:
+- The repository has no `vendor/` directory and the configured Kronos commit is `UNPINNED`. The public upstream README documents multi-sample output as averaged, but does not establish the API at the configured commit.
+- The `predict_paths` adapter is optional and mocked; actual vendor support for it and the repeated-call behavior have not been verified. The code marks the selected runtime path `UNVERIFIED` and needs a real smoke test in v2 phase 15.
+- No Kronos model was downloaded or run.
+
+Skipped:
+- v2 phase 6 and later work was not started. No live model, paid API, broker, ARCTIC, or Slurm request was made. No dependency was added.
+
+Choices made while unattended:
+- Set stub `k_sd` to a per-ticker lognormal with median 1 percent and log sigma 0.5. Use a separate stream seeded with `seed + 1` so adding spread does not change v1 `k`.
+- Use `predict_paths` as an optional per-path adapter; otherwise use repeated `sample_count=1` calls because the current public upstream documentation describes multi-sample output as averaged.
+- If all Kronos paths are invalid, set both `k` and `k_sd` to NaN so `combine` excludes that ticker rather than inventing a return.

@@ -1,14 +1,14 @@
 # Design: one page per pipeline stage
 
-The formulas below describe the v1 pipeline stages retained in Phase 1. `PLAN2.md` is the
-current specification and phases 2 onward replace the formulas they change. Each stage names
-the module that implements it.
+The formulas below describe the v1 pipeline stages retained through v2 phase 1. `PLAN2.md` is
+the current specification and v2 phases 2 onward replace the formulas they change. Each stage
+names the module that implements it.
 
 ## Source and portfolio identities (`types.py`)
 
 A rating source is `<model>__<prompt-id>` and is independent of the strategy using its ratings.
 Strategy-steered portfolios use `<strategy>__<model>__<prompt-id>`, each strategy's baseline-only
-portfolio uses `<strategy>__Q0`, and controls use `HRP` or `EW`. Phase 1 enables MVO only and
+portfolio uses `<strategy>__Q0`, and controls use `HRP` or `EW`. v2 phase 1 enables MVO only and
 does not enable controls. IC history is recorded per rating source rather than per portfolio.
 
 ## Week alignment (`calendar.py`)
@@ -34,13 +34,16 @@ actions are appended to the ledger and never rewritten.
 M12_1 = P[t-21]/P[t-252] - 1 ;  M3 = P[t]/P[t-63] - 1 ;  R1 = -(P[t]/P[t-21] - 1)
 u(x)  = rank(x)/N
 m     = mean(u(M12_1), u(M3), u(R1))
-Kronos: k_i = mean_over_20_paths( P_hat[t+5] / P[t] ) - 1
+r_ij  = P_hat_i,j[t+5] / P_i[t] - 1
+k_i   = mean_j(r_ij) ;  k_sd_i = sd_j(r_ij, ddof=1) ;  s_i = k_sd_i
 b = 0.5 u(m) + 0.5 u(k) ;  z_b = (b - mean(b)) / sd(b)      (sd with ddof=1)
 ```
 
 Adjusted close is used; stocks missing any of the 252-day history are excluded for the week
 and logged. Kronos takes adjusted OHLCV (E4); the stub forecaster is deterministic drift plus
-seeded noise.
+seeded noise. `baseline.csv` stores `k_sd`; paths with a non-positive close are dropped and
+logged, and `k_sd` is NaN when fewer than two valid paths remain. v2 phase 6 uses this spread for
+the DECISION(K1) baseline uncertainty ratio.
 
 ## Risk model and prior (`risk/`)
 

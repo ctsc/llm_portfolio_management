@@ -72,7 +72,7 @@ The table below records the values used before PLAN2 superseded them.
 
 ## Current provisional item
 
-- D3 budget: settle the paid API goal after prompt tests in Phase 15.
+- D3 budget: settle the paid API goal after prompt tests in v2 phase 15.
 
 ## Items marked UNVERIFIED until the real-service smoke test
 

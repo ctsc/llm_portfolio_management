@@ -18,12 +18,12 @@ from portstudy.data.snapshot import Snapshot
 from portstudy.io import read_csv, write_csv_atomic
 from portstudy.paths import week_output_dir
 
-BASELINE_COLUMNS = ["ticker", "M12_1", "M3", "R1", "m", "k", "b", "z_b"]
+BASELINE_COLUMNS = ["ticker", "M12_1", "M3", "R1", "m", "k", "k_sd", "b", "z_b"]
 
 
-def combine(momentum: pd.DataFrame, k: pd.Series) -> pd.DataFrame:
-    """Join momentum features with the forecast `k` and compute `b` and `z_b`."""
-    df = momentum.set_index("ticker").join(k.rename("k"), how="inner")
+def combine(momentum: pd.DataFrame, forecast: pd.DataFrame) -> pd.DataFrame:
+    """Join momentum features with forecast values and compute `b` and `z_b`."""
+    df = momentum.set_index("ticker").join(forecast.loc[:, ["k", "k_sd"]], how="inner")
     df = df.dropna(subset=["m", "k"]).sort_index()
     if len(df) < 2:
         return pd.DataFrame(columns=BASELINE_COLUMNS)
@@ -78,13 +78,13 @@ def build_baseline(
     fc = forecaster or make_forecaster(cfg.baseline)
     kc = cfg.baseline.kronos
     data = ohlcv_by_ticker(snapshot, tickers, kc.context_candles)
-    k = fc.forecast_return(
+    forecast = fc.forecast(
         data,
         horizon=kc.horizon,
         n_samples=kc.n_samples,
         seed=kc.seed if cfg.baseline.forecaster == "kronos" else cfg.baseline.stub_seed,
     )
-    out = combine(mom.features, k)
+    out = combine(mom.features, forecast)
     write_csv_atomic(out, week_output_dir(week_id) / "baseline.csv")
     return out
 

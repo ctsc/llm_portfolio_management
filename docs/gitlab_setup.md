@@ -27,7 +27,7 @@ Windows desktop see the same bytes.
 2. Stages: `lint` (ruff, mypy), `test` (pytest over `tests/unit` and `tests/integration` with
    coverage), `checks` (prompt manifest hashes, placebo length, banned words, secret patterns,
    yamllint). The `e2e` job runs only on the default branch.
-3. Every stage must be green before the repository is tagged `frozen-v1` (Phase 17 E2).
+3. Every stage must be green before the repository is tagged `frozen-v1` (v1 phase 17 E2).
 
 ## 4. Notes
 
