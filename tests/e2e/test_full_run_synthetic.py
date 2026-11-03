@@ -56,8 +56,13 @@ def test_full_run_synthetic(e2e_dir: Path, study_config: StudyConfig, model_regi
                             world: SyntheticWorld, e2e_weeks: list[str]) -> None:
     cfg = generous_budget(study_config)
     before_prompts = _prompt_hashes()
-    keys = WeekendRunner(cfg, model_registry, world).context(e2e_weeks[0]).portfolio_keys()
-    assert len(keys) == 25
+    context = WeekendRunner(cfg, model_registry, world).context(e2e_weeks[0])
+    keys = context.portfolio_keys()
+    n_sources = len(model_registry.enabled(synthetic=True)) * len(load_manifest().enabled())
+    assert len(keys) == len(cfg.strategies.enabled) * (n_sources + 1) + len(
+        cfg.strategies.controls
+    )
+    replayed_keys = [key for key in keys if key not in context.control_keys()]
     for w in e2e_weeks:
         snap = read_snapshot(w)
         # No look-ahead: nothing in a snapshot is dated after its cutoff.
@@ -66,14 +71,14 @@ def test_full_run_synthetic(e2e_dir: Path, study_config: StudyConfig, model_regi
                 + pd.Timedelta(hours=16)).all()
         lock = read_json(e2e_dir / "outputs" / w / "weights" / "locked.json")
         assert dt.datetime.fromisoformat(lock["locked_at"]) <= lock_deadline(w, cfg)
-        for key in keys:
+        for key in replayed_keys:
             wdf = read_csv(e2e_dir / "outputs" / w / "weights" / f"{key}.csv")
             assert wdf["weight"].sum() == pytest.approx(1.0, abs=1e-8)
             assert (wdf["weight"] >= -1e-12).all() and (wdf["weight"] <= cfg.optimizer.max_weight + 1e-9).all()
             assert fb.week_status_for(w, key) == "normal"
         scores = read_scores(w)
         assert len(scores) == 24 * len(snap.included_tickers)
-    for key in keys:
+    for key in replayed_keys:
         trades, daily = read_trades(key), read_daily(key)
         assert (trades["cost_usd"] - trades["trade_value"] * cfg.simulator.cost_bps / 1e4).abs().max() < 1e-6
         buys = trades.loc[trades["side"] == "buy", "trade_value"].sum()

@@ -173,16 +173,20 @@ def test_invalid_rate_above_threshold_falls_back(pipeline_dir: Path, study_confi
     assert all(s == "done" for s in states.values())
     plan = fb.read_plan(inject_week)
     assert plan is not None
-    for conf in load_manifest().enabled():
-        assert plan.status_for(f"mvo__stub-ow-b__{conf.id}") == "fallback"
-        assert "invalid_rate" in plan.reasons[f"mvo__stub-ow-b__{conf.id}"]
-        assert plan.status_for(f"mvo__stub-ow-a__{conf.id}") == "normal"
+    for strategy in cfg.strategies.enabled:
+        for conf in load_manifest().enabled():
+            key = f"{strategy}__stub-ow-b__{conf.id}"
+            assert plan.status_for(key) == "fallback"
+            assert "invalid_rate" in plan.reasons[key]
+            assert plan.status_for(f"{strategy}__stub-ow-a__{conf.id}") == "normal"
     pd.testing.assert_frame_equal(
         read_weights(inject_week, "mvo__Q0"),
         read_weights(inject_week, "mvo__stub-ow-b__skills_1"),
     )
     log = fb.read_log(inject_week)
-    assert sum(1 for e in log if e["status"] == "fallback") == len(load_manifest().enabled())
+    assert sum(1 for e in log if e["status"] == "fallback") == len(
+        cfg.strategies.enabled
+    ) * len(load_manifest().enabled())
 
 
 def test_j1_data_failure_gives_no_rebalance(pipeline_dir: Path, study_config: StudyConfig,

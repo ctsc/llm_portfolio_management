@@ -133,13 +133,13 @@ views:
   ic_signal_for_llm: llm_resid    # DECISION(E2)
 
 optimizer:
-  max_weight: 0.05
+  max_weight: 0.05                 # DECISION(G1)
   min_stocks: 20
   solvers: [OSQP, CLARABEL]
 
 strategies:
-  enabled: [mvo]
-  controls: []
+  enabled: [mvo, cvar, robust, resampled, topk]  # DECISION(S1)
+  controls: [HRP, EW]               # DECISION(S2)
   cvar:
     n_scenarios: 10000             # DECISION(S3)
     beta: 0.95                     # DECISION(S3)

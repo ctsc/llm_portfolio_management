@@ -202,6 +202,9 @@ License: MIT.
 
 ## Design choices
 
+- **DECISION(G1), portfolio guardrails** (`optimizer.max_weight`): all strategies and controls use a 5 percent cap with no short positions, matching the same investability limits.
+- **DECISION(S2), forecast-free controls**: HRP and equal weight do not use LLM views or Q0 weights, so they provide strategy-independent comparators.
+- **DECISION(S1), enabled strategy package**: run MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, with HRP and equal weight controls, to compare each planned allocation rule under shared guardrails.
 - **DECISION(S4), Mean-CVaR lambda = 1.0** (`strategies.cvar.lam`): expected return and tail loss use weekly-return units, so equal weighting avoids tuning against past returns.
 - **DECISION(S3), Mean-CVaR scenarios** (`strategies.cvar.n_scenarios`, `strategies.cvar.beta`): 10,000 posterior scenarios at a 0.95 tail level define a reproducible weekly tail-risk objective.
 - **DECISION(S5), Robust MVO kappa = 1.0** (`strategies.robust.kappa`): a one-standard-deviation ellipsoid is a neutral uncertainty radius that is not fit to past returns.
@@ -228,6 +231,15 @@ License: MIT.
 - **DECISION(D2), fallback serving**: use the gateway by default and switch eligible sources to the configured Slurm endpoint only when explicitly requested, preserving one endpoint per source-week.
 - **DECISION(D3), gateway pricing**: gateway calls have zero listed price, while API prices continue through the existing cost guard.
 - **DECISION(N1), open-weight timing**: use bounded workers with a default concurrency of four and stop starting provider requests at the lock margin.
+- **v2 phase 7 replay test scope (chosen during build)**: reserve HRP and EW weight-file and transaction-cost assertions for the v2 phase 8 J7 integration, because v2 phase 7 defines their registry while v2 phase 8 adds them to weekly replay.
+- **Full GitLab history for the phase checklist**: set `GIT_DEPTH: "0"` so the one-commit-per-phase check can see the entire committed phase history.
+- **Common random number seed encoding (chosen during build)**: derive the NumPy generator seed from the first eight bytes of SHA-256 over the JSON tuple `(seed, week_id, strategy)`, yielding repeatable draws shared across portfolio sources.
+- **Resampled weight dispersion (chosen during build)**: report the mean per-ticker standard deviation across successful draw weights, providing one scale-consistent diagnostic.
+- **HRP cluster variance (chosen during build)**: use inverse-variance allocations inside each cluster when computing cluster variance, following standard HRP bisection without using expected returns.
+- **CVaR diagnostic tail average (chosen during build)**: use fractional mass at the boundary of the worst 5 percent of losses, matching empirical expected shortfall when the scenario count does not divide evenly.
+- **HRP audit diagnostics (chosen during build)**: retain linkage order and pre-cap weights so the cluster allocation can be inspected independently of the shared cap.
+- **Deterministic portfolio metadata (chosen during build)**: label non-solver strategies and controls as `deterministic` and use NaN for their unused objective.
+- **Cholesky retry jitter (chosen during build)**: retry once with diagonal jitter `1e-12 * max(trace(M) / N, 1)` to recover only near-singular covariance inputs while keeping the adjustment bounded and deterministic.
 - **Synthetic cutoff clock (chosen during build)**: derive a synthetic runner's default time from its source week so historical synthetic status is date-independent; live provider calls retain the wall-clock J6 cutoff.
 - **Stable stub randomness across renamed open-weight IDs (chosen during build)**: preserve the previous synthetic output stream when `stub-local-*` IDs become `stub-ow-*`, avoiding unrelated fixture drift.
 - **Stub concurrency (chosen during build)**: set test-only open-weight stubs to one worker for deterministic failure injection; the gateway models use four workers and the concurrency tests exercise four workers directly.

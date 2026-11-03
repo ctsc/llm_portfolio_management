@@ -412,3 +412,37 @@ Choices made while unattended:
 - Treated an omitted `k_sd` series as all missing, which keeps callers without baseline spread data on the neutral ratio.
 - Kept validated width and `c` values available for audit output when `IC_L` disables LLM view rows.
 - Repaired solver-tolerance cleanup by redistributing any shortfall only across remaining position-cap headroom. The v2 phase 6 posterior change exposed that the previous clip-then-renormalize step could exceed the fixed maximum weight.
+
+## v2 phase 7: strategy package
+
+Built:
+- Added shared strategy inputs, result records, guardrails, water-filling cap normalization, ordered solver attempts, fallback chain, deterministic common normals, Cholesky retry, and `view_shift`.
+- Added MVO, Mean-CVaR, Robust MVO, Resampled MVO, Top-K, HRP, and equal-weight strategy/control implementations with registry dispatch.
+- Enabled all five steered strategies and both controls in `config/study.yaml`; declared the optional `solvers` extra for HIGHS.
+- Added the Phase 7 strategy suite and updated README and design/config references.
+- CI sets `GIT_DEPTH: "0"` so the checklist history test sees all phase commits rather than a depth-20 clone.
+
+Changed v1 tests and reasons:
+- `tests/e2e/test_full_run_synthetic.py`: compute the expected configured portfolio count and exercise generated weights and trades for replayed portfolios; HRP/EW weight files are part of the v2 phase 8 J7 integration.
+- `tests/integration/test_phase10_pipeline.py`: assert fallback status and log counts across all five configured strategies rather than only MVO.
+- `tests/integration/test_phase11_report.py`: require shuffle results only for non-control portfolios, and check positive transaction costs only for portfolios replayed before v2 phase 8.
+
+`tests/unit/test_v2_phase7_strategies.py` uses a `1e-8` tolerance for the zero-optimal CVaR weights because the solver returns small floating-point residuals.
+
+Tests and checks:
+- Full pytest: 288 passed, 1199 warnings in 1190.94 seconds. Warnings are pandas DataFrame-fragmentation notices from evaluation and three NumPy empty-slice warnings in the synthetic report test.
+- 300-stock Mean-CVaR benchmark: 10,000 scenarios, beta 0.95, lambda 1.0; CLARABEL completed in 23.434 seconds with no fallback, using seeded synthetic inputs.
+- `ruff check src tests scripts` passed. `mypy src scripts` passed with no issues in 89 source files.
+- `ruff format --check` passed for the strategy modules and the new Phase 7 test. The three modified v1 tests remain unformatted within the known 27-file baseline; no bulk formatting was applied.
+- Manifest refresh, placebo-length, banned-word, secret, and yamllint checks passed. `scripts/smoke_real_services.py --dry-run` made no requests.
+- `git diff --check` and LF line-ending checks passed.
+
+Choices made while unattended:
+- Kept the Phase 7 strategy/control registry independent of weekly J7 replay wiring scheduled for Phase 8; adjusted existing pipeline assertions to cover the current phase boundary.
+- Encode common random seeds as the first eight bytes of SHA-256 over canonical JSON `[seed, week_id, strategy]`.
+- Define resampled weight dispersion as the mean standard deviation across ticker weights.
+- Use inverse-variance allocations inside HRP clusters and retain the leaf order and pre-cap weights for diagnostics.
+- Compute diagnostic empirical CVaR as a fractional average over the worst tail, including fractional mass at its boundary.
+- Label non-solver portfolios `deterministic` and set their unused objective to NaN.
+- Retry a covariance Cholesky factorization once with diagonal jitter `1e-12 * max(trace(M) / N, 1)`.
+- Add `highspy>=1.7` as the optional HIGHS solver extra; the repository environment already provides an importable `highspy`, so no package installation was needed.

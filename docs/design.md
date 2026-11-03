@@ -8,8 +8,19 @@ names the module that implements it.
 
 A rating source is `<model>__<prompt-id>` and is independent of the strategy using its ratings.
 Strategy-steered portfolios use `<strategy>__<model>__<prompt-id>`, each strategy's baseline-only
-portfolio uses `<strategy>__Q0`, and controls use `HRP` or `EW`. v2 phase 1 enables MVO only and
-does not enable controls. IC history is recorded per rating source rather than per portfolio.
+portfolio uses `<strategy>__Q0`, and controls use `HRP` or `EW`. v2 phase 7 enables five steered
+strategies and both controls under the shared 5 percent, no-shorts guardrails. IC history is
+recorded per rating source rather than per portfolio.
+
+## v2 phase 7 strategy package
+
+The strategy registry exposes MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, plus the
+forecast-free HRP and equal-weight controls. Mean-CVaR uses 10,000 common posterior scenarios at
+beta 0.95 and lambda 1.0. Robust MVO subtracts the posterior-mean uncertainty norm with kappa 1.0.
+Resampled MVO averages 200 MVO solutions over common mean draws. Top-K gives 20 highest-mean names
+equal weights, breaking boundary ties by ticker. Every portfolio is long-only with a 5 percent
+maximum position. Solver failures share the previous-weight, same-strategy Q0, then equal-weight
+fallback chain. HRP clusters correlation distance from Sigma and never reads mu.
 
 ## Week alignment (`calendar.py`)
 
