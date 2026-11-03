@@ -158,7 +158,7 @@ def main() -> None:
                 spec.id, raw.tokens_in, raw.tokens_cached, raw.tokens_out, batch=False
             )
             return (
-                f"version={raw.model_version} valid={parsed.valid} score={parsed.score} "
+                f"version={raw.model_version} valid={parsed.valid} likely={parsed.likely} "
                 f"tokens={raw.tokens_in}/{raw.tokens_out} cost={cost:.5f} USD"
             )
 

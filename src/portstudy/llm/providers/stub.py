@@ -1,10 +1,9 @@
 """Deterministic stub LLM used for every test and the synthetic rehearsal.
 
 The stub reads the planted sentiment words from the news text inside the prompt (like a real
-model would) and returns an integer score and a confidence. The answer is a pure function of
-(ticker, week, configuration, seed) plus configurable noise per configuration: the skills
-configuration is slightly better than bare, and placebo equals bare. Failure injection covers
-invalid JSON, truncated JSON, timeouts, a batch that never returns, and a crash after N calls.
+model would) and returns a low, likely, and high rating. The answer is a pure function of
+(ticker, week, configuration, seed) plus configurable noise per configuration. Failure
+injection covers invalid JSON, truncated JSON, timeouts, a batch that never returns, and a crash.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ from portstudy.llm.providers.base import (
     LlmProviderError,
     RawResult,
 )
+from portstudy.llm.schema import RANGE_MAX, RANGE_MIN
 
 # Noise per configuration: skills reads the planted words much more cleanly than the two
 # controls, which share the same noise so that placebo equals bare in expectation.
@@ -103,22 +103,25 @@ class StubLlmProvider(LlmProvider):
 
     # Scoring ------------------------------------------------------------------------------
 
-    def answer_for(self, item: BatchItem) -> tuple[int, float, str]:
-        """Deterministic (score, confidence, rationale) for an item."""
+    def answer_for(self, item: BatchItem) -> tuple[int, int, int, str]:
+        """Deterministic (low, likely, high, rationale) for an item."""
         rng = _rng(self.seed, self.model_id, item.config_id, item.week_id, item.ticker)
         net = sentiment_from_text(item.prompt.full_text)
         noise_sd = self.noise_by_config.get(item.config_id, DEFAULT_NOISE["bare"])
         signal = self.model_skill * 1.5 * net
-        score = int(np.clip(np.rint(signal + rng.normal(0.0, noise_sd)), -5, 5))
-        conf = float(np.clip(0.45 + 0.1 * abs(net) + rng.normal(0.0, 0.08), 0.05, 1.0))
+        noise = float(rng.normal(0.0, noise_sd))
+        likely = int(np.clip(np.rint(signal + noise), RANGE_MIN, RANGE_MAX))
+        half_width = max(1, int(np.ceil(abs(noise))))
+        low = max(RANGE_MIN, likely - half_width)
+        high = min(RANGE_MAX, likely + half_width)
         tone = "positive" if net > 0 else "negative" if net < 0 else "neutral"
         rationale = f"News tone is {tone} for {item.ticker} this week."
-        return score, conf, rationale
+        return low, likely, high, rationale
 
     def _text_for(self, item: BatchItem, settings: LlmSettings) -> tuple[str, str | None]:
         rng = _rng(self.seed, "fail", self.model_id, item.config_id, item.week_id, item.ticker)
-        score, conf, rationale = self.answer_for(item)
-        payload = json.dumps({"score": score, "confidence": round(conf, 3), "rationale": rationale})
+        low, likely, high, rationale = self.answer_for(item)
+        payload = json.dumps({"low": low, "likely": likely, "high": high, "rationale": rationale})
         if item.ticker in self.failures.always_invalid_tickers:
             return "I cannot rate this stock.", None
         u = rng.random()

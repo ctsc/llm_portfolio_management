@@ -12,7 +12,7 @@ from scipy import stats
 
 from portstudy import calendar as cal
 from portstudy.config import ModelRegistry, StudyConfig, ViewsConfig
-from portstudy.views.build import build_views, views_frame
+from portstudy.views.build import build_views, range_certainty, views_frame
 from portstudy.views.ic import ICStore, rank_ic, trailing_ic, weekly_returns
 from portstudy.views.residualize import residualize, valid_scores
 
@@ -112,21 +112,37 @@ def test_residual_is_uncorrelated_with_zb_and_skips_invalid() -> None:
     rng = np.random.default_rng(3)
     tickers = [f"T{i}" for i in range(80)]
     z_b = pd.Series(rng.normal(size=80), index=tickers)
-    score = np.rint(2 * z_b.to_numpy() + rng.normal(size=80)).clip(-5, 5)
-    scores = pd.DataFrame({"ticker": tickers, "score": score, "confidence": 0.6, "valid": True,
-                           "fallback_flag": [None] * 80})
+    likely = np.rint(2 * z_b.to_numpy() + rng.normal(size=80)).clip(-5, 5).astype(int)
+    low = np.maximum(-5, likely - 1)
+    high = np.minimum(5, likely + 1)
+    scores = pd.DataFrame({
+        "ticker": tickers,
+        "low": low,
+        "likely": likely,
+        "high": high,
+        "width": high - low,
+        "valid": True,
+        "fallback_flag": [None] * 80,
+    })
     scores.loc[:9, "valid"] = False
     scores.loc[:9, "fallback_flag"] = "invalid_output"
-    scores.loc[:9, "score"] = 0
+    scores.loc[:9, ["low", "likely", "high", "width"]] = 0
     v = valid_scores(scores)
+    assert list(v.columns) == ["ticker", "low", "likely", "high", "width"]
     assert len(v) == 70 and not set(v["ticker"]) & set(tickers[:10])
     z_l = residualize(v, z_b)
     assert len(z_l) == 70
     assert abs(np.corrcoef(z_l.to_numpy(), z_b.loc[z_l.index].to_numpy())[0, 1]) < 1e-8
     assert z_l.mean() == pytest.approx(0.0, abs=1e-12) and z_l.std(ddof=1) == pytest.approx(1.0)
     # Constant residual gives zeros.
-    const = pd.DataFrame({"ticker": tickers, "score": 2 * z_b.to_numpy(), "confidence": 0.5})
+    const = pd.DataFrame({"ticker": tickers, "likely": 2 * z_b.to_numpy()})
     assert (residualize(const, z_b) == 0).all()
+
+
+def test_range_certainty_decreases_with_width() -> None:
+    width = pd.Series([0, 5, 10], index=["narrow", "middle", "wide"])
+    certainty = range_certainty(width, ViewsConfig())
+    np.testing.assert_allclose(certainty.to_numpy(), [1.0, 0.5, 0.1])
 
 
 def _toy_inputs(n: int = 30) -> tuple[pd.Series, pd.Series, pd.Series]:
@@ -203,9 +219,18 @@ def test_views_build_for_every_portfolio_over_synthetic_weeks(work_data_dir: Pat
                 sub = scores[(scores["model"] == spec.id) & (scores["config_id"] == conf.id)]
                 v = valid_scores(sub)
                 z_l = residualize(v, base["z_b"])
-                views = build_views(prior["pi"], prior["sigma"], base["z_b"], ic_b=0.02, cfg=cfg.views,
-                                    z_l=z_l, confidence=v.set_index("ticker")["confidence"], ic_l=0.02,
-                                    label=f"{spec.id}__{conf.id}")
+                certainty = range_certainty(v.set_index("ticker")["width"], cfg.views)
+                views = build_views(
+                    prior["pi"],
+                    prior["sigma"],
+                    base["z_b"],
+                    ic_b=0.02,
+                    cfg=cfg.views,
+                    z_l=z_l,
+                    confidence=certainty,
+                    ic_l=0.02,
+                    label=f"{spec.id}__{conf.id}",
+                )
                 assert views.use_llm_view and views.use_baseline_view
                 assert len(views.q_l) == len(z_l) and views.q_b.notna().all()
                 n_built += 1

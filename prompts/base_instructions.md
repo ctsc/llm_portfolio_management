@@ -6,11 +6,14 @@ Rate the stock's expected one-week return relative to the other large US stocks 
 
 Respond with JSON only, exactly in this form and nothing else:
 
-{"score": <integer -5..5>, "confidence": <number 0..1>, "rationale": "<short reason>"}
+{"low": <integer -5..5>, "likely": <integer -5..5>, "high": <integer -5..5>, "rationale": "<short reason>"}
 
 Rules for the fields:
-- score: an integer from -5 (strongly underperform) to 5 (strongly outperform). 0 means no view.
-- confidence: a number from 0 to 1 giving how sure you are of the score.
-- rationale: one or two short sentences, at most 150 tokens.
+- low: the lowest plausible rating for the next week.
+- likely: the most likely rating for the next week.
+- high: the highest plausible rating for the next week.
+- Each rating must be an integer from -5 (strongly underperform) to 5 (strongly outperform). 0 means no view.
+- Order the ratings so low <= likely <= high.
+- rationale: a short reason, at most 150 tokens.
 
 Do not include code fences, markdown, or any text outside the JSON object.

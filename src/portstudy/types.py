@@ -110,13 +110,16 @@ class SnapshotRef:
 
 @dataclass
 class LlmResponse:
-    score: int
-    confidence: float
+    low: int
+    likely: int
+    high: int
     rationale: str
     valid: bool
     raw: str
     error: str | None = None
     fallback_flag: str | None = None
+    extra_keys: list[str] = field(default_factory=list)
+    had_thinking: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

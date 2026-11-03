@@ -25,7 +25,7 @@ from portstudy.paths import week_output_dir
 from portstudy.risk.covariance import RiskModel, read_risk_model
 from portstudy.risk.prior import read_prior
 from portstudy.types import PortfolioId, RatingSource, StrategyName
-from portstudy.views.build import Views, build_views, views_frame
+from portstudy.views.build import Views, build_views, range_certainty, views_frame
 from portstudy.views.ic import ICStore, trailing_ic
 from portstudy.views.residualize import residualize, valid_scores
 
@@ -37,7 +37,7 @@ WEIGHT_COLUMNS = [
     "pi",
     "z_b",
     "z_L",
-    "confidence",
+    "width",
     "has_llm_view",
 ]
 
@@ -156,7 +156,7 @@ def _optimize(
     extra: dict[str, Any],
     logger: logging.Logger,
     z_l: pd.Series | None = None,
-    confidence: pd.Series | None = None,
+    width: pd.Series | None = None,
 ) -> Weights:
     sigma_matrix = inputs.risk.sigma_matrix
     post = (
@@ -185,7 +185,7 @@ def _optimize(
     )
     for k, v in extra.items():
         setattr(out, k, v)
-    _save(out, views, inputs, z_l, confidence)
+    _save(out, views, inputs, z_l, width)
     return out
 
 
@@ -194,7 +194,7 @@ def _save(
     views: Views,
     inputs: WeekInputs,
     z_l: pd.Series | None,
-    confidence: pd.Series | None,
+    width: pd.Series | None,
 ) -> None:
     frame = views_frame(views).set_index("ticker")
     idx = w.weights.index
@@ -210,9 +210,9 @@ def _save(
     )
     has_l = z_l is not None and len(z_l) > 0
     df["z_L"] = z_l.reindex(idx).to_numpy() if has_l and z_l is not None else float("nan")
-    df["confidence"] = (
-        confidence.reindex(idx).to_numpy()
-        if has_l and confidence is not None and len(confidence)
+    df["width"] = (
+        width.reindex(idx).to_numpy()
+        if has_l and width is not None and len(width)
         else float("nan")
     )
     df["has_llm_view"] = df["ticker"].isin(views.llm_tickers) if w.use_llm_view else False
@@ -258,16 +258,17 @@ def build_weights(
     valid = valid_scores(scores)
     n_invalid = int(len(scores) - len(valid))
     z_l = residualize(valid, inp.z_b()) if len(valid) else pd.Series(dtype=float)
-    conf = valid.set_index("ticker")["confidence"].astype(float) if len(valid) else None
+    width = valid.set_index("ticker")["width"].astype(float) if len(valid) else None
+    view_certainty = range_certainty(width, cfg.views) if width is not None else None
     views = build_views(
         inp.pi(),
         inp.sigma_vec(),
         inp.z_b(),
         ic_b,
         cfg.views,
-        z_l=z_l,
-        confidence=conf,
-        ic_l=ic_l,
+        z_l,
+        view_certainty,
+        ic_l,
         logger=log,
         label=key,
     )
@@ -283,7 +284,7 @@ def build_weights(
         {"n_invalid": n_invalid},
         log,
         z_l=z_l,
-        confidence=conf,
+        width=width,
     )
     if q0_only:
         out.notes.append("weights_equal_q0")

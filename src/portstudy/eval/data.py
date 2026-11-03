@@ -130,7 +130,7 @@ def _stock_week_table(weeks: list[str], portfolios: list[str]) -> pd.DataFrame:
                 & (scores["config_id"] == source.config_id)
                 & scores["valid"]
             ]
-            base[key] = sub.set_index("ticker")["score"].reindex(base.index).astype(float)
+            base[key] = sub.set_index("ticker")["likely"].reindex(base.index).astype(float)
         frames.append(base.reset_index())
     if not frames:
         return pd.DataFrame()

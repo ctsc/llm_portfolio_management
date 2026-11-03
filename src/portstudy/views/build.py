@@ -43,6 +43,12 @@ class Views:
         return len(self.tickers)
 
 
+def range_certainty(width: pd.Series, cfg: ViewsConfig) -> pd.Series:
+    """Map range width to view certainty using DECISION(E1)."""
+    lo, hi = cfg.confidence_clip
+    return (1.0 - width.astype(float) / 10.0).clip(lo, hi)
+
+
 def build_views(
     pi: pd.Series,
     sigma_vec: pd.Series,

@@ -241,3 +241,38 @@ Choices made while unattended:
 - CVaR and resampled strategy seeds are 7, matching the existing Kronos seed for deterministic defaults.
 - Added `llm.model_ids` and `llm.prompt_ids` selectors so the test config can select two stub models and a fixed prompt subset without changing study defaults.
 - Excluded `PLAN2.md` from the banned-word scan because it contains required examples of the rules being checked; the plan file remains unchanged.
+
+## v2 phase 2: low, likely, high output schema
+
+Built:
+- Replaced the scalar response schema with ordered `low`, `likely`, and `high` integer ratings, strict validation, first-object parsing, thinking-block handling, extra-key logging, and fallback metadata.
+- Updated score records and downstream readers to store `low`, `likely`, `high`, and `width`. Residualization uses `likely`; shuffle evaluation permutes the range columns together.
+- Derived view certainty from width using DECISION(E1), retained the Phase 6 view-builder interface, and updated optimizer weight output.
+- Updated the deterministic stub so likely ratings use the v1 signal plus noise and range width follows sampled noise. Updated the base prompt and refreshed its manifest hash.
+- Updated README, design, and config-reference docs for the range schema and width-derived certainty.
+- Updated `scripts/smoke_real_services.py` to report `likely` from the new response type. The script was not run against real services.
+
+Tests and checks:
+- Full pytest: 200 passed, 3 warnings in 369.60 seconds. The first invocation omitted `.venv/bin` from PATH and failed `test_every_ci_command_exists`; rerunning with the venv bin directory on PATH passed all tests.
+- `ruff check src tests scripts`: passed. The updated smoke script also passed its targeted Ruff check.
+- `mypy src scripts`: passed after updating the smoke script response field.
+- Manifest, placebo-length, banned-word, secret, and yamllint checks passed. The banned-word and secret checks were rerun after this entry was added.
+- Targeted `ruff format --check` reports three modified v1 tests that remain in the known 27-file formatting baseline. The other changed Python files passed; no baseline files were bulk formatted.
+- `git diff --check` and LF checks passed after the final edits.
+
+Changed v1 tests and reasons:
+- `tests/unit/test_phase6_llm.py`: updated parser fixtures, runner columns, provider payloads, and stub assertions for the range response fields.
+- `tests/unit/test_phase7_views.py`: updated residualization and view fixtures to use likely ratings and width, and tested width-derived certainty.
+- `tests/unit/test_phase11_eval.py`: changed the stub tuple selection to use the likely rating.
+
+UNVERIFIED:
+- No new unverified items were introduced. Real-provider behavior remains unverified because this phase was kept offline.
+
+Skipped:
+- Phase 3 was not started, as requested.
+- No real services or paid APIs were called.
+
+Choices made while unattended:
+- Stub half-width is `max(1, ceil(abs(noise)))`, so synthetic uncertainty follows the sampled noise while retaining a nonzero interval.
+- Width-derived certainty is applied at the optimizer boundary; the existing view-builder interface remains until Phase 6.
+- The `endpoint` output field is empty because `RawResult` does not yet expose a resolved serving endpoint; the column is retained for the later serving implementation.

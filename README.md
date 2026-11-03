@@ -31,8 +31,8 @@ Each week, for 100 sector-balanced S&P 500 stocks:
 | **Quant baseline** | Momentum features (12-1, 3-month, 1-month reversal) plus a 5-day price forecast are rank-averaged into `z_b`. |
 | **Risk model** | Ledoit-Wolf covariance on 252 daily returns, scaled to weekly; market-cap prior `pi = delta Sigma w_mkt`. |
 | **LLM views** | Every model rates every stock from its ticker, name, sector, and the week's news, under three prompt configurations: `bare`, `skills`, and a length-matched `placebo`. One stock per call, temperature 0, JSON output only. |
-| **Residualize** | LLM scores are regressed on `z_b`; the standardized residual `z_L` is the part of the view the baseline did not already know. |
-| **Black-Litterman** | Baseline and LLM views enter as stacked identity views, scaled by trailing rank IC and the model's stated confidence. |
+| **Residualize** | LLM likely ratings are regressed on `z_b`; the standardized residual `z_L` is the part of the view the baseline did not already know. |
+| **Black-Litterman** | Baseline and LLM views enter as stacked identity views, scaled by trailing rank IC and range-derived certainty. |
 | **Optimize** | Phase 1 enables MVO with a 5 percent cap. Its baseline-only portfolio is `mvo__Q0`; a steered portfolio is `mvo__<model>__<prompt-id>`. |
 | **Simulate** | Monday-open rebalance at raw ledger prices, 10 bps costs, daily stop-loss (-8%) and take-profit (+15%), dividends and splits handled. |
 | **Evaluate** | Weekly rank IC gaps (H1 to H3), pre-registered splits (H4), factor regressions and a shuffled-ratings test (H5), all with Holm correction. |
@@ -52,7 +52,7 @@ The planned strategies are MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K,
                                                                          |
                                                               J7 weights (BL + MVO, strategy Q0, fallbacks)
                                                                          |
-            next weekend: J8 replay from the price ledger + score rank IC ──> J9 dated CSV backup
+            next weekend: J8 replay from the price ledger + likely-rating IC ──> J9 dated CSV backup
 ```
 
 - **One hand-run script.** `scripts/run_weekend.py` runs the jobs in order, polls batches with a countdown, and resumes where it stopped. No scheduler.
@@ -211,3 +211,8 @@ License: MIT.
 - **Config selectors for models and prompt IDs (chosen during build)**: `llm.model_ids` and `llm.prompt_ids` make the small offline test configuration reproducible without changing the default study.
 - **Strategy seeds of 7 (chosen during build)**: reuses the existing Kronos seed for deterministic defaults where PLAN2 does not prescribe strategy-specific seeds.
 - **Exclude `PLAN2.md` from the banned-word scan (chosen during build)**: it contains the rules and examples that the scanner is designed to enforce, and remains untouched.
+- **DECISION(C3), range output**: the model reports low, likely, and high integer ratings, making uncertainty explicit without adding a separate confidence field.
+- **DECISION(E1), range-derived certainty**: `clip(1 - width / 10, 0.1, 1.0)` lets wider rating ranges contribute less to the LLM view.
+- **Stub range width (chosen during build)**: half-width follows the absolute sampled noise with a minimum of one, so noisier synthetic ratings have wider ranges.
+- **Range certainty adapter (chosen during build)**: apply width-derived certainty at the optimizer boundary to preserve the existing view-builder interface until Phase 6.
+- **Empty endpoint metadata (chosen during build)**: keep the output column stable until a provider exposes the resolved serving endpoint.

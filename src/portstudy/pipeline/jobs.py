@@ -478,7 +478,7 @@ def update_ic_history(ctx: RunContext, weeks: list[str], book: PriceBook) -> int
                 (scores["model"] == source.model) & (scores["config_id"] == source.config_id)
             ]
             if len(sub):
-                v = valid_scores(sub).set_index("ticker")["score"]
+                v = valid_scores(sub).set_index("ticker")["likely"]
                 rows.append(
                     {
                         "week_id": w,

@@ -33,7 +33,7 @@ from portstudy.llm.providers.base import (
     make_custom_id,
 )
 from portstudy.llm.providers.factory import make_provider
-from portstudy.llm.schema import FALLBACK_CONFIDENCE, FALLBACK_SCORE, INVALID_OUTPUT
+from portstudy.llm.schema import INVALID_OUTPUT, fallback_response
 from portstudy.llm.validate import parse_response
 from portstudy.paths import week_output_dir
 
@@ -43,11 +43,16 @@ SCORE_COLUMNS = [
     "model",
     "config_id",
     "ticker",
-    "score",
-    "confidence",
+    "low",
+    "likely",
+    "high",
+    "width",
     "rationale",
     "valid",
     "fallback_flag",
+    "extra_keys",
+    "had_thinking",
+    "endpoint",
     "tokens_in",
     "tokens_cached",
     "tokens_out",
@@ -254,11 +259,7 @@ class WeekRunner:
     ) -> dict[str, Any]:
         resp = parse_response(raw.text, self.cfg.llm.rationale_token_cap, raw.stop_reason)
         if raw.error:
-            resp.valid = False
-            resp.error = raw.error
-            resp.fallback_flag = INVALID_OUTPUT
-        if not resp.valid:
-            resp.score, resp.confidence = FALLBACK_SCORE, FALLBACK_CONFIDENCE
+            resp = fallback_response(raw.text, raw.error, INVALID_OUTPUT)
         cost = (
             0.0
             if raw.from_cache
@@ -271,11 +272,16 @@ class WeekRunner:
             "model": spec.id,
             "config_id": task.config_id,
             "ticker": task.ticker,
-            "score": resp.score,
-            "confidence": resp.confidence,
+            "low": resp.low,
+            "likely": resp.likely,
+            "high": resp.high,
+            "width": resp.high - resp.low if resp.valid else "",
             "rationale": resp.rationale,
             "valid": resp.valid,
             "fallback_flag": resp.fallback_flag,
+            "extra_keys": resp.extra_keys,
+            "had_thinking": resp.had_thinking,
+            "endpoint": "",
             "error": resp.error,
             "raw": raw.text,
             "tokens_in": raw.tokens_in,
@@ -554,9 +560,7 @@ class WeekRunner:
 
     # Outputs ------------------------------------------------------------------------------
 
-    def _record_cost(
-        self, model: str, config_id: str, extra: dict[str, Any] | None = None
-    ) -> None:
+    def _record_cost(self, model: str, config_id: str, extra: dict[str, Any] | None = None) -> None:
         recs = list(self._read_records(model, config_id).values())
         if not recs:
             return

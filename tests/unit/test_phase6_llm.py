@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -36,17 +37,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 @pytest.mark.parametrize(
     "raw,valid,error",
     [
-        ('{"score": 3, "confidence": 0.7, "rationale": "ok"}', True, None),
-        ('```json\n{"score": -5, "confidence": 1, "rationale": "x"}\n```', True, None),
-        ('Sure: {"score": 0, "confidence": 0.5, "rationale": "y"} done', True, None),
-        ('{"score": 6, "confidence": 0.5, "rationale": "x"}', False, "score_out_of_range"),
-        ('{"score": 2.0, "confidence": 0.5, "rationale": "x"}', False, "score_not_integer"),
-        ('{"score": true, "confidence": 0.5, "rationale": "x"}', False, "score_not_integer"),
-        ('{"score": 1, "confidence": 1.5, "rationale": "x"}', False, "confidence_out_of_range"),
-        ('{"score": 1, "confidence": "high", "rationale": "x"}', False, "confidence_not_number"),
-        ('{"score": 1, "confidence": 0.5, "rationale": 7}', False, "rationale_not_string"),
-        ("not json at all", False, "json_parse_error"),
-        ("[1, 2]", False, "not_an_object"),
+        ('{"low": 1, "likely": 3, "high": 5, "rationale": "ok"}', True, None),
+        ('```json\n{"low": -5, "likely": -5, "high": 0, "rationale": "x"}\n```', True, None),
+        ('Sure: {"low": -1, "likely": 0, "high": 1, "rationale": "y"} done', True, None),
+        ('{"low": -6, "likely": 0, "high": 1, "rationale": "x"}', False, "out_of_range"),
+        ('{"low": 0, "likely": 2.5, "high": 3, "rationale": "x"}', False, "not_integer"),
+        ('{"low": true, "likely": 0, "high": 1, "rationale": "x"}', False, "not_integer"),
+        ('{"low": 1, "likely": 0, "high": 2, "rationale": "x"}', False, "bad_order"),
+        ('{"low": 0, "likely": 1, "high": "3", "rationale": "x"}', False, "not_integer"),
+        ('{"low": 0, "likely": 1, "high": 2}', False, "missing_key"),
+        ('{"low": 0, "likely": 1, "high": 2, "rationale": 7}', False, "rationale_not_string"),
+        ("not json at all", False, "not_json"),
+        ("", False, "empty"),
     ],
 )
 def test_parse_response_cases(raw: str, valid: bool, error: str | None) -> None:
@@ -58,13 +60,16 @@ def test_parse_response_cases(raw: str, valid: bool, error: str | None) -> None:
 
 
 def test_truncated_answer_flagged_separately() -> None:
-    r = parse_response('{"score": 2, "confidence": 0.6, "rat', stop_reason="max_tokens")
+    r = parse_response('{"low": 0, "likely": 1, "high": 2, "rat', stop_reason="max_tokens")
     assert not r.valid and r.fallback_flag == "invalid_truncated"
 
 
 def test_rationale_truncated_to_cap() -> None:
     long = " ".join(["word"] * 400)
-    r = parse_response(json.dumps({"score": 1, "confidence": 0.5, "rationale": long}), rationale_token_cap=20)
+    r = parse_response(
+        json.dumps({"low": 0, "likely": 1, "high": 2, "rationale": long}),
+        rationale_token_cap=20,
+    )
     assert r.valid and len(r.rationale) // 4 <= 20
 
 
@@ -113,7 +118,11 @@ def test_stub_run_covers_every_task_once_and_second_run_is_cached(
     assert len(per_model) == n_conf * len(snap.included_tickers)
     assert not per_model.duplicated(["model", "config_id", "ticker"]).any()
     assert per_model["valid"].all()
-    assert per_model["score"].between(-5, 5).all()
+    assert per_model["low"].between(-5, 5).all()
+    assert per_model["low"].le(per_model["likely"]).all()
+    assert per_model["likely"].le(per_model["high"]).all()
+    assert (per_model["width"] == per_model["high"] - per_model["low"]).all()
+    assert {"extra_keys", "had_thinking", "endpoint"} <= set(per_model.columns)
     assert set(per_model["prompt_hash"].str.len()) == {64}
 
     # A fresh runner on a fresh output folder but the same cache is fully cached.
@@ -151,7 +160,8 @@ def test_invalid_output_injection_counts_rates_and_retries_once(
     scores = read_scores(week)
     inv = scores[(scores["model"] == model) & ~scores["valid"]]
     assert set(inv["ticker"]) == bad
-    assert (inv["score"] == 0).all() and (inv["confidence"] == 0.1).all()
+    assert (inv[["low", "likely", "high"]] == 0).all().all()
+    assert inv["width"].isna().all()
     assert (inv["fallback_flag"] == "invalid_output").all()
     status = runner.assess_run(model, "bare", now=dt.datetime(2026, 1, 10, 12, tzinfo=ET))
     assert status.invalid_rate == pytest.approx(20 / len(snap.included_tickers))
@@ -208,7 +218,7 @@ def test_crash_then_resume_does_not_repeat_calls(work_data_dir: Path,
     finally:
         os.environ["PORTSTUDY_DATA_DIR"] = str(work_data_dir)
     merged = read_scores(week)
-    cols = ["model", "config_id", "ticker", "score", "confidence", "valid"]
+    cols = ["model", "config_id", "ticker", "low", "likely", "high", "width", "valid"]
     pd.testing.assert_frame_equal(merged[cols].reset_index(drop=True), clean[cols].reset_index(drop=True))
 
 
@@ -326,6 +336,31 @@ def _item(study_config: StudyConfig, model: str = "m", config_id: str = "skills"
     return BatchItem(make_custom_id(model, config_id, "2026-W05", "AAA"), model, config_id, "2026-W05", "AAA", prompt)
 
 
+def test_stub_ranges_are_deterministic_and_reflect_prompt_noise(study_config: StudyConfig) -> None:
+    provider = StubLlmProvider("stub", seed=29)
+    bare = _item(study_config, config_id="bare")
+    skills = _item(study_config, config_id="skills")
+    bare_widths = []
+    skill_widths = []
+    for index in range(500):
+        ticker = f"T{index}"
+        bare_item = replace(
+            bare, custom_id=f"bare-{ticker}", ticker=ticker
+        )
+        skills_item = replace(
+            skills, custom_id=f"skills-{ticker}", ticker=ticker
+        )
+        bare_answer = provider.answer_for(bare_item)
+        assert provider.answer_for(bare_item) == bare_answer
+        assert bare_answer[0] <= bare_answer[1] <= bare_answer[2]
+        skill_answer = provider.answer_for(skills_item)
+        assert provider.answer_for(skills_item) == skill_answer
+        assert skill_answer[0] <= skill_answer[1] <= skill_answer[2]
+        bare_widths.append(bare_answer[2] - bare_answer[0])
+        skill_widths.append(skill_answer[2] - skill_answer[0])
+    assert pd.Series(skill_widths).mean() < pd.Series(bare_widths).mean()
+
+
 def _no_tools(payload: Any) -> None:
     text = json.dumps(payload).lower()
     for banned in ("\"tools\"", "web_search", "tool_choice", "function"):
@@ -335,7 +370,7 @@ def _no_tools(payload: Any) -> None:
 def test_ollama_payload_has_no_tools_and_keeps_prompt_order(study_config: StudyConfig) -> None:
     item = _item(study_config)
     transport = FakeTransport([{"model": "qwen3.5:4b", "message": {"role": "assistant", "content":
-                                '{"score": 1, "confidence": 0.5, "rationale": "r"}'},
+                                '{"low": 0, "likely": 1, "high": 2, "rationale": "r"}'},
                                 "prompt_eval_count": 500, "eval_count": 20, "done_reason": "stop"}])
     provider = OllamaProvider("qwen3.5-4b", "qwen3.5:4b", transport=transport)
     settings = LlmSettings(temperature=0.0, seed=1234, max_output_tokens=300, think=False)
@@ -353,7 +388,9 @@ def test_anthropic_batch_payload_and_collect(study_config: StudyConfig) -> None:
     item = _item(study_config)
     results_jsonl = json.dumps({"custom_id": item.custom_id, "result": {"type": "succeeded", "message": {
         "model": "claude-haiku-5-5-20260101", "stop_reason": "end_turn",
-        "content": [{"type": "text", "text": '{"score": 2, "confidence": 0.8, "rationale": "r"}'}],
+        "content": [
+            {"type": "text", "text": '{"low": 1, "likely": 2, "high": 4, "rationale": "r"}'}
+        ],
         "usage": {"input_tokens": 100, "output_tokens": 30, "cache_read_input_tokens": 400,
                   "cache_creation_input_tokens": 0}}}}) + "\n"
     transport = FakeTransport([
@@ -386,7 +423,7 @@ def test_openai_batch_payload_and_collect(study_config: StudyConfig) -> None:
     item = _item(study_config)
     output_jsonl = json.dumps({"custom_id": item.custom_id, "response": {"status_code": 200, "body": {
         "model": "gpt-6-luna-2026-01-01", "choices": [{"finish_reason": "stop", "message": {
-            "content": '{"score": -1, "confidence": 0.4, "rationale": "r"}'}}],
+            "content": '{"low": -2, "likely": -1, "high": 0, "rationale": "r"}'}}],
         "usage": {"prompt_tokens": 600, "completion_tokens": 25, "prompt_tokens_details": {"cached_tokens": 512}}}},
         "error": None}) + "\n"
     transport = FakeTransport([
@@ -444,5 +481,5 @@ def test_full_synthetic_week_all_models(work_data_dir: Path, week_snapshot: tupl
     tasks = {t.item.custom_id: t for t in runner.plan_week()}
     scores["net"] = [sentiment_from_text(tasks[make_custom_id(m, c, week, t)].item.prompt.full_text)
                      for m, c, t in zip(scores["model"], scores["config_id"], scores["ticker"])]
-    corr = scores.groupby("config_id").apply(lambda g: g["score"].corr(g["net"]))
+    corr = scores.groupby("config_id").apply(lambda g: g["likely"].corr(g["net"]))
     assert corr["skills"] > corr["bare"] > 0.3

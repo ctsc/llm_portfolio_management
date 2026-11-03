@@ -1,5 +1,5 @@
 base_instructions: prompts/base_instructions.md
-base_sha256: 0622daaedabc704bbaad6c40accf7916ba9cefbce9abdd8fdc89d499a26bc9b9
+base_sha256: bab6376a42534415c6b5ffb8350774958004487ed28f4f0e41747db51171c82c
 configurations:
 - id: bare
   kind: bare

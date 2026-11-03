@@ -61,14 +61,18 @@ Shared prefix first (base instructions plus the configuration's file), then the 
 gets the fixed sentence (C2). Output schema:
 
 ```
-{"score": <integer -5..5>, "confidence": <number 0..1>, "rationale": "<short reason>"}
+{"low": <integer -5..5>, "likely": <integer -5..5>, "high": <integer -5..5>, "rationale": "<short reason>"}
 ```
+
+The three integer ratings are valid only when `low <= likely <= high`. Extra keys are ignored and
+recorded. Invalid output stores `low = likely = high = 0`, `valid = false`, and an empty width.
 
 ## LLM runner (`llm/runner.py`)
 
 One stock per call, temperature 0, no tools. Invalid output: retry once, then store
-`score = 0, confidence = 0.1, fallback_flag = invalid_output` (`invalid_truncated` when the
-answer hit the output limit). Cache key `sha256(model_version, prompt_hash, ticker, week_id,
+`low = likely = high = 0`, an empty width, and `fallback_flag = invalid_output`
+(`invalid_truncated` when the answer hit the output limit). Valid width is `high - low`. Cache
+key `sha256(model_version, prompt_hash, ticker, week_id,
 settings, model_id)`. Cost guard before any batch: projected study total above the goal raises
 unless `--allow-over-budget` (D3). Failure rule (N1): invalid rate above 0.15, or local job or
 batch not finished by the lock deadline minus the margin.
@@ -76,11 +80,11 @@ batch not finished by the lock deadline minus the margin.
 ## Rank IC, residual, views (`views/`)
 
 ```
-Rank IC:    Spearman(score at Friday cutoff, total return from next Monday open to the following Monday open)
+Rank IC:    Spearman(likely rating at Friday cutoff, total return from next Monday open to the following Monday open)
 Trailing IC: mean of last 8 scored weeks, floored at 0 ; fixed 0.02 for the first 5 live weeks
 Residual:   s = a + c z_b + e ;  z_L = standardize(e)        (invalid outputs excluded)
 Views:      q_b = pi + IC_b sigma z_b ;  q_L = pi + IC_L sigma z_L
-Uncertainty: Omega_b,ii = tau Sigma_ii ;  Omega_L,ii = tau Sigma_ii / clip(conf_i, 0.1, 1) ;  tau = 0.05
+Uncertainty: Omega_b,ii = tau Sigma_ii ;  Omega_L,ii = tau Sigma_ii / clip(1 - width_i / 10, 0.1, 1) ;  tau = 0.05
 Zero IC:    IC_L = 0  ->  drop LLM view rows, weights = Q0 weights
 ```
 

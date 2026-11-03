@@ -1,7 +1,7 @@
 """H5 shuffled-ratings test (DECISION(G6)).
 
 For every portfolio (each model and configuration) plus Q0: for each clean week permute the
-LLM scores (and confidences with them) across stocks with a seeded RNG, rebuild
+LLM ranges across stocks with a seeded RNG, rebuild
 residualization, views, Black-Litterman, and mean-variance, replay the simulator from the
 ledger, and repeat `n_shuffles` times. View strength is held fixed: every shuffle uses the
 real portfolio's stored weekly IC_L (IC_b for Q0) and `use_llm_view` flags, so only the
@@ -32,7 +32,7 @@ from portstudy.pipeline import fallback as fb
 from portstudy.sim import PriceBook, WeekPlan, ledger_book, replay
 from portstudy.sim.records import daily_frame, read_daily
 from portstudy.types import PortfolioId, StrategyName
-from portstudy.views.build import build_views
+from portstudy.views.build import build_views, range_certainty
 from portstudy.views.residualize import residualize, valid_scores
 
 
@@ -103,11 +103,14 @@ def _shuffled_weights(
         valid = valid_scores(state.scores)
         perm = rng.permutation(len(valid))
         shuffled = valid.copy()
-        shuffled[["score", "confidence"]] = valid[["score", "confidence"]].to_numpy()[perm]
+        shuffled[["low", "likely", "high", "width"]] = valid[
+            ["low", "likely", "high", "width"]
+        ].to_numpy()[perm]
         z_l = residualize(shuffled, z_b)
-        conf = shuffled.set_index("ticker")["confidence"].astype(float)
+        width = shuffled.set_index("ticker")["width"].astype(float)
+        view_certainty = range_certainty(width, cfg.views)
         views = build_views(
-            pi, sigma_vec, z_b, state.ic_b, cfg.views, z_l=z_l, confidence=conf, ic_l=state.ic_l
+            pi, sigma_vec, z_b, state.ic_b, cfg.views, z_l, view_certainty, state.ic_l
         )
         if not views.use_llm_view:
             return state.q0_weights

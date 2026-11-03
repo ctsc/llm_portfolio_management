@@ -1,7 +1,7 @@
-"""Residualize the LLM score on the baseline score z_b (DECISION(E2) uses this signal's IC).
+"""Residualize the likely rating on the baseline score z_b (DECISION(E2) uses this signal's IC).
 
-s = a + c z_b + e ;  z_L = standardize(e) with ddof=1 ; zeros if the residual std < 1e-9.
-Invalid outputs are excluded: a stored fallback score of 0 must never be residualized.
+s = a + c z_b + e ; z_L = standardize(e) with ddof=1 ; zeros if the residual std < 1e-9.
+Invalid outputs are excluded so their stored fallback range is never residualized.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ RESID_STD_FLOOR = 1e-9
 
 
 def valid_scores(scores: pd.DataFrame) -> pd.DataFrame:
-    """Rows with a valid output for one (model, configuration): ticker, score, confidence."""
+    """Rows with a valid output for one (model, configuration)."""
     valid = (
         scores["valid"].astype(str).str.lower().eq("true")
         if scores["valid"].dtype == object
@@ -25,7 +25,7 @@ def valid_scores(scores: pd.DataFrame) -> pd.DataFrame:
         else pd.Series("", index=scores.index)
     )
     ok = valid & (flag.isna() | (flag.astype(str) == ""))
-    return scores.loc[ok, ["ticker", "score", "confidence"]].reset_index(drop=True)
+    return scores.loc[ok, ["ticker", "low", "likely", "high", "width"]].reset_index(drop=True)
 
 
 def residualize(scores: pd.DataFrame, z_b: pd.Series) -> pd.Series:
@@ -34,7 +34,7 @@ def residualize(scores: pd.DataFrame, z_b: pd.Series) -> pd.Series:
     `scores` must already be filtered to valid outputs (see `valid_scores`). Only tickers
     present in both inputs are used. Returns `z_L` indexed by ticker.
     """
-    s = scores.set_index("ticker")["score"].astype(float)
+    s = scores.set_index("ticker")["likely"].astype(float)
     common = s.index.intersection(z_b.index)
     s = s.loc[common]
     x = z_b.loc[common].astype(float)

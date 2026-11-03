@@ -124,7 +124,7 @@ def _weekly_ics(study_config: StudyConfig, world: SyntheticWorld, weeks: list[st
                 row = {"ticker": tk, "name": ref.loc[tk, "name"], "sector": ref.loc[tk, "sector"]}
                 prompt = assemble_prompt(c, row, str(text.get(tk, "")), study_config, man)
                 item = BatchItem(make_custom_id("m", c, w, tk), "m", c, w, tk, prompt)
-                scores[tk] = stub.answer_for(item)[0]
+                scores[tk] = stub.answer_for(item)[1]
             out[c][w] = rank_ic(pd.Series(scores, dtype=float), ret)
     return pd.DataFrame(out)
 
