@@ -116,7 +116,8 @@ Keys go in a `.env` file on the desktop only; `scripts/smoke_real_services.py` l
 | `ic_floor` | 0.0 | Floor on the trailing IC | |
 | `cold_start_weeks`, `cold_start_ic` | 5, 0.02 | Fixed IC for the first live weeks | A6 |
 | `ic_min_weeks` | 3 | Fewer clean weeks keeps the cold-start IC | |
-| `confidence_clip` | [0.1, 1.0] | Clip on range-derived certainty in Omega_L | |
+| `kronos_spread_clip` | [0.25, 4.0] | Clip on each stock's Kronos spread divided by the weekly median in Omega_b | K1 |
+| `width_conf_clip` | [0.1, 1.0] | Clip on width-derived LLM view scale `c` in Omega_L | E1 |
 | `ic_signal_for_llm` | llm_resid | IC used to scale the LLM view | E2 |
 
 ### optimizer, simulator

@@ -11,7 +11,11 @@ import pytest
 from portstudy.config import ModelRegistry, OptimizerConfig, StudyConfig, ViewsConfig
 from portstudy.optimize import WeekInputs, build_q0_weights, build_weights, read_weights
 from portstudy.optimize.black_litterman import black_litterman, black_litterman_q0
-from portstudy.optimize.mean_variance import OptimizerError, solve_mean_variance
+from portstudy.optimize.mean_variance import (
+    OptimizerError,
+    _normalize_capped_weights,
+    solve_mean_variance,
+)
 from portstudy.views.build import build_views
 
 
@@ -38,24 +42,23 @@ def test_no_views_gives_pi() -> None:
     assert post.n_views == 0 and np.allclose(post.tilt.to_numpy(), 0.0)
 
 
-def test_confident_llm_view_moves_mu_toward_q_l() -> None:
+def test_narrow_llm_range_moves_mu_toward_q_l() -> None:
     sigma, pi, sv, z_b = _case()
     cfg = ViewsConfig()
     target = "T7"
     z_l = pd.Series(0.0, index=pi.index)
     z_l[target] = 3.0
-    conf = pd.Series(0.1, index=pi.index)
-    conf[target] = 1.0
-    v = build_views(pi, sv, z_b, ic_b=0.0, cfg=cfg, z_l=z_l, confidence=conf, ic_l=0.1)
+    width = pd.Series(10.0, index=pi.index)
+    width[target] = 0.0
+    v = build_views(pi, sv, z_b, ic_b=0.0, cfg=cfg, z_l=z_l, width=width, ic_l=0.1)
     post = black_litterman(v, sigma)
     q_l_target = v.q_l[target]
     assert pi[target] < post.mu_bl[target] <= q_l_target + 1e-12
-    # Higher confidence pulls closer to q_L.
-    conf_low = conf.copy()
-    conf_low[target] = 0.1
-    v_low = build_views(pi, sv, z_b, ic_b=0.0, cfg=cfg, z_l=z_l, confidence=conf_low, ic_l=0.1)
-    post_low = black_litterman(v_low, sigma)
-    assert abs(post.mu_bl[target] - q_l_target) < abs(post_low.mu_bl[target] - q_l_target)
+    wide = width.copy()
+    wide[target] = 10.0
+    v_wide = build_views(pi, sv, z_b, ic_b=0.0, cfg=cfg, z_l=z_l, width=wide, ic_l=0.1)
+    post_wide = black_litterman(v_wide, sigma)
+    assert abs(post.mu_bl[target] - q_l_target) < abs(post_wide.mu_bl[target] - q_l_target)
 
 
 def test_posterior_matches_textbook_formula() -> None:
@@ -64,8 +67,8 @@ def test_posterior_matches_textbook_formula() -> None:
     rng = np.random.default_rng(4)
     valid = pi.index[::2]
     z_l = pd.Series(rng.normal(size=len(valid)), index=valid)
-    conf = pd.Series(rng.uniform(0.2, 1.0, len(valid)), index=valid)
-    v = build_views(pi, sv, z_b, ic_b=0.04, cfg=cfg, z_l=z_l, confidence=conf, ic_l=0.03)
+    width = pd.Series(rng.uniform(0.0, 10.0, len(valid)), index=valid)
+    v = build_views(pi, sv, z_b, ic_b=0.04, cfg=cfg, z_l=z_l, width=width, ic_l=0.03)
     post = black_litterman(v, sigma)
     # Textbook: explicit inverses with P = [I; I_L].
     n = len(pi)
@@ -87,7 +90,8 @@ def test_q0_equals_bl_without_llm_rows() -> None:
     sigma, pi, sv, z_b = _case()
     cfg = ViewsConfig()
     z_l = pd.Series(np.random.default_rng(1).normal(size=len(pi)), index=pi.index)
-    v = build_views(pi, sv, z_b, ic_b=0.03, cfg=cfg, z_l=z_l, confidence=None, ic_l=0.05)
+    width = pd.Series(5.0, index=pi.index)
+    v = build_views(pi, sv, z_b, ic_b=0.03, cfg=cfg, z_l=z_l, width=width, ic_l=0.05)
     only_b = build_views(pi, sv, z_b, ic_b=0.03, cfg=cfg)
     np.testing.assert_allclose(black_litterman_q0(v, sigma).mu_bl.to_numpy(),
                                black_litterman(only_b, sigma).mu_bl.to_numpy())
@@ -106,6 +110,17 @@ def test_weights_sum_to_one_capped_and_deterministic() -> None:
     # CLARABEL agrees with OSQP to solver tolerance.
     r3 = solve_mean_variance(mu, sigma, 2.5, cfg, solvers=["CLARABEL"])
     assert np.abs(r1.weights.to_numpy() - r3.weights.to_numpy()).max() < 1e-3
+
+
+def test_weight_cleanup_preserves_cap_when_repairing_solver_tolerance() -> None:
+    raw = np.full(20, 0.05)
+    raw[0] += 7e-8
+    raw[1] -= 7e-8
+
+    weights = _normalize_capped_weights(raw, 0.05)
+
+    assert weights.sum() == pytest.approx(1.0, abs=1e-12)
+    assert (weights >= 0.0).all() and (weights <= 0.05).all()
 
 
 def test_min_stocks_guard_and_solver_failure_fallback() -> None:
@@ -162,6 +177,8 @@ def test_build_weights_every_portfolio_and_q0_rules(week_inputs: tuple[str, Week
     assert (p.weights <= cfg.optimizer.max_weight + 1e-9).all()
     saved_ok = read_weights(w, "mvo__stub-ow-a__skills_1")
     assert saved_ok["has_llm_view"].all() and saved_ok["z_L"].notna().all()
+    assert {"k_sd", "ratio", "width", "c"} <= set(saved_ok.columns)
+    assert saved_ok[["k_sd", "ratio", "width", "c"]].notna().all().all()
     # IC_L == 0: use_llm_view False and the weights equal Q0's exactly.
     z = build_weights(w, "stub-ow-a", "skills_1", cfg, ic_b=0.02, ic_l=0.0, inputs=inputs)
     assert not z.use_llm_view and "weights_equal_q0" in z.notes
@@ -174,6 +191,8 @@ def test_build_weights_every_portfolio_and_q0_rules(week_inputs: tuple[str, Week
     pd.testing.assert_series_equal(inv.weights, q0.weights)
     saved = read_weights(w, "mvo__stub-ow-b__bare")
     assert saved["z_L"].isna().all() and not saved["has_llm_view"].any()
+    assert saved["k_sd"].notna().all() and saved["ratio"].between(0.25, 4.0).all()
+    assert saved["width"].isna().all() and saved["c"].isna().all()
     # Deterministic.
     again = build_weights(w, "stub-ow-a", "skills_1", cfg, ic_b=0.02, ic_l=0.03, inputs=inputs)
     pd.testing.assert_series_equal(again.weights, p.weights)

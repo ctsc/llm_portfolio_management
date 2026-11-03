@@ -128,7 +128,8 @@ views:
   cold_start_weeks: 5             # DECISION(A6)
   cold_start_ic: 0.02             # DECISION(A6)
   ic_min_weeks: 3
-  confidence_clip: [0.1, 1.0]
+  kronos_spread_clip: [0.25, 4.0]  # DECISION(K1)
+  width_conf_clip: [0.1, 1.0]     # DECISION(E1)
   ic_signal_for_llm: llm_resid    # DECISION(E2)
 
 optimizer:
@@ -255,7 +256,7 @@ decisions:
     value: "Kronos 20-path spread mapping K1"
     status: confirmed
   - id: K1
-    value: "s_i=sd of 20 five-day return paths; r_i=clip(s_i/median(s),0.25,4); Omega_b,ii=tau Sigma_ii r_i"
+    value: "k_sd_i=sd of 20 five-day return paths; r_i=clip(k_sd_i/median(k_sd),0.25,4); Omega_b,ii=tau Sigma_ii r_i"
     status: confirmed
   - id: S1
     value: "MVO, Mean-CVaR, Robust MVO, Resampled MVO, Top-K; each has its own Q0"

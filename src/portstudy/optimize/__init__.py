@@ -25,7 +25,7 @@ from portstudy.paths import week_output_dir
 from portstudy.risk.covariance import RiskModel, read_risk_model
 from portstudy.risk.prior import read_prior
 from portstudy.types import PortfolioId, RatingSource, StrategyName
-from portstudy.views.build import Views, build_views, range_certainty, views_frame
+from portstudy.views.build import Views, build_views, views_frame
 from portstudy.views.ic import ICStore, trailing_ic
 from portstudy.views.residualize import residualize, valid_scores
 
@@ -37,7 +37,10 @@ WEIGHT_COLUMNS = [
     "pi",
     "z_b",
     "z_L",
+    "k_sd",
+    "ratio",
     "width",
+    "c",
     "has_llm_view",
 ]
 
@@ -159,11 +162,12 @@ def _optimize(
     extra: dict[str, Any],
     logger: logging.Logger,
     z_l: pd.Series | None = None,
-    width: pd.Series | None = None,
 ) -> Weights:
     sigma_matrix = inputs.risk.sigma_matrix
     post = (
-        black_litterman_q0(views, sigma_matrix) if q0_only else black_litterman(views, sigma_matrix)
+        black_litterman_q0(views, sigma_matrix, logger=logger)
+        if q0_only
+        else black_litterman(views, sigma_matrix, logger=logger)
     )
     previous = _previous_weights(inputs.week_id, portfolio, previous_week)
     mv = solve_mean_variance(post.mu_bl, sigma_matrix, cfg.risk.delta, cfg.optimizer, previous)
@@ -188,7 +192,7 @@ def _optimize(
     )
     for k, v in extra.items():
         setattr(out, k, v)
-    _save(out, views, inputs, z_l, width)
+    _save(out, views, inputs, z_l)
     return out
 
 
@@ -197,7 +201,6 @@ def _save(
     views: Views,
     inputs: WeekInputs,
     z_l: pd.Series | None,
-    width: pd.Series | None,
 ) -> None:
     frame = views_frame(views).set_index("ticker")
     idx = w.weights.index
@@ -209,15 +212,14 @@ def _save(
             "tilt": w.tilt.to_numpy(),
             "pi": frame["pi"].reindex(idx).to_numpy(),
             "z_b": inputs.z_b().reindex(idx).to_numpy(),
+            "k_sd": frame["k_sd"].reindex(idx).to_numpy(),
+            "ratio": frame["ratio"].reindex(idx).to_numpy(),
         }
     )
     has_l = z_l is not None and len(z_l) > 0
     df["z_L"] = z_l.reindex(idx).to_numpy() if has_l and z_l is not None else float("nan")
-    df["width"] = (
-        width.reindex(idx).to_numpy()
-        if has_l and width is not None and len(width)
-        else float("nan")
-    )
+    df["width"] = frame["width"].reindex(idx).to_numpy()
+    df["c"] = frame["c"].reindex(idx).to_numpy()
     df["has_llm_view"] = df["ticker"].isin(views.llm_tickers) if w.use_llm_view else False
     folder = weights_dir(w.week_id)
     write_csv_atomic(df.loc[:, WEIGHT_COLUMNS], folder / f"{w.portfolio}.csv")
@@ -236,7 +238,14 @@ def build_q0_weights(
     log = logger or logging.getLogger("portstudy.optimize")
     inp = inputs or WeekInputs.load(week_id)
     views = build_views(
-        inp.pi(), inp.sigma_vec(), inp.z_b(), ic_b, cfg.views, label=f"{strategy}__Q0", logger=log
+        inp.pi(),
+        inp.sigma_vec(),
+        inp.z_b(),
+        ic_b,
+        cfg.views,
+        k_sd=inp.k_sd(),
+        label=f"{strategy}__Q0",
+        logger=log,
     )
     return _optimize(PortfolioId.q0(strategy).key, inp, views, cfg, True, previous_week, {}, log)
 
@@ -262,16 +271,16 @@ def build_weights(
     n_invalid = int(len(scores) - len(valid))
     z_l = residualize(valid, inp.z_b()) if len(valid) else pd.Series(dtype=float)
     width = valid.set_index("ticker")["width"].astype(float) if len(valid) else None
-    view_certainty = range_certainty(width, cfg.views) if width is not None else None
     views = build_views(
         inp.pi(),
         inp.sigma_vec(),
         inp.z_b(),
         ic_b,
         cfg.views,
-        z_l,
-        view_certainty,
-        ic_l,
+        k_sd=inp.k_sd(),
+        z_l=z_l,
+        ic_l=ic_l,
+        width=width,
         logger=log,
         label=key,
     )
@@ -287,7 +296,6 @@ def build_weights(
         {"n_invalid": n_invalid},
         log,
         z_l=z_l,
-        width=width,
     )
     if q0_only:
         out.notes.append("weights_equal_q0")

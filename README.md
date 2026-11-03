@@ -32,7 +32,7 @@ Each week, for 100 sector-balanced S&P 500 stocks:
 | **Risk model** | Ledoit-Wolf covariance on 252 daily returns, scaled to weekly; market-cap prior `pi = delta Sigma w_mkt`. |
 | **LLM views** | Every model rates every stock from its ticker, name, sector, and the week's news, under `bare`, `placebo`, and `skills_1` through `skills_5` prompt configurations. Skills and placebo files are length-matched to the enabled skills mean. One stock per call, temperature 0, JSON output only. |
 | **Residualize** | LLM likely ratings are regressed on `z_b`; the standardized residual `z_L` is the part of the view the baseline did not already know. |
-| **Black-Litterman** | Baseline and LLM views enter as stacked identity views, scaled by trailing rank IC and range-derived certainty. |
+| **Black-Litterman** | Baseline and LLM views enter as stacked identity views, scaled by trailing rank IC, Kronos spread, and rating width. |
 | **Optimize** | v2 phase 1 enables MVO with a 5 percent cap. Its baseline-only portfolio is `mvo__Q0`; a steered portfolio is `mvo__<model>__<prompt-id>`. |
 | **Simulate** | Monday-open rebalance at raw ledger prices, 10 bps costs, daily stop-loss (-8%) and take-profit (+15%), dividends and splits handled. |
 | **Evaluate** | Weekly rank IC gaps (H1 to H3), pre-registered splits (H4), factor regressions and a shuffled-ratings test (H5), all with Holm correction. |
@@ -208,7 +208,7 @@ License: MIT.
 - **DECISION(S6), Resampled MVO draws** (`strategies.resampled.n_draws`): 200 draws balance Monte Carlo stability with a bounded number of solver runs.
 - **DECISION(S7), Top-K** (`strategies.topk.k`): selecting 20 names gives a fixed, interpretable equal-weight comparator.
 - **DECISION(S1), strategy-aware portfolio keys**: a strategy, source, Q0, or control has an unambiguous identity, while source-level IC remains shared across strategies.
-- **DECISION(K1), Kronos spread to baseline uncertainty** (`views.kronos_spread_clip`): `Omega_b,ii = tau Sigma_ii clip(s_i / median(s), 0.25, 4)`. Scaling by the median keeps average baseline uncertainty at the v1 level, so spread shifts trust between stocks. The clip stops one unusual forecast from making a view almost certain or almost ignored.
+- **DECISION(K1), Kronos spread to baseline uncertainty** (`views.kronos_spread_clip`): `Omega_b,ii = tau Sigma_ii clip(k_sd_i / median(k_sd), 0.25, 4)`. Scaling by the median keeps median baseline uncertainty at the v1 level, so spread shifts trust between stocks. The clip stops one unusual forecast from making a view almost certain or almost ignored.
 - **Seeded stub spread (chosen during build)**: use a lognormal with median 1 percent and log sigma 0.5; a separate stream seeded by `stub_seed + 1` preserves the existing `k` samples.
 - **Kronos sample adapter (chosen during build)**: use `predict_paths` when exposed and otherwise make repeated `sample_count=1` calls, matching the current upstream documentation that multi-sample outputs are averaged.
 - **No valid Kronos paths (chosen during build)**: set `k` and `k_sd` to NaN so baseline combination excludes the ticker instead of inventing a return.
@@ -216,9 +216,9 @@ License: MIT.
 - **Strategy seeds of 7 (chosen during build)**: reuses the existing Kronos seed for deterministic defaults where PLAN2 does not prescribe strategy-specific seeds.
 - **Exclude `PLAN2.md` from the banned-word scan (chosen during build)**: it contains the rules and examples that the scanner is designed to enforce, and remains untouched.
 - **DECISION(C3), range output**: the model reports low, likely, and high integer ratings, making uncertainty explicit without adding a separate confidence field.
-- **DECISION(E1), range-derived certainty**: `clip(1 - width / 10, 0.1, 1.0)` lets wider rating ranges contribute less to the LLM view.
+- **DECISION(E1), width-based LLM view uncertainty** (`views.width_conf_clip`): `c_i = clip(1 - width_i / 10, 0.1, 1.0)` and `Omega_L,ii = tau Sigma_ii / c_i`, so wider rating ranges receive less precision.
 - **Stub range width (chosen during build)**: half-width follows the absolute sampled noise with a minimum of one, so noisier synthetic ratings have wider ranges.
-- **Range certainty adapter (chosen during build)**: apply width-derived certainty at the optimizer boundary to preserve the existing view-builder interface until v2 phase 6.
+- **View-layer width conversion (chosen during build)**: calculate `c_i` in `build_views` so validated rating widths directly determine LLM view uncertainty.
 - **Empty endpoint metadata (chosen during build)**: keep the output column stable until a provider exposes the resolved serving endpoint.
 - **DECISION(B1), prompt configurations**: compare `bare`, `placebo`, and five named skills prompts, with `skills_5` disabled by default, so skills sources can be added without changing discovery code.
 - **DECISION(P1), prompt length tolerances**: keep each enabled skills file within 5 percent of the skills mean and placebo within 2 percent of that mean, controlling for prompt length.

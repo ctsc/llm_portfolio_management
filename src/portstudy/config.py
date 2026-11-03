@@ -182,7 +182,8 @@ class ViewsConfig(StrictModel):
     cold_start_weeks: int = 5
     cold_start_ic: float = 0.02
     ic_min_weeks: int = 3
-    confidence_clip: tuple[float, float] = (0.1, 1.0)
+    kronos_spread_clip: tuple[float, float] = (0.25, 4.0)
+    width_conf_clip: tuple[float, float] = (0.1, 1.0)
     ic_signal_for_llm: Literal["llm_resid", "llm_raw"] = "llm_resid"
 
 

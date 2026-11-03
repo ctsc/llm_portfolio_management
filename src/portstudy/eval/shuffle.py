@@ -32,7 +32,7 @@ from portstudy.pipeline import fallback as fb
 from portstudy.sim import PriceBook, WeekPlan, ledger_book, replay
 from portstudy.sim.records import daily_frame, read_daily
 from portstudy.types import PortfolioId, StrategyName
-from portstudy.views.build import build_views, range_certainty
+from portstudy.views.build import build_views
 from portstudy.views.residualize import residualize, valid_scores
 
 
@@ -95,7 +95,7 @@ def _shuffled_weights(
     sigma_matrix = inp.risk.sigma_matrix
     if is_q0:
         shuffled_zb = pd.Series(rng.permutation(z_b.to_numpy()), index=z_b.index)
-        views = build_views(pi, sigma_vec, shuffled_zb, state.ic_b, cfg.views)
+        views = build_views(pi, sigma_vec, shuffled_zb, state.ic_b, cfg.views, k_sd=inp.k_sd())
         post = black_litterman_q0(views, sigma_matrix)
     else:
         if not state.use_llm_view or state.q0_weights is None:
@@ -108,9 +108,16 @@ def _shuffled_weights(
         ].to_numpy()[perm]
         z_l = residualize(shuffled, z_b)
         width = shuffled.set_index("ticker")["width"].astype(float)
-        view_certainty = range_certainty(width, cfg.views)
         views = build_views(
-            pi, sigma_vec, z_b, state.ic_b, cfg.views, z_l, view_certainty, state.ic_l
+            pi,
+            sigma_vec,
+            z_b,
+            state.ic_b,
+            cfg.views,
+            k_sd=inp.k_sd(),
+            z_l=z_l,
+            ic_l=state.ic_l,
+            width=width,
         )
         if not views.use_llm_view:
             return state.q0_weights

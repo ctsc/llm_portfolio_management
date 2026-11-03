@@ -12,7 +12,7 @@ from scipy import stats
 
 from portstudy import calendar as cal
 from portstudy.config import ModelRegistry, StudyConfig, ViewsConfig
-from portstudy.views.build import build_views, range_certainty, views_frame
+from portstudy.views.build import build_views, views_frame, width_to_c
 from portstudy.views.ic import ICStore, rank_ic, trailing_ic, weekly_returns
 from portstudy.views.residualize import residualize, valid_scores
 
@@ -139,10 +139,10 @@ def test_residual_is_uncorrelated_with_zb_and_skips_invalid() -> None:
     assert (residualize(const, z_b) == 0).all()
 
 
-def test_range_certainty_decreases_with_width() -> None:
+def test_width_scale_decreases_with_width() -> None:
     width = pd.Series([0, 5, 10], index=["narrow", "middle", "wide"])
-    certainty = range_certainty(width, ViewsConfig())
-    np.testing.assert_allclose(certainty.to_numpy(), [1.0, 0.5, 0.1])
+    c = width_to_c(width, ViewsConfig())
+    np.testing.assert_allclose(c.to_numpy(), [1.0, 0.5, 0.1])
 
 
 def _toy_inputs(n: int = 30) -> tuple[pd.Series, pd.Series, pd.Series]:
@@ -158,11 +158,13 @@ def test_zero_ic_gives_views_equal_to_pi_and_drops_rows() -> None:
     pi, sigma, z_b = _toy_inputs()
     cfg = ViewsConfig()
     z_l = pd.Series(np.random.default_rng(6).normal(size=30), index=pi.index)
-    conf = pd.Series(0.7, index=pi.index)
-    v = build_views(pi, sigma, z_b, ic_b=0.0, cfg=cfg, z_l=z_l, confidence=conf, ic_l=0.0)
+    width = pd.Series(5.0, index=pi.index)
+    v = build_views(pi, sigma, z_b, ic_b=0.0, cfg=cfg, z_l=z_l, width=width, ic_l=0.0)
     pd.testing.assert_series_equal(v.q_b, pi, check_names=False)
     assert v.use_llm_view is False and v.use_baseline_view is False
     assert "llm_view_dropped:ic_zero" in v.notes and "baseline_view_dropped" in v.notes
+    pd.testing.assert_series_equal(v.width, width)
+    pd.testing.assert_series_equal(v.c, width_to_c(width, cfg))
     assert len(v.q_l) == 0 and v.llm_tickers == []
 
 
@@ -171,19 +173,29 @@ def test_views_formulas_and_per_stock_rule() -> None:
     cfg = ViewsConfig()
     valid = pi.index[5:]
     z_l = pd.Series(np.random.default_rng(7).normal(size=len(valid)), index=valid)
-    conf = pd.Series(np.linspace(0.0, 1.2, len(valid)), index=valid)
-    v = build_views(pi, sigma, z_b, ic_b=0.03, cfg=cfg, z_l=z_l, confidence=conf, ic_l=0.05)
+    width = pd.Series(np.linspace(0.0, 10.0, len(valid)), index=valid)
+    k_sd = pd.Series(0.02, index=pi.index)
+    v = build_views(pi, sigma, z_b, ic_b=0.03, cfg=cfg, k_sd=k_sd, z_l=z_l, width=width, ic_l=0.05)
     np.testing.assert_allclose(v.q_b.to_numpy(), (pi + 0.03 * sigma * z_b).to_numpy())
     np.testing.assert_allclose(v.omega_b.to_numpy(), (cfg.tau * sigma**2).to_numpy())
     assert v.use_llm_view and v.llm_tickers == list(valid)
-    np.testing.assert_allclose(v.q_l.to_numpy(), (pi.loc[valid] + 0.05 * sigma.loc[valid] * z_l).to_numpy())
-    clipped = conf.clip(0.1, 1.0)
-    np.testing.assert_allclose(v.omega_l.to_numpy(), (cfg.tau * sigma.loc[valid] ** 2 / clipped).to_numpy())
+    np.testing.assert_allclose(
+        v.q_l.to_numpy(), (pi.loc[valid] + 0.05 * sigma.loc[valid] * z_l).to_numpy()
+    )
+    c = width_to_c(width, cfg)
+    np.testing.assert_allclose(
+        v.omega_l.to_numpy(), (cfg.tau * sigma.loc[valid] ** 2 / c).to_numpy()
+    )
     frame = views_frame(v)
     assert frame["has_llm_view"].sum() == len(valid)
     assert frame.loc[~frame["has_llm_view"], "q_L"].isna().all()
+    assert frame["k_sd"].notna().all() and (frame["ratio"] == 1.0).all()
+    pd.testing.assert_series_equal(
+        frame.set_index("ticker")["width"].dropna(), width.rename_axis("ticker").rename("width")
+    )
+    pd.testing.assert_series_equal(frame.set_index("ticker")["c"].dropna(), c.rename_axis("ticker"))
     # Every stock invalid: no LLM view at all.
-    v2 = build_views(pi, sigma, z_b, ic_b=0.03, cfg=cfg, z_l=pd.Series(dtype=float), confidence=None, ic_l=0.05)
+    v2 = build_views(pi, sigma, z_b, ic_b=0.03, cfg=cfg, z_l=pd.Series(dtype=float), ic_l=0.05)
     assert v2.use_llm_view is False and "llm_view_dropped:no_valid_outputs" in v2.notes
 
 
@@ -219,16 +231,16 @@ def test_views_build_for_every_portfolio_over_synthetic_weeks(work_data_dir: Pat
                 sub = scores[(scores["model"] == spec.id) & (scores["config_id"] == conf.id)]
                 v = valid_scores(sub)
                 z_l = residualize(v, base["z_b"])
-                certainty = range_certainty(v.set_index("ticker")["width"], cfg.views)
                 views = build_views(
                     prior["pi"],
                     prior["sigma"],
                     base["z_b"],
                     ic_b=0.02,
                     cfg=cfg.views,
+                    k_sd=base["k_sd"],
                     z_l=z_l,
-                    confidence=certainty,
                     ic_l=0.02,
+                    width=v.set_index("ticker")["width"],
                     label=f"{spec.id}__{conf.id}",
                 )
                 assert views.use_llm_view and views.use_baseline_view

@@ -31,6 +31,17 @@ class MVResult:
     fallback_flag: str | None = None
 
 
+def _normalize_capped_weights(raw: np.ndarray, cap: float) -> np.ndarray:
+    weights: np.ndarray = np.clip(raw, 0.0, cap)
+    total = float(weights.sum())
+    if total > 1.0:
+        weights /= total
+    elif total < 1.0:
+        headroom = cap - weights
+        weights += (1.0 - total) * headroom / headroom.sum()
+    return weights
+
+
 def _cholesky_factor(sigma: np.ndarray) -> np.ndarray:
     sym = 0.5 * (sigma + sigma.T)
     try:
@@ -71,9 +82,7 @@ def solve_mean_variance(
             continue
         if problem.status in ("optimal", "optimal_inaccurate") and w.value is not None:
             raw = np.asarray(w.value, dtype=float)
-            # Clean tiny violations, then renormalize so the sum is exactly 1.
-            raw = np.clip(raw, 0.0, cfg.max_weight)
-            raw = raw / raw.sum()
+            raw = _normalize_capped_weights(raw, cfg.max_weight)
             return MVResult(
                 pd.Series(raw, index=tickers, name="weight"), name, float(problem.value)
             )

@@ -385,3 +385,30 @@ Choices made while unattended:
 - Set stub `k_sd` to a per-ticker lognormal with median 1 percent and log sigma 0.5. Use a separate stream seeded with `seed + 1` so adding spread does not change v1 `k`.
 - Use `predict_paths` as an optional per-path adapter; otherwise use repeated `sample_count=1` calls because the current public upstream documentation describes multi-sample output as averaged.
 - If all Kronos paths are invalid, set both `k` and `k_sd` to NaN so `combine` excludes that ticker rather than inventing a return.
+
+## v2 phase 6: width-based view uncertainty and BL posterior covariance
+
+Built:
+- Added the DECISION(K1) spread ratio to baseline view uncertainty and the DECISION(E1) width scale to LLM view uncertainty. `views_frame` and stored weights now include `k_sd`, `ratio`, `width`, and `c`.
+- Added `Posterior.cov_mu`. The Black-Litterman precision matrix is factored once with Cholesky; triangular solves return the posterior mean and covariance. A failed factorization gets one logged diagonal-jitter retry before `OptimizerError`.
+- Updated the view configuration, optimizer output columns, and shuffle view construction.
+- Updated README and design/config-reference formulas for v2 phase 6.
+
+Changed v1 tests and reasons:
+- `tests/unit/test_phase7_views.py`: migrated the view formulas and synthetic-week builder to pass spread and width inputs.
+- `tests/unit/test_phase8_optimize.py`: replaced the old certainty-input test with narrow-versus-wide range behavior, migrated the explicit BL formula test, and added a cap-preserving solver-tolerance regression test.
+
+Tests and checks:
+- Full pytest: 239 passed, 3 existing NumPy empty-slice warnings, 567.44 seconds.
+- `ruff check src tests scripts` passed. `mypy src scripts` passed with no issues in 80 source files.
+- Manifest, placebo-length, banned-word, secret, and yamllint checks passed. `scripts/smoke_real_services.py --dry-run` printed payloads only and made no requests.
+- `ruff format --check` passed for changed source files and `tests/unit/test_v2_phase6_views_bl.py`. The two modified v1 tests remain unformatted within the known 27-file baseline, so I left their unrelated formatting unchanged.
+- `git diff --check` and LF line-ending checks passed.
+
+Choices made while unattended:
+- Kept `cov_mu` as a ticker-labeled DataFrame so downstream strategies can align it with `mu_bl`.
+- Used the existing SciPy dependency's triangular solver for the two Cholesky solves.
+- Treated missing, infinite, or negative path spreads as unavailable, assigning ratio 1 to those stocks and logging the fallback.
+- Treated an omitted `k_sd` series as all missing, which keeps callers without baseline spread data on the neutral ratio.
+- Kept validated width and `c` values available for audit output when `IC_L` disables LLM view rows.
+- Repaired solver-tolerance cleanup by redistributing any shortfall only across remaining position-cap headroom. The v2 phase 6 posterior change exposed that the previous clip-then-renormalize step could exceed the fixed maximum weight.

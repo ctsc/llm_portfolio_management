@@ -93,7 +93,10 @@ Rank IC:    Spearman(likely rating at Friday cutoff, total return from next Mond
 Trailing IC: mean of last 8 scored weeks, floored at 0 ; fixed 0.02 for the first 5 live weeks
 Residual:   s = a + c z_b + e ;  z_L = standardize(e)        (invalid outputs excluded)
 Views:      q_b = pi + IC_b sigma z_b ;  q_L = pi + IC_L sigma z_L
-Uncertainty: Omega_b,ii = tau Sigma_ii ;  Omega_L,ii = tau Sigma_ii / clip(1 - width_i / 10, 0.1, 1) ;  tau = 0.05
+Uncertainty: r_i = clip(k_sd_i / median(k_sd), 0.25, 4)
+             Omega_b,ii = tau Sigma_ii r_i
+             c_i = clip(1 - width_i / 10, 0.1, 1) ;  Omega_L,ii = tau Sigma_ii / c_i
+             tau = 0.05
 Zero IC:    IC_L = 0  ->  drop LLM view rows, weights = Q0 weights
 ```
 
@@ -104,14 +107,18 @@ the baseline view.
 ## Black-Litterman and optimizer (`optimize/`)
 
 ```
-BL:         mu = [ inv(tau Sigma) + P' inv(Omega) P ]^-1 [ inv(tau Sigma) pi + P' inv(Omega) q ]   P = [I; I]
+BL:         A = inv(tau Sigma) + P' inv(Omega) P
+            mu = solve(A, inv(tau Sigma) pi + P' inv(Omega) q) ;  M = inv(A)
+            P = [I; I_L], where I_L selects stocks with valid LLM views
 Q0:         same with P = I, q = q_b, Omega = Omega_b
 Optimizer:  max w' mu - (delta/2) w' Sigma w   s.t. sum w = 1, 0 <= w_i <= 0.05
 ```
 
-Omega is diagonal, so the system is solved as `(I + tau Sigma D) mu = pi + tau Sigma d`
-without inverting Sigma. OSQP, then CLARABEL; on failure the previous week's weights are used
-with `fallback_flag = solver_failed`. At least 20 stocks are required for the cap.
+`black_litterman` builds A once, factors it with Cholesky, and uses triangular solves for both
+`mu` and `M`, returned as `Posterior.cov_mu`. A failed factorization retries once with diagonal
+jitter of `1e-12 * trace(A) / N`, then raises `OptimizerError`. OSQP, then CLARABEL; on failure
+the previous week's weights are used with `fallback_flag = solver_failed`. At least 20 stocks are
+required for the cap.
 
 ## Simulator (`sim/`)
 
