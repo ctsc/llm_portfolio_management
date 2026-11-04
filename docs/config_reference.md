@@ -160,7 +160,7 @@ failed this long before the lock so that J7 can still write; decision N1).
 | `h4_splits` | market_direction, volatility, earnings_week | Exploratory splits | G4 |
 | `min_group_size` | 10 | Minimum stocks per group for the earnings split IC | |
 | `h3b.split`, `h3b.min_group_size` | median, 10 | H3b width split per source-week; weeks with a smaller group or all-equal widths are skipped | G3b |
-| `shuffle.n_shuffles`, `seed`, `processes` | 500, 99, 1 | Shuffled-ratings test | G6 |
+| `shuffle.n_shuffles`, `seed`, `processes`, `shard_size` | 500, 99, 1, 25 | Shuffled-ratings test; `shard_size` shuffles per shard file (one Slurm array task) | G6 |
 
 ### backup
 

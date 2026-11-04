@@ -255,6 +255,7 @@ class ShuffleConfig(StrictModel):
     n_shuffles: int = 500
     seed: int = 99
     processes: int = 1
+    shard_size: int = 25
 
 
 class H3bConfig(StrictModel):

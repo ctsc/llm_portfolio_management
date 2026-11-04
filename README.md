@@ -202,6 +202,9 @@ License: MIT.
 
 ## Design choices
 
+- **v2 phase 11 per-week shuffle RNG (chosen during build)**: each (shuffle index, week) seeds its own RNG from SHA-256 of (seed, portfolio, index, week), so a shard can run any subset of weeks or indices and still match a serial run.
+- **v2 phase 11 report runs missing shards in-process (chosen during build)**: `shuffle_test` runs missing shards itself unless `require_complete` is set; the `collect` command sets it and fails listing every missing range.
+- **v2 phase 11 shard files under `data/shuffle/` (chosen during build)**: one JSON per shard with a `complete` marker and the per-index metrics, keeping the file count at shuffles / 25 per portfolio.
 - **v2 phase 10 H4 splits per strategy (chosen during build)**: the v1 market direction and volatility splits run both on the source IC gaps (as in v1) and on each strategy's weekly return gap vs its Q0; the earnings split stays on source IC because it is defined per stock rating.
 - **v2 phase 10 stock-week table per source (chosen during build)**: `EvalData.stock_week` holds `likely:<source>` and `width:<source>` columns once per rating source rather than once per portfolio, since five strategies share each source's ratings and H3b needs the width.
 - **v2 phase 10 fallback counts in the header (chosen during build)**: "fallback weeks" counts weeks in which at least one source fell back; "fallback-served" counts steered portfolio-weeks that traded a Q0 copy.

@@ -205,6 +205,18 @@ P1 values read from config, then one section per strategy (metrics, H2 return ta
 equity curve with its Q0, steered portfolios, HRP, and EW) and a warning for any strategy whose
 mean `view_shift` is below 0.01. H5: factor regression on daily returns for every portfolio (G5)
 and the shuffled-ratings test over every steered portfolio and each strategy's Q0, Holm within
-each strategy, with view strength held fixed (G6). The primary paired p-value is the exact sign-flip
+each strategy, with view strength held fixed (G6).
+
+### Sharded shuffle (`eval/shuffle.py`, v2 phase 11)
+
+Each shuffle permutes the `low, likely, high, width` rows across stocks per clean week with an
+RNG seeded by SHA-256 of `(seed, portfolio, index, week)`, then reruns residualize, views, BL,
+and the portfolio's own strategy; Q0 permutes `z_b` and `k_sd` together. CVaR and resampled MVO
+draw their common random numbers from `(week, strategy)`, so the identity permutation reproduces
+the stored weights. Shuffles are grouped into `Shard(portfolio, start, stop)` of
+`eval.shuffle.shard_size`; `run_shard` writes `data/shuffle/<portfolio>/<start>_<stop>.json`
+atomically with `complete: true`, skips a complete file, and reruns a file without the marker.
+`collect` fails listing every missing range; `shuffle_test` in the report runs missing shards
+in-process first. A portfolio with no clean weeks is written as skipped and reported. The primary paired p-value is the exact sign-flip
 permutation; Newey-West is reported beside it. Gaps below the minimum detectable gap are
 inconclusive, not evidence of no effect. A null result is acceptable.

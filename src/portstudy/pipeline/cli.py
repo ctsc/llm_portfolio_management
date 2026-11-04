@@ -199,6 +199,93 @@ def eval_cmd(
     typer.echo(f"report written to {out}")
 
 
+shuffle_app = typer.Typer(help="H5 shuffled-ratings test, sharded for a Slurm array.")
+app.add_typer(shuffle_app, name="shuffle")
+
+
+def _shuffle_setup(synthetic: bool, config: str | None) -> tuple[RunContext, list[str], object]:
+    from portstudy.eval.data import load_eval_data
+
+    ctx = _context(synthetic, False, True, None, None, config)
+    data = load_eval_data(ctx.cfg, ctx.portfolio_keys())
+    return ctx, data.weeks, data
+
+
+@shuffle_app.command("plan")
+def shuffle_plan_cmd(
+    out: str = typer.Option("data/shuffle/shards.csv", "--out"),
+    n_shuffles: int | None = typer.Option(None, "--n-shuffles"),
+    synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config"),
+) -> None:
+    from portstudy.eval.shuffle import plan_shards, write_shard_plan
+
+    ctx = _context(synthetic, False, True, None, None, config)
+    n = n_shuffles if n_shuffles is not None else ctx.cfg.eval.shuffle.n_shuffles
+    shards = plan_shards(ctx.portfolio_keys(), n, ctx.cfg.eval.shuffle.shard_size)
+    write_shard_plan(shards, Path(out))
+    typer.echo(f"{len(shards)} shards written to {out}")
+
+
+@shuffle_app.command("run")
+def shuffle_run_cmd(
+    shard_index: int = typer.Option(..., "--shard-index"),
+    shards: str = typer.Option("data/shuffle/shards.csv", "--shards"),
+    synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config"),
+) -> None:
+    from portstudy.eval.shuffle import read_shard_plan, run_shard
+
+    plan = read_shard_plan(Path(shards))
+    if not 0 <= shard_index < len(plan):
+        typer.echo(f"shard index {shard_index} outside 0..{len(plan) - 1}")
+        raise typer.Exit(code=2)
+    ctx, weeks, _ = _shuffle_setup(synthetic, config)
+    path = run_shard(ctx.cfg, plan[shard_index], weeks)
+    typer.echo(f"shard {shard_index} ({plan[shard_index].portfolio}) written to {path}")
+
+
+@shuffle_app.command("run-local")
+def shuffle_run_local_cmd(
+    processes: int = typer.Option(1, "--processes"),
+    shards: str = typer.Option("data/shuffle/shards.csv", "--shards"),
+    synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config"),
+) -> None:
+    from portstudy.eval.shuffle import read_shard_plan, run_shards_local
+
+    plan = read_shard_plan(Path(shards))
+    ctx, weeks, _ = _shuffle_setup(synthetic, config)
+    paths = run_shards_local(ctx.cfg, plan, weeks, processes=processes)
+    typer.echo(f"{len(paths)} shards complete")
+
+
+@shuffle_app.command("collect")
+def shuffle_collect_cmd(
+    shards: str = typer.Option("data/shuffle/shards.csv", "--shards"),
+    out: str | None = typer.Option(None, "--out", help="CSV path (default: report dir)"),
+    synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config"),
+) -> None:
+    from portstudy.eval.shuffle import MissingShards, read_shard_plan, shuffle_test
+    from portstudy.io import write_csv_atomic
+    from portstudy.paths import report_dir
+
+    plan = read_shard_plan(Path(shards))
+    ctx, weeks, _ = _shuffle_setup(synthetic, config)
+    try:
+        table, dists = shuffle_test(
+            ctx.cfg, ctx.portfolio_keys(), weeks, shards=plan, require_complete=True
+        )
+    except MissingShards as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    target = Path(out) if out else report_dir() / "h5_shuffle.csv"
+    write_csv_atomic(table, target)
+    write_csv_atomic(dists, target.with_name("h5_shuffle_distributions.csv"))
+    typer.echo(f"{len(table)} portfolios collected to {target}")
+
+
 @app.command("jobs")
 def jobs_cmd() -> None:
     for name in JOBS:

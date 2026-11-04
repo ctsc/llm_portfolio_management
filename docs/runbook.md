@@ -106,3 +106,16 @@ is written to `data/benchmarks/<date>.csv`. `--jobs` times J1 to J9 once on the 
 instead. When the universe is built, the log shows `universe_thin_sector` for every sector that
 could not fill its quota and `universe_leftover_slots` for the slots filled by the highest-volume
 leftovers.
+
+## 8. Shuffle test as a Slurm array
+
+```
+portstudy shuffle plan --out data/shuffle/shards.csv        # one row per shard
+portstudy shuffle run --shard-index $SLURM_ARRAY_TASK_ID --shards data/shuffle/shards.csv
+portstudy shuffle run-local --processes 8                   # same work on one machine
+portstudy shuffle collect                                   # fails listing missing shards
+```
+
+Shards can run in any order and any number of times; a complete shard file is skipped and a
+half-written one (no `complete` marker) is rerun. `collect` writes `h5_shuffle.csv` and the
+distributions to the report folder with Holm applied within each strategy.

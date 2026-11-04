@@ -194,6 +194,7 @@ eval:
     n_shuffles: 500               # DECISION(G6)
     seed: 99
     processes: 1
+    shard_size: 25                # shuffles per Slurm array task (one file per shard)
 
 backup:
   keep_zips: true

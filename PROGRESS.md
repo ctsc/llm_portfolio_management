@@ -516,3 +516,18 @@ Changed v1 tests and reasons: `tests/integration/test_phase11_report.py` expects
 UNVERIFIED: none new.
 
 Choices made while unattended: see the README design choices for v2 phase 10 (splits per strategy, stock-week table per source, fallback count definitions, header values).
+
+## v2 phase 11: sharded shuffle test
+
+Built:
+- `eval/shuffle.py`: per-week RNG `week_rng(seed, portfolio, index, week)`; `shuffled_weights` permutes the range rows (`low, likely, high, width`) and reruns residualize, views, BL, and the portfolio's own strategy through `run_strategy` (Q0 permutes `z_b` and `k_sd` together); `Shard`, `plan_shards`, `write_shard_plan`, `read_shard_plan`, `run_shard` (atomic JSON with `complete` marker under `data/shuffle/<portfolio>/`), `run_shards_local` (optionally multi-process), `collect_shards` raising `MissingShards` with every missing range, `shuffle_table` (p-values, Holm within each strategy), `shuffle_test(shards=, require_complete=)`, `identity_weights`.
+- `pipeline/cli.py`: `portstudy shuffle plan|run|run-local|collect`.
+- `config.py` `ShuffleConfig.shard_size` (25) and `config/study.yaml`.
+
+Tests (`tests/integration/test_v2_phase11_shuffle.py`): 20 shuffles in 4 shards serial, reversed, rerun (files untouched), and in 4 processes give identical results; a missing shard fails `collect` with `[5, 10)` listed and is run by the in-process path; a shard file without its marker or with invalid JSON is rerun to identical content; every shuffle keeps the multiset of range triples per week and different (index, week) keys give different permutations; the identity permutation equals the stored weights for every strategy's Q0 and steered portfolio (atol 1e-6); the plan covers each Q0 and steered portfolio, no controls, and round-trips through CSV.
+
+Changed v1 tests and reasons: none beyond the v2 phase 10 report test (shuffle table now carries `strategy`).
+
+UNVERIFIED: Slurm array behaviour on ARCTIC (v2 phase 12 adds the sbatch file).
+
+Choices made while unattended: see the README design choices for v2 phase 11.
