@@ -164,7 +164,7 @@ failed this long before the lock so that J7 can still write; decision N1).
 
 ### backup
 
-`keep_zips` true; `master_tables` (llm_scores, trades, daily_values, weekly_ic, fallback_log,
+`keep_zips` true; `rsync_target` null (optional rsync destination for the dated backup folder and zip, v2 phase 12); `master_tables` (llm_scores, trades, daily_values, weekly_ic, fallback_log,
 cost_log). Decision N3.
 
 ### decisions

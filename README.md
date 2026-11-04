@@ -202,6 +202,10 @@ License: MIT.
 
 ## Design choices
 
+- **v2 phase 12 health check marks sources, J4 skips them (chosen during build)**: a failed gateway health check without `--gateway-fallback` writes a failed `run_status.json` entry per source of the failing model and `gateway_health.json`; J4 skips those models so the run continues and J6 serves the strategy's Q0 (N1). With the flag J4 runs every model (eligible ones on the fallback endpoint).
+- **v2 phase 12 `--until` and `--check-walltime` on `run_weekend.py` (chosen during build)**: login mode needs J3 to J5 on the login node and the plan asks for a walltime warning before submitting; both live in the script so the sbatch wrappers stay thin.
+- **v2 phase 12 sbatch flags from `submit_weekend.sh` (chosen during build)**: account, partition, GRES and walltime are passed as `sbatch` flags from `arctic.env`, so no `#SBATCH` line holds a `TBD`; `common.sh` refuses any `TBD` value.
+- **v2 phase 12 rsync never raises (chosen during build)**: the local backup is complete before rsync runs, so a transfer failure is printed and logged and J9 still succeeds.
 - **v2 phase 11 per-week shuffle RNG (chosen during build)**: each (shuffle index, week) seeds its own RNG from SHA-256 of (seed, portfolio, index, week), so a shard can run any subset of weeks or indices and still match a serial run.
 - **v2 phase 11 report runs missing shards in-process (chosen during build)**: `shuffle_test` runs missing shards itself unless `require_complete` is set; the `collect` command sets it and fails listing every missing range.
 - **v2 phase 11 shard files under `data/shuffle/` (chosen during build)**: one JSON per shard with a `complete` marker and the per-index metrics, keeping the file count at shuffles / 25 per portfolio.

@@ -161,9 +161,7 @@ class WeekRunner:
     def provider(self, model_id: str, config_id: str | None = None) -> LlmProvider:
         if model_id not in self._providers:
             status = (
-                read_run_status(self.week_id).get(f"{model_id}__{config_id}")
-                if config_id
-                else None
+                read_run_status(self.week_id).get(f"{model_id}__{config_id}") if config_id else None
             )
             self._providers[model_id] = make_provider(
                 self.registry.get(model_id),
@@ -335,8 +333,7 @@ class WeekRunner:
                     record = json.loads(line)
                     records[str(record["custom_id"])] = record
         text = "".join(
-            json.dumps(record, sort_keys=True, default=str) + "\n"
-            for record in records.values()
+            json.dumps(record, sort_keys=True, default=str) + "\n" for record in records.values()
         )
         write_text_atomic(text, archive_path)
         path.unlink()
@@ -371,9 +368,7 @@ class WeekRunner:
                     state="incomplete",
                     reason=f"{len(records)}/{len(source_tasks)} done",
                     n_tasks=len(source_tasks),
-                    n_done=sum(
-                        task.item.custom_id in records for task in source_tasks
-                    ),
+                    n_done=sum(task.item.custom_id in records for task in source_tasks),
                     assessed_at=now,
                     endpoint=spec.serving,
                     started_at=previous.started_at if previous and previous.started_at else now,
@@ -407,9 +402,7 @@ class WeekRunner:
         self._update_open_weight_status(task, record)
         return record
 
-    def _update_open_weight_status(
-        self, task: Task, record: dict[str, Any]
-    ) -> None:
+    def _update_open_weight_status(self, task: Task, record: dict[str, Any]) -> None:
         statuses = read_run_status(self.week_id)
         key = f"{task.model}__{task.config_id}"
         status = statuses.get(key)
@@ -500,9 +493,7 @@ class WeekRunner:
                 summary.n_cached += 1
                 summary.n_invalid += 0 if record["valid"] else 1
                 summary.cost_usd += float(record["cost_usd"])
-                summary.per_config[task.config_id] = (
-                    summary.per_config.get(task.config_id, 0) + 1
-                )
+                summary.per_config[task.config_id] = summary.per_config.get(task.config_id, 0) + 1
             else:
                 remaining.append((task, key))
 
@@ -866,6 +857,13 @@ class WeekRunner:
         n_invalid = sum(1 for r in done if not r["valid"])
         current = now or dt.datetime.now(tz=ET)
         source_status = read_run_status(self.week_id).get(f"{model}__{config_id}")
+        if (
+            source_status is not None
+            and source_status.state == "failed"
+            and source_status.reason == "gateway_health_check_failed"
+            and not done
+        ):
+            return source_status  # marked by the pre-J4 health check (N1); nothing ran
         endpoints = {str(record.get("endpoint", "")) for record in done}
         endpoints.discard("")
         if len(endpoints) > 1:

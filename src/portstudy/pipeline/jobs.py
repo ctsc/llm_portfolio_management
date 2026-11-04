@@ -184,9 +184,15 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
             raise RuntimeError(
                 "J2 (baseline, including the forecaster) is not done; J4 waits for it"
             )
+        from portstudy.llm.health import unhealthy_models
+
         runner = _week_runner(ctx, week_id)
         out: dict[str, Any] = {}
+        unhealthy = unhealthy_models(week_id) if not ctx.gateway_fallback else set()
         for model in ctx.open_weight_models():
+            if model in unhealthy:  # marked failed by the gateway health check (N1)
+                out[model] = {"skipped": "gateway_health_check_failed"}
+                continue
             s = runner.run_open_weight(model)
             out[model] = {"n_calls": s.n_calls, "n_cached": s.n_cached, "n_invalid": s.n_invalid}
         return out

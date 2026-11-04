@@ -127,6 +127,8 @@ def run_backup(
         print(f"backup folder: {target}")
         if zip_path is not None:
             print(f"backup zip:    {zip_path}")
+        if cfg.backup.rsync_target:
+            rsync_backup(target, zip_path, cfg.backup.rsync_target, log)
         log.info(
             "backup_written",
             extra={
@@ -140,6 +142,28 @@ def run_backup(
     else:
         print(f"dry run: backup folder would be {target}")
     return target
+
+
+def rsync_command(target: Path, zip_path: Path | None, destination: str) -> list[str]:
+    sources = [f"{target}/"] if zip_path is None else [f"{target}/", str(zip_path)]
+    return ["rsync", "-a", "--partial", *sources, destination.rstrip("/") + f"/{target.name}/"]
+
+
+def rsync_backup(
+    target: Path, zip_path: Path | None, destination: str, log: logging.Logger
+) -> bool:
+    """Copy the dated folder (and zip) to `backup.rsync_target`; a failure is reported, not
+    raised, because the local backup is already complete."""
+    cmd = rsync_command(target, zip_path, destination)
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        print(f"backup rsync FAILED ({destination}): {detail.strip()}")
+        log.warning("backup_rsync_failed", extra={"extra_fields": {"error": detail.strip()}})
+        return False
+    print(f"backup rsync:  {destination}")
+    return True
 
 
 def verify_backup(path: Path) -> list[str]:

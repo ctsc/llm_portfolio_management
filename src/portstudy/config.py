@@ -285,6 +285,7 @@ class EvalConfig(StrictModel):
 
 class BackupConfig(StrictModel):
     keep_zips: bool = True
+    rsync_target: str | None = None  # e.g. user@host:/path, pulls the dated folders off ARCTIC
     master_tables: list[str] = Field(
         default_factory=lambda: [
             "llm_scores",

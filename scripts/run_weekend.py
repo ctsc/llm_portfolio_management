@@ -11,7 +11,13 @@ command to rerun that one job. Rerunning the script resumes where it stopped.
 
 Usage: python scripts/run_weekend.py [--week 2026-W46] [--dry-run] [--synthetic]
                                      [--allow-over-budget] [--gateway-fallback] [--now ISO]
-                                     [--poll-seconds N]
+                                     [--poll-seconds N] [--from J3] [--until J5]
+                                     [--check-walltime HH:MM:SS]
+
+v2 phase 12: `--from <job>` resumes at that job (earlier jobs are left as they are), `--until`
+stops after a job (login mode runs J3 to J5 on the login node), and before J4 a health check
+sends one tiny call per gateway model; on a failure without `--gateway-fallback` the D2 steps
+are printed and the affected sources are marked failed (N1) so the run can continue.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from portstudy import calendar as cal
+from portstudy.llm import health
 from portstudy.llm.runner import lock_deadline
 from portstudy.pipeline import fallback as fb
 from portstudy.pipeline.context import RunContext, default_context, synthetic_clock
@@ -51,9 +58,7 @@ def say(msg: str) -> None:
     print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def rerun_command(
-    job: str, week: str, synthetic: bool, gateway_fallback: bool = False
-) -> str:
+def rerun_command(job: str, week: str, synthetic: bool, gateway_fallback: bool = False) -> str:
     return (
         f"portstudy run-job {job} --week {week}"
         + (" --synthetic" if synthetic else "")
@@ -161,7 +166,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=None, help="study YAML path")
     parser.add_argument("--now", default=None, help="override the clock, ISO datetime with offset")
     parser.add_argument("--poll-seconds", type=int, default=None)
+    parser.add_argument("--from", dest="from_job", default="J1", help="resume at this job")
+    parser.add_argument("--until", dest="until_job", default="J9", help="stop after this job")
+    parser.add_argument(
+        "--check-walltime", default=None, help="Slurm walltime; warn if it ends after the lock"
+    )
     args = parser.parse_args(argv)
+    if args.from_job not in STEP_ORDER or args.until_job not in STEP_ORDER:
+        parser.error(f"--from/--until must be one of {STEP_ORDER}")
 
     clock = None
     if args.now:
@@ -184,10 +196,18 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     now = ctx.now()
+    if args.check_walltime:
+        ends = now + health.parse_walltime(args.check_walltime)
+        deadline = lock_deadline(week, ctx.cfg)
+        if ends > deadline:
+            say(
+                f"warning: walltime {args.check_walltime} ends {ends.isoformat()} after the lock "
+                f"deadline {deadline.isoformat()}; shorten the job or start earlier"
+            )
+        else:
+            say(f"walltime {args.check_walltime} ends {ends.isoformat()} before the lock")
     if now.weekday() == 5:
-        say(
-            "warning: Saturday start leaves a smaller buffer for a batch retry before the lock"
-        )
+        say("warning: Saturday start leaves a smaller buffer for a batch retry before the lock")
     say(
         f"week {week}: cutoff {cal.cutoff_day(week)}, trade date {cal.monday_open_day(week)}, "
         f"lock {lock_deadline(week, ctx.cfg).isoformat()}"
@@ -204,18 +224,54 @@ def main(argv: list[str] | None = None) -> int:
         for job in ctx.cfg.pipeline.jobs:
             print(f"  {job}: {read_status(week, job).state}")
         return 0
+    jobs = jobs_between(args.from_job, args.until_job)
+    say(f"jobs this run: {' '.join(jobs)}")
     try:
-        step1_catch_up(ctx, week, args.synthetic)
-        for job in ("J1", "J2", "J3", "J4"):
-            run(ctx, job, week, args.synthetic)
-        wait_for_batches(ctx, week, args.synthetic, poll)
-        run(ctx, "J6", week, args.synthetic)
-        run(ctx, "J7", week, args.synthetic)
-        run(ctx, "J9", week, args.synthetic)
+        if args.from_job == "J1":
+            step1_catch_up(ctx, week, args.synthetic)
+        for job in jobs:
+            if job == "J4":
+                gateway_health(ctx, week)
+            if job == "J5":
+                wait_for_batches(ctx, week, args.synthetic, poll)
+            elif job != "J8":
+                run(ctx, job, week, args.synthetic)
     except JobFailed:
         return 1
-    print_summary(week)
+    if "J9" in jobs:
+        print_summary(week)
     return 0
+
+
+STEP_ORDER = ["J1", "J2", "J3", "J4", "J5", "J6", "J7", "J8", "J9"]
+
+
+def jobs_between(from_job: str, until_job: str) -> list[str]:
+    start, stop = STEP_ORDER.index(from_job), STEP_ORDER.index(until_job)
+    if stop < start:
+        raise SystemExit(f"--until {until_job} comes before --from {from_job}")
+    return STEP_ORDER[start : stop + 1]
+
+
+def gateway_health(ctx: RunContext, week: str) -> health.HealthReport:
+    """One tiny call per gateway model before J4; print the D2 steps and mark sources on failure."""
+    from portstudy.pipeline.jobs import _week_runner
+
+    report = health.gateway_health_check(ctx, week, _week_runner(ctx, week))
+    if report.healthy:
+        checked = ", ".join(report.ok) if report.ok else "no gateway models"
+        say(f"gateway health check ok: {checked}")
+        return report
+    for line in health.d2_steps(week, report.failed):
+        say(line)
+    if ctx.gateway_fallback:
+        say(
+            "continuing with --gateway-fallback: fallback-eligible models use the fallback endpoint"
+        )
+        return report
+    keys = health.mark_sources_failed(ctx, week, sorted(report.failed), health.HEALTH_REASON)
+    say(f"marked failed (N1): {', '.join(keys)}; the rest of the week continues")
+    return report
 
 
 if __name__ == "__main__":

@@ -531,3 +531,21 @@ Changed v1 tests and reasons: none beyond the v2 phase 10 report test (shuffle t
 UNVERIFIED: Slurm array behaviour on ARCTIC (v2 phase 12 adds the sbatch file).
 
 Choices made while unattended: see the README design choices for v2 phase 11.
+
+## v2 phase 12: ARCTIC Slurm scripts
+
+Built:
+- `scripts/arctic/`: `arctic.env.example` (every value `TBD`, pointing to `docs/arctic_setup.md`), `common.sh` (loads the env, refuses `TBD`, activates the venv, exports `PORTSTUDY_DATA_DIR`), `kronos.sbatch` (J2, J1 first in compute mode), `weekend.sbatch` (`run_weekend.py --from J3` or `--from J6` by `ARCTIC_NETWORK_MODE`, `PORTSTUDY_FROM` override), `submit_weekend.sh` (compute: kronos then weekend `--dependency=afterok`; login: J1 here, kronos, J3 to J5 here, weekend J6 to J9; walltime warning via `--check-walltime`; prints job ids, log paths and rerun commands), `shuffle_array.sbatch` (`portstudy shuffle run --shard-index $SLURM_ARRAY_TASK_ID`), `llm_fallback.sbatch` (DECISION(D2) server for fallback-eligible models, writes host, port, week, start time and job id to the endpoint file; serving tool `# UNVERIFIED`, vLLM assumed).
+- `llm/health.py`: `gateway_health_check` (one tiny prompt per enabled open-weight model on the gateway, report in `gateway_health.json`), `mark_sources_failed` (N1 statuses), `d2_steps`, `parse_walltime`, `unhealthy_models`.
+- `pipeline/jobs.py` J4 skips models marked unhealthy unless `--gateway-fallback`.
+- `scripts/run_weekend.py`: `--from`, `--until`, `--check-walltime`, `jobs_between`, `gateway_health` before J4.
+- `backup.py`: `rsync_command`, `rsync_backup`; `BackupConfig.rsync_target`.
+- `docs/arctic_setup.md`.
+
+Tests (`tests/integration/test_v2_phase12_arctic.py`): shellcheck on every script (skipped with a note when not installed; installed here through `shellcheck-py`); `run_weekend.py --from J3 --synthetic` runs J3 to J9 only and `--until J5` stops after J5; a health failure without the flag marks exactly the failing model's sources failed, J4 skips that model, and J6/J7 serve Q0 for them; with a fresh endpoint file and the flag the fallback-eligible model switches to `slurm_fallback` and the others stay on the gateway; a stale endpoint file is rejected; `parse_walltime`; the walltime warning; `rsync_command` and a failing rsync that does not raise.
+
+Changed v1 tests and reasons: none.
+
+UNVERIFIED: every ARCTIC value (`TBD`), the serving command in `llm_fallback.sbatch`, Slurm behaviour (no cluster here).
+
+Choices made while unattended: see the README design choices for v2 phase 12.
