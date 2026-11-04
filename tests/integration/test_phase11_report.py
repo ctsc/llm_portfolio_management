@@ -30,15 +30,31 @@ def test_report_builds_on_synthetic_run(pipeline_dir: Path, study_config: StudyC
                 "h2_portfolio_vs_q0_as_traded.csv", "h3_skills_vs_controls.csv", "h4_earnings_week.csv",
                 "h5_factors.csv", "h5_shuffle.csv", "fallback_counts.csv", "weekly_ic_long.csv",
                 "portfolio_metrics_as_traded.csv", "fig_weekly_ic.png", "fig_h1_gaps.png",
-                "fig_equity_curves.png", "fig_shuffle_histograms.png"]
+                "fig_equity_curves.png", "fig_shuffle_histograms.png",
+                # v2 phase 10: H3b, H4 ranking, per-strategy equity curves
+                "h3b_width.csv", "h4_strategy_ranking.csv", "fig_h3b_width.png",
+                "fig_h4_ranking.png", *[f"fig_equity_{s}.png" for s in cfg.strategies.enabled]]
     for name in expected:
         assert (folder / name).exists(), name
     md = (folder / "report.md").read_text(encoding="utf-8")
     assert "Minimum detectable gap" in md and "Fallback counts" in md and "inconclusive" in md
+    assert "## Run summary" in md and "G3b:" in md and "K1:" in md and "P1:" in md
+    for strategy in cfg.strategies.enabled:
+        assert f"## Strategy: {strategy}" in md
+    assert "## H3b:" in md and "strategy ranking" in md
+    ranking = pd.read_csv(folder / "h4_strategy_ranking.csv")
+    assert list(ranking["strategy"]) and set(ranking["strategy"]) <= set(cfg.strategies.enabled)
+    assert not set(ranking["strategy"]) & set(cfg.strategies.controls)
+    h2 = pd.read_csv(folder / "h2_portfolio_vs_q0_clean.csv")
+    assert set(h2["strategy"]) == set(cfg.strategies.enabled)
+    metrics_all = pd.read_csv(folder / "portfolio_metrics_as_traded.csv")
+    assert {"mean_view_shift", "solver_failed_weeks", "fallback_weeks"} <= set(metrics_all.columns)
+    assert set(cfg.strategies.controls) <= set(metrics_all["portfolio"])
     shuffle = pd.read_csv(folder / "h5_shuffle.csv")
     shuffle_portfolios = set(ctx.portfolio_keys()) - set(ctx.control_keys())  # controls: no family
     assert set(shuffle["portfolio"]) == shuffle_portfolios
     assert len(shuffle) == len(shuffle_portfolios) and (shuffle["n_shuffles"] == 3).all()
+    assert set(shuffle["strategy"]) == set(cfg.strategies.enabled)  # Holm within each strategy
     assert shuffle["p_total_return"].between(0, 1).all()
     assert (shuffle["p_total_return_holm"] >= shuffle["p_total_return"] - 1e-12).all()
     metrics = pd.read_csv(folder / "portfolio_metrics_as_traded.csv")

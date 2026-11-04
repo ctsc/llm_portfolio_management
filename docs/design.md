@@ -186,12 +186,25 @@ portfolio (`no_rebalance`). `clean_weeks` returns the normal weeks for IC histor
 Min detectable gap: 2.8 * sd / sqrt(T)
 ```
 
-H1: `IC_llm_raw - IC_baseline` per rating source (win above the tie band, loss below, else tie).
-H2: `IC_combined - IC_baseline` with combined = ranked BL tilt (E3); strategy weekly return
-minus its Q0. H3: skills vs bare and skills vs placebo per model, Holm across the family (G3).
-H4: splits by market direction, volatility, and earnings week, exploratory (G4). H5: factor
-regression on daily returns (G5) and the shuffled-ratings test over every steered portfolio and
-each strategy's Q0
-with view strength held fixed (G6). The primary paired p-value is the exact sign-flip
+H1: `IC_llm_raw - IC_baseline` per rating source (win above the tie band, loss below, else tie),
+Holm across all sources. H2: `IC_combined - IC_baseline` per source with combined = ranked BL
+tilt (E3), Holm across sources; and each steered portfolio's weekly return minus its own
+strategy's Q0 on the source's clean weeks, Holm within each strategy. H3: every `skills` prompt
+type (from `manifest.by_kind`) vs bare and vs placebo per model, Holm per model (G3). H3b (G3b):
+per source and week, valid stocks split at the median range width (width at or below the median
+is narrow); rank IC of `likely` in each group; weeks with a group under `eval.h3b.min_group_size`
+or with every width equal are skipped and counted; weekly gap narrow minus wide, Holm across
+sources. H4 (G4, exploratory, no Holm): per strategy and week the mean gap vs its Q0 across the
+sources clean that week, strategy mean with a bootstrap CI, ranked; weeks with no clean source
+are dropped and counted; the v1 market direction and volatility splits run on the source IC gaps
+and on each strategy's weekly gap, the earnings split on source IC. Solver-failed weeks stay in
+the data and are counted per portfolio in the metrics table, with the mean `view_shift`. Controls
+(HRP, EW) appear in the metrics and factor tables and in no hypothesis family. The report opens
+with the portfolio count, weeks, fallback and fallback-served weeks, and the K1, S4, S5, G3b, and
+P1 values read from config, then one section per strategy (metrics, H2 return table, H5 table,
+equity curve with its Q0, steered portfolios, HRP, and EW) and a warning for any strategy whose
+mean `view_shift` is below 0.01. H5: factor regression on daily returns for every portfolio (G5)
+and the shuffled-ratings test over every steered portfolio and each strategy's Q0, Holm within
+each strategy, with view strength held fixed (G6). The primary paired p-value is the exact sign-flip
 permutation; Newey-West is reported beside it. Gaps below the minimum detectable gap are
 inconclusive, not evidence of no effect. A null result is acceptable.

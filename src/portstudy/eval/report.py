@@ -23,7 +23,9 @@ from portstudy.eval.hypotheses import (  # noqa: E402
     h2_combined_vs_baseline,
     h2_portfolio_vs_q0,
     h3_skills_vs_controls,
+    h3b_width,
     h4_splits,
+    h4_strategy_ranking,
     portfolio_metrics,
 )
 from portstudy.eval.rank_ic import long_table  # noqa: E402
@@ -97,23 +99,66 @@ def _fig_gaps(h1: pd.DataFrame, folder: Path) -> None:
     plt.close(fig)
 
 
-def _fig_equity(data: EvalData, folder: Path) -> None:
+def _plot_equity(data: EvalData, keys: list[str], path: Path) -> None:
     fig, ax = plt.subplots(figsize=(10, 4))
-    for key, daily in data.daily_values.items():
+    for key in keys:
+        daily = data.daily_values.get(key, pd.DataFrame())
         if len(daily) == 0:
             continue
+        pid = PortfolioId.parse(key)
         ax.plot(
             pd.to_datetime(daily["date"]),
             daily["value"],
             label=key,
-            color="black" if PortfolioId.parse(key).is_q0 else None,
-            linewidth=2 if PortfolioId.parse(key).is_q0 else 0.8,
+            color="black" if pid.is_q0 else "grey" if pid.is_control else None,
+            linewidth=2 if pid.is_q0 else 1.5 if pid.is_control else 0.8,
+            linestyle="--" if pid.is_control else "-",
             alpha=0.9,
         )
     ax.set_ylabel("portfolio value")
     ax.legend(fontsize=5, ncol=3)
     fig.tight_layout()
-    fig.savefig(folder / "fig_equity_curves.png", dpi=120)
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+
+
+def _fig_equity(data: EvalData, folder: Path) -> None:
+    _plot_equity(data, list(data.daily_values), folder / "fig_equity_curves.png")
+    for strategy in data.strategies():
+        keys = [data.q0_key(strategy), *data.steered_for(strategy), *data.controls]
+        _plot_equity(data, keys, folder / f"fig_equity_{strategy}.png")
+
+
+def _fig_h3b(h3b: pd.DataFrame, folder: Path) -> None:
+    if len(h3b) == 0:
+        return
+    fig, ax = plt.subplots(figsize=(8, 4))
+    x = range(len(h3b))
+    ax.bar([i - 0.2 for i in x], h3b["mean_ic_narrow"], width=0.4, label="narrow", color="seagreen")
+    ax.bar([i + 0.2 for i in x], h3b["mean_ic_wide"], width=0.4, label="wide", color="indianred")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(list(h3b["source"]), rotation=90, fontsize=6)
+    ax.axhline(0, color="grey", linewidth=0.5)
+    ax.set_ylabel("mean weekly rank IC by width group")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(folder / "fig_h3b_width.png", dpi=120)
+    plt.close(fig)
+
+
+def _fig_h4_ranking(ranking: pd.DataFrame, folder: Path) -> None:
+    if len(ranking) == 0:
+        return
+    fig, ax = plt.subplots(figsize=(6, 4))
+    err = [
+        (ranking["mean_gap"] - ranking["ci_low"]).fillna(0).to_numpy(),
+        (ranking["ci_high"] - ranking["mean_gap"]).fillna(0).to_numpy(),
+    ]
+    ax.bar(ranking["strategy"], ranking["mean_gap"], yerr=err, color="steelblue")
+    ax.axhline(0, color="grey", linewidth=0.5)
+    ax.set_ylabel("mean weekly gap vs own Q0")
+    fig.tight_layout()
+    fig.savefig(folder / "fig_h4_ranking.png", dpi=120)
     plt.close(fig)
 
 
@@ -151,8 +196,10 @@ def build_report(
     tables["h2_portfolio_vs_q0_clean"] = h2_portfolio_vs_q0(data, clean_only=True)
     tables["h2_portfolio_vs_q0_as_traded"] = h2_portfolio_vs_q0(data, clean_only=False)
     tables["h3_skills_vs_controls"] = h3_skills_vs_controls(data)
+    tables["h3b_width"] = h3b_width(data)
     tables["portfolio_metrics_as_traded"] = portfolio_metrics(data, clean_only=False)
     tables["portfolio_metrics_clean"] = portfolio_metrics(data, clean_only=True)
+    tables["h4_strategy_ranking"] = h4_strategy_ranking(data)
     for name, df in h4_splits(data).items():
         tables[f"h4_{name}"] = df
     tables["earnings_exposure"] = earnings_exposure(data)
@@ -171,6 +218,8 @@ def build_report(
     _fig_ic_series(data, folder)
     _fig_gaps(tables["h1_ic_gap"], folder)
     _fig_equity(data, folder)
+    _fig_h3b(tables["h3b_width"], folder)
+    _fig_h4_ranking(tables["h4_strategy_ranking"], folder)
     _fig_shuffle(dists, shuffle_table, folder)
     md = _markdown(data, tables, source, skip_shuffle)
     write_text_atomic(md, folder / "report.md")
@@ -186,8 +235,40 @@ def _markdown(
         f"{data.weeks[-1] if data.weeks else ''}). Pilot week excluded: {data.pilot_week}."
     )
     out.append("")
+    out.extend(_header_lines(data))
     out.append("## Fallback counts per portfolio")
     out.append(_md_table(tables["fallback_counts"]))
+    out.append("## H4 (exploratory): strategy ranking by mean weekly gap vs own Q0")
+    ranking = tables["h4_strategy_ranking"]
+    out.append(
+        _md_table(
+            ranking,
+            [
+                c
+                for c in [
+                    "rank",
+                    "strategy",
+                    "n_sources",
+                    "n_weeks",
+                    "dropped_weeks",
+                    "mean_gap",
+                    "ci_low",
+                    "ci_high",
+                    "p_perm",
+                    "wins",
+                    "ties",
+                    "losses",
+                ]
+                if c in ranking.columns
+            ],
+        )
+    )
+    out.append(
+        "Weeks where no source of a strategy was clean are dropped and counted. "
+        "Exploratory: no Holm correction."
+    )
+    out.append("")
+    out.extend(_strategy_sections(data, tables, skip_shuffle))
     gap_cols = [
         "portfolio",
         "n_weeks",
@@ -201,13 +282,22 @@ def _markdown(
         "p_holm",
         "significant",
         "min_detectable_gap",
+        "usable_weeks",
+        "skipped_small_group",
+        "skipped_equal_width",
+        "mean_ic_narrow",
+        "mean_ic_wide",
     ]
     for title, key in (
         ("## H1: LLM raw IC minus baseline IC (clean weeks)", "h1_ic_gap"),
         ("## H2: combined IC minus baseline IC (clean weeks)", "h2_ic_gap"),
         (
-            "## H3: skills vs bare and skills vs placebo (Holm across the family)",
+            "## H3: skills vs bare and skills vs placebo (Holm per model)",
             "h3_skills_vs_controls",
+        ),
+        (
+            "## H3b: rank IC of likely, narrow width minus wide width (Holm across sources)",
+            "h3b_width",
         ),
     ):
         out.append(title)
@@ -222,9 +312,10 @@ def _markdown(
                 "inconclusive, not evidence of no effect."
             )
             out.append("")
-    out.append("## H2: portfolio weekly return minus Q0")
+    out.append("## H2: portfolio weekly return minus its strategy's Q0 (Holm per strategy)")
     out.append("Clean weeks only:")
     port_cols = [
+        "strategy",
         "portfolio",
         "n_weeks",
         "wins",
@@ -239,6 +330,8 @@ def _markdown(
         "max_drawdown",
         "turnover",
         "total_cost_usd",
+        "mean_view_shift",
+        "solver_failed_weeks",
     ]
     out.append(
         _md_table(
@@ -267,6 +360,7 @@ def _markdown(
             cols = [
                 c
                 for c in [
+                    "level",
                     "group",
                     "portfolio",
                     "n_weeks",
@@ -320,11 +414,122 @@ def _markdown(
         "fig_h1_gaps.png",
         "fig_h1_win_tie_loss.png",
         "fig_equity_curves.png",
+        *[f"fig_equity_{s}.png" for s in data.strategies()],
+        "fig_h3b_width.png",
+        "fig_h4_ranking.png",
         "fig_shuffle_histograms.png",
     ):
         out.append(f"- {f}")
     out.append("")
     return "\n".join(out)
+
+
+DESIGN_CHOICE_IDS = ("K1", "S4", "S5", "G3b", "P1")
+VIEW_SHIFT_WARNING = 0.01
+
+
+def _header_lines(data: EvalData) -> list[str]:
+    """Portfolio counts, fallback weeks, and the design choice values the run used."""
+    statuses = data.statuses
+    steered = [k for k in data.portfolios if k in statuses]
+    fallback_weeks = int((statuses[steered] == "fallback").any(axis=1).sum()) if steered else 0
+    served = int((statuses[steered] == "fallback").sum().sum()) if steered else 0
+    lines = [
+        "## Run summary",
+        "",
+        f"- Portfolios: {len(data.portfolio_keys)} ({len(data.portfolios)} steered across "
+        f"{len(data.strategies())} strategies and {len(data.sources)} sources, "
+        f"{len(data.strategies())} Q0, {len(data.controls)} controls)",
+        f"- Weeks: {len(data.weeks)}; weeks with at least one source on fallback: "
+        f"{fallback_weeks}; portfolio-weeks served by a fallback: {served}",
+        "- Design choice values used:",
+    ]
+    cfg = data.cfg
+    values = {
+        "K1": f"kronos_spread_clip={list(cfg.views.kronos_spread_clip)}",
+        "S4": f"cvar lam={cfg.strategies.cvar.lam}, beta={cfg.strategies.cvar.beta}, "
+        f"scenarios={cfg.strategies.cvar.n_scenarios}",
+        "S5": f"robust kappa={cfg.strategies.robust.kappa}",
+        "G3b": f"h3b split={cfg.eval.h3b.split}, min_group_size={cfg.eval.h3b.min_group_size}",
+        "P1": "skills within 5 percent of the mean skills length; placebo within 2 percent",
+    }
+    for did in DESIGN_CHOICE_IDS:
+        try:
+            stated = cfg.decision(did).value
+        except KeyError:
+            stated = "not listed in decisions"
+        lines.append(f"  - {did}: {values[did]} (decision: {stated})")
+    lines.append("")
+    return lines
+
+
+def _strategy_sections(
+    data: EvalData, tables: dict[str, pd.DataFrame], skip_shuffle: bool
+) -> list[str]:
+    out: list[str] = []
+    metric_cols = [
+        "portfolio",
+        "source",
+        "n_weeks",
+        "total_return",
+        "sharpe",
+        "max_drawdown",
+        "turnover",
+        "mean_view_shift",
+        "fallback_weeks",
+        "solver_failed_weeks",
+    ]
+    h2_cols = [
+        "portfolio",
+        "n_weeks",
+        "wins",
+        "ties",
+        "losses",
+        "mean_gap",
+        "p_perm",
+        "p_holm",
+        "significant",
+        "min_detectable_gap",
+    ]
+    h5_cols = [
+        "portfolio",
+        "n_shuffles",
+        "real_total_return",
+        "shuffle_mean_total_return",
+        "p_total_return",
+        "p_total_return_holm",
+        "significant_total_return",
+    ]
+    metrics = tables["portfolio_metrics_as_traded"]
+    for strategy in data.strategies():
+        keys = [data.q0_key(strategy), *data.steered_for(strategy), *data.controls]
+        out.append(f"## Strategy: {strategy}")
+        out.append("")
+        sub = metrics[metrics["portfolio"].isin(keys)]
+        shift = sub.loc[sub["portfolio"].isin(data.steered_for(strategy)), "mean_view_shift"]
+        mean_shift = float(shift.mean()) if shift.notna().any() else float("nan")
+        if pd.notna(mean_shift) and mean_shift < VIEW_SHIFT_WARNING:
+            out.append(
+                f"WARNING: mean view_shift {mean_shift:.4f} is below {VIEW_SHIFT_WARNING}; "
+                "the views barely change this strategy's weights."
+            )
+            out.append("")
+        out.append("Metrics (as traded; Q0, steered portfolios, controls):")
+        out.append(_md_table(sub, [c for c in metric_cols if c in sub.columns]))
+        h2 = tables["h2_portfolio_vs_q0_clean"]
+        if len(h2) and "strategy" in h2.columns:
+            h2 = h2[h2["strategy"] == strategy]
+        out.append("H2 return vs Q0 (clean weeks, Holm within this strategy):")
+        out.append(_md_table(h2, [c for c in h2_cols if c in h2.columns]))
+        if not skip_shuffle and "h5_shuffle" in tables:
+            h5 = tables["h5_shuffle"]
+            if len(h5) and "strategy" in h5.columns:
+                h5 = h5[h5["strategy"] == strategy]
+            out.append("H5 shuffled-ratings test (Holm within this strategy):")
+            out.append(_md_table(h5, [c for c in h5_cols if c in h5.columns]))
+        out.append(f"Equity curve: `fig_equity_{strategy}.png`")
+        out.append("")
+    return out
 
 
 def run_eval(

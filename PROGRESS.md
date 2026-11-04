@@ -499,3 +499,20 @@ Choices made while unattended:
 - Benchmark on synthetic matrices rather than a pipeline week, so the numbers isolate optimizer cost (README Design choices).
 - `warm_start=False` on every solve, trading a little OSQP speed for cached and fresh solves being identical.
 - Shuffle projection counts one solve per week per shuffle per steered portfolio.
+
+## v2 phase 10: per-strategy evaluation
+
+Built:
+- `eval/data.py`: `EvalData` carries `strategy_of`, `source_of`, `controls`, `solver_failed` and `view_shift` (weeks by portfolios, from the weight meta files), `strategies()`, `q0_key()`, `steered_for()`, and `source_clean_mask()`; `stock_week` holds `likely:<source>` and `width:<source>` once per rating source; weekly returns cover every portfolio including HRP and EW.
+- `eval/hypotheses.py`: H1 and H2 IC per source (Holm across sources); H2 return pairs each steered portfolio with its own strategy's Q0 and Holm-adjusts within each strategy; H3 takes the `skills` prompt types from `manifest.by_kind` and Holm-adjusts per model; `h3b_width` (DECISION(G3b)) splits each clean source-week at the median width, skips small or all-equal weeks and counts them, reports mean IC per width group; `h4_strategy_ranking` ranks strategies by the mean weekly gap vs their Q0 across clean sources with a bootstrap CI (no Holm) and counts dropped weeks; `h4_splits` runs market direction and volatility on source IC gaps and on strategy gaps; `portfolio_metrics` adds `strategy`, `source`, `mean_view_shift`, `fallback_weeks`, `solver_failed_weeks` and covers controls.
+- `eval/shuffle.py`: H5 Holm within each strategy (steered portfolios plus its Q0), controls excluded.
+- `eval/report.py`: run summary header (portfolio counts, weeks, fallback and fallback-served weeks, K1, S4, S5, G3b, P1 values), H4 ranking table and `fig_h4_ranking.png`, one section per strategy (metrics, H2 return table, H5 table, `fig_equity_<strategy>.png` with Q0, steered, HRP, EW), H3b table and `fig_h3b_width.png`, a WARNING line for a strategy whose mean `view_shift` is below 0.01, `h3b_width.csv` and `h4_strategy_ranking.csv`.
+- `config.py` `H3bConfig` (`eval.h3b`), `config/study.yaml` `eval.holm_families` per PLAN2 and `eval.h3b` tagged DECISION(G3b).
+
+Tests: `tests/unit/test_v2_phase10_eval.py` on a synthetic 30-week `EvalData` (2 models x 4 prompts x 2 strategies, HRP and EW): Holm within each strategy only on a planted edge, H2 pairs with the own Q0, H3 finds every skills kind per model, H3b positive on planted width data and skips all-equal weeks, H4 ranking matches the planted order and counts dropped weeks, controls appear in metrics and in no family, config families and H3b validation. `tests/integration/test_phase11_report.py` checks the new files and report sections on the synthetic pipeline run.
+
+Changed v1 tests and reasons: `tests/integration/test_phase11_report.py` expects the v2 phase 10 outputs and the per-strategy shuffle column.
+
+UNVERIFIED: none new.
+
+Choices made while unattended: see the README design choices for v2 phase 10 (splits per strategy, stock-week table per source, fallback count definitions, header values).

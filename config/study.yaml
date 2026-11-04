@@ -179,13 +179,17 @@ eval:
   factor_frequency: daily         # DECISION(G5)
   fama_french_file: null
   holm_families:
-    H1_ic_gap: all_portfolios
-    H2_ic_gap: all_portfolios
-    H2_portfolio_vs_q0: all_portfolios
-    H3_skills_vs_controls: per_model_skills_vs_bare_and_placebo
-    H5_shuffle: all_portfolios_plus_q0
+    H1_ic_gap: all_sources
+    H2_ic_gap: all_sources
+    H2_portfolio_vs_q0: per_strategy
+    H3_skills_vs_controls: per_model
+    H3b_width: all_sources
+    H5_shuffle: per_strategy       # each strategy's steered portfolios plus its Q0
   h4_splits: [market_direction, volatility, earnings_week]   # DECISION(G4)
   min_group_size: 10
+  h3b:                            # DECISION(G3b)
+    split: median
+    min_group_size: 10
   shuffle:
     n_shuffles: 500               # DECISION(G6)
     seed: 99

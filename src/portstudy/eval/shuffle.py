@@ -226,7 +226,8 @@ def shuffle_test(
     seed: int | None = None,
     processes: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Every portfolio plus Q0; p = (1 + count at or above real) / (n + 1); Holm across all."""
+    """Every steered portfolio plus each strategy's Q0; p = (1 + count at or above real) / (n + 1);
+    Holm within each strategy (its steered portfolios plus its Q0), never across controls."""
     rows = []
     dists = []
     strategies = dict.fromkeys(
@@ -260,8 +261,13 @@ def shuffle_test(
         rows.append(row)
     table = pd.DataFrame(rows)
     if len(table):
-        table["p_total_return_holm"] = holm(table["p_total_return"].to_numpy())
-        table["p_sharpe_holm"] = holm(table["p_sharpe"].to_numpy())
+        table["strategy"] = [str(PortfolioId.parse(k).strategy) for k in table["portfolio"]]
+        for metric in ("total_return", "sharpe"):
+            table[f"p_{metric}_holm"] = float("nan")
+            for strategy in table["strategy"].unique():
+                mask = table["strategy"] == strategy
+                raw = table.loc[mask, f"p_{metric}"].to_numpy()
+                table.loc[mask, f"p_{metric}_holm"] = holm(raw)
         table["significant_total_return"] = table["p_total_return_holm"] < cfg.eval.significance
     return table, pd.concat(dists, ignore_index=True) if dists else pd.DataFrame()
 

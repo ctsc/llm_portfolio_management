@@ -257,6 +257,13 @@ class ShuffleConfig(StrictModel):
     processes: int = 1
 
 
+class H3bConfig(StrictModel):
+    """DECISION(G3b): per source and week, stocks at or below the median width vs the rest."""
+
+    split: Literal["median"] = "median"
+    min_group_size: int = 10
+
+
 class EvalConfig(StrictModel):
     tie_band: float = 0.01
     bootstrap_samples: int = 2000
@@ -271,6 +278,7 @@ class EvalConfig(StrictModel):
         default_factory=lambda: ["market_direction", "volatility", "earnings_week"]
     )
     min_group_size: int = 10
+    h3b: H3bConfig = H3bConfig()
     shuffle: ShuffleConfig = ShuffleConfig()
 
 

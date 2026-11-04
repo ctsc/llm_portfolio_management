@@ -202,6 +202,10 @@ License: MIT.
 
 ## Design choices
 
+- **v2 phase 10 H4 splits per strategy (chosen during build)**: the v1 market direction and volatility splits run both on the source IC gaps (as in v1) and on each strategy's weekly return gap vs its Q0; the earnings split stays on source IC because it is defined per stock rating.
+- **v2 phase 10 stock-week table per source (chosen during build)**: `EvalData.stock_week` holds `likely:<source>` and `width:<source>` columns once per rating source rather than once per portfolio, since five strategies share each source's ratings and H3b needs the width.
+- **v2 phase 10 fallback counts in the header (chosen during build)**: "fallback weeks" counts weeks in which at least one source fell back; "fallback-served" counts steered portfolio-weeks that traded a Q0 copy.
+- **v2 phase 10 header values (chosen during build)**: the report prints the K1, S4, S5, G3b, and P1 values in force from the config objects beside the `decisions` text, and says "not listed" when a config has no decisions block (the test config).
 - **v2 phase 9 compiled-problem cache (chosen during build)**: cvxpy problems are keyed by their constant data (tickers, SHA-256 of Sigma, and for robust and CVaR the SHA-256 of M plus week and seed) with `mu` as a parameter, so resampled draws, every source in a week, and the shuffle test reuse one canonicalization; `warm_start=False` keeps cached and fresh solves identical.
 - **v2 phase 9 benchmark on synthetic matrices (chosen during build)**: `scripts/benchmark_pipeline.py` times the optimizers on a seeded 3-factor covariance instead of a full pipeline week, so the 300-stock numbers isolate solver cost; the v1 job timing stays behind `--jobs`.
 - **v2 phase 9 shuffle projection (chosen during build)**: CPU hours = weeks x shuffles x (projected sources x strategies) x mean strategy solve time, with 51 projected sources (7 models x 7 prompt types + Q0) as PLAN2 states; the ARCTIC request of 15,000 CPU hours is flagged when exceeded.

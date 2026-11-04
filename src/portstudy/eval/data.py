@@ -13,11 +13,20 @@ from portstudy.data import ledger
 from portstudy.data.snapshot import read_snapshot, snapshot_exists
 from portstudy.eval.rank_ic import ic_tables
 from portstudy.llm.runner import read_scores
+from portstudy.optimize import read_weights_meta, weights_dir
 from portstudy.pipeline import fallback as fb
 from portstudy.pipeline.jobs import weeks_with_weights
 from portstudy.sim.records import read_daily, read_trades
-from portstudy.types import PortfolioId
+from portstudy.types import PortfolioId, RatingSource
 from portstudy.views.ic import ICStore, weekly_returns
+
+
+def likely_column(source: str) -> str:
+    return f"likely:{source}"
+
+
+def width_column(source: str) -> str:
+    return f"width:{source}"
 
 
 def weekly_portfolio_returns(daily: pd.DataFrame, initial_value: float) -> pd.Series:
@@ -45,6 +54,9 @@ def sharpe(weekly: pd.Series, periods: int = 52) -> float:
 
 @dataclass
 class EvalData:
+    """Everything the evaluation reads. `portfolios` are the steered (strategy, source) keys;
+    `sources` are rating-source keys; `portfolio_keys` also hold every Q0 and control."""
+
     cfg: StudyConfig
     portfolios: list[str]
     sources: list[str]
@@ -52,20 +64,55 @@ class EvalData:
     weeks: list[str]
     pilot_week: str | None
     ic: dict[str, pd.DataFrame]
-    weekly_returns: pd.DataFrame  # weeks by portfolios (plus Q0), as traded
+    weekly_returns: pd.DataFrame  # weeks by every portfolio (steered, Q0, controls), as traded
     daily_values: dict[str, pd.DataFrame]
     trades: dict[str, pd.DataFrame]
     statuses: pd.DataFrame  # weeks by portfolios: normal | fallback | no_rebalance
     spy_weekly: pd.Series
     spy_vol20: pd.Series
     stock_week: pd.DataFrame = field(default_factory=pd.DataFrame)  # per stock-week rows
+    strategy_of: dict[str, str] = field(default_factory=dict)  # steered or Q0 key -> strategy
+    source_of: dict[str, str] = field(default_factory=dict)  # steered key -> source key
+    controls: list[str] = field(default_factory=list)
+    solver_failed: pd.DataFrame = field(default_factory=pd.DataFrame)  # weeks by portfolios
+    view_shift: pd.DataFrame = field(default_factory=pd.DataFrame)  # weeks by portfolios
+
+    def __post_init__(self) -> None:
+        for key in self.portfolio_keys:
+            pid = PortfolioId.parse(key)
+            if pid.is_control:
+                if key not in self.controls:
+                    self.controls.append(key)
+                continue
+            self.strategy_of.setdefault(key, str(pid.strategy))
+            if pid.source is not None:
+                self.source_of.setdefault(key, pid.source.key)
+
+    def strategies(self) -> list[str]:
+        """Strategies in config order that have a portfolio in the data."""
+        present = set(self.strategy_of.values())
+        ordered = [s for s in self.cfg.strategies.enabled if s in present]
+        return ordered + sorted(present - set(ordered))
+
+    def q0_key(self, strategy: str) -> str:
+        return f"{strategy}__Q0"
+
+    def steered_for(self, strategy: str) -> list[str]:
+        return [key for key in self.portfolios if self.strategy_of.get(key) == strategy]
 
     def clean_mask(self, portfolio: str) -> pd.Series:
+        """Weeks traded normally. A steered portfolio inherits its source's fallback weeks."""
         return (
             self.statuses[portfolio].eq("normal")
             if portfolio in self.statuses
             else pd.Series(dtype=bool)
         )
+
+    def source_clean_mask(self, source: str) -> pd.Series:
+        for key, src in self.source_of.items():
+            if src == source and key in self.statuses:
+                return self.clean_mask(key)
+        return pd.Series(True, index=self.weeks)
 
     def fallback_counts(self) -> pd.DataFrame:
         rows = []
@@ -103,8 +150,9 @@ def _spy_series(weeks: list[str]) -> tuple[pd.Series, pd.Series]:
     return pd.Series(weekly, name="spy_ret"), pd.Series(vol, name="spy_vol20")
 
 
-def _stock_week_table(weeks: list[str], portfolios: list[str]) -> pd.DataFrame:
-    """Per (week, stock): realized return, earnings flag, and each portfolio's valid score."""
+def _stock_week_table(weeks: list[str], sources: list[str]) -> pd.DataFrame:
+    """Per (week, stock): realized return, earnings flag, and each source's valid likely rating
+    and range width (`likely:<source>`, `width:<source>`)."""
     led = ledger.read_ledger()
     actions = ledger.read_actions()
     last = max(led["date"]) if len(led) else None
@@ -120,21 +168,43 @@ def _stock_week_table(weeks: list[str], portfolios: list[str]) -> pd.DataFrame:
         flags = ref["earnings_in_window"].reindex(base.index)
         base["earnings_in_window"] = [bool(v) if pd.notna(v) else False for v in flags]
         scores = read_scores(w)
-        for key in portfolios:
-            pid = PortfolioId.parse(key)
-            source = pid.source
-            if source is None:
-                continue
+        columns: dict[str, pd.Series] = {}
+        for key in sources:
+            source = RatingSource.parse(key)
             sub = scores[
                 (scores["model"] == source.model)
                 & (scores["config_id"] == source.config_id)
                 & scores["valid"]
-            ]
-            base[key] = sub.set_index("ticker")["likely"].reindex(base.index).astype(float)
+            ].set_index("ticker")
+            columns[likely_column(key)] = sub["likely"].reindex(base.index).astype(float)
+            if "width" in sub.columns:
+                columns[width_column(key)] = sub["width"].reindex(base.index).astype(float)
+            else:
+                columns[width_column(key)] = pd.Series(np.nan, index=base.index)
+        if columns:
+            base = pd.concat([base, pd.DataFrame(columns)], axis=1)
         frames.append(base.reset_index())
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
+
+
+def _meta_tables(weeks: list[str], keys: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Weeks by portfolios: solver-failed flag and view shift, from the weight meta files."""
+    failed: dict[str, dict[str, bool]] = {}
+    shift: dict[str, dict[str, float]] = {}
+    for key in keys:
+        failed[key], shift[key] = {}, {}
+        for w in weeks:
+            if not (weights_dir(w) / f"{key}.meta.json").exists():
+                continue
+            meta = read_weights_meta(w, key)
+            failed[key][w] = bool(meta.get("fallback_flag"))
+            value = meta.get("view_shift")
+            shift[key][w] = float(value) if value is not None else float("nan")
+    failed_df = pd.DataFrame(failed).reindex(weeks).fillna(False).astype(bool)
+    shift_df = pd.DataFrame(shift).reindex(weeks).astype(float)
+    return failed_df, shift_df
 
 
 def load_eval_data(
@@ -167,6 +237,7 @@ def load_eval_data(
     weekly = weekly[weekly.index.isin(weeks_used)]
     statuses = pd.DataFrame({k: {w: fb.week_status_for(w, k) for w in weeks_used} for k in keys})
     spy_weekly, spy_vol = _spy_series(weeks_used)
+    solver_failed, view_shift = _meta_tables(weeks_used, keys)
     return EvalData(
         cfg=cfg,
         portfolios=source_portfolios,
@@ -181,5 +252,7 @@ def load_eval_data(
         statuses=statuses,
         spy_weekly=spy_weekly,
         spy_vol20=spy_vol,
-        stock_week=_stock_week_table(weeks_used, source_portfolios),
+        stock_week=_stock_week_table(weeks_used, list(portfolio_by_source)),
+        solver_failed=solver_failed,
+        view_shift=view_shift,
     )

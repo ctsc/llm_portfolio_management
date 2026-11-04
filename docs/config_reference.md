@@ -156,9 +156,10 @@ failed this long before the lock so that J7 can still write; decision N1).
 | `combined_signal` | bl_tilt | Combined score for H2 is the ranked BL tilt | E3 |
 | `factor_frequency` | daily | Factor regression frequency | G5 |
 | `fama_french_file` | null | Path to the official daily five-factor file, when present | |
-| `holm_families` | see file | Family labels (fixed before the run) | |
+| `holm_families` | see file | Family labels fixed before the run: `H1_ic_gap`, `H2_ic_gap`, `H3b_width` all_sources; `H2_portfolio_vs_q0`, `H5_shuffle` per_strategy; `H3_skills_vs_controls` per_model | |
 | `h4_splits` | market_direction, volatility, earnings_week | Exploratory splits | G4 |
 | `min_group_size` | 10 | Minimum stocks per group for the earnings split IC | |
+| `h3b.split`, `h3b.min_group_size` | median, 10 | H3b width split per source-week; weeks with a smaller group or all-equal widths are skipped | G3b |
 | `shuffle.n_shuffles`, `seed`, `processes` | 500, 99, 1 | Shuffled-ratings test | G6 |
 
 ### backup
