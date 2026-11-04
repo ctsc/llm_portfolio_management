@@ -33,11 +33,11 @@ Each week, for 100 sector-balanced S&P 500 stocks:
 | **LLM views** | Every model rates every stock from its ticker, name, sector, and the week's news, under `bare`, `placebo`, and `skills_1` through `skills_5` prompt configurations. Skills and placebo files are length-matched to the enabled skills mean. One stock per call, temperature 0, JSON output only. |
 | **Residualize** | LLM likely ratings are regressed on `z_b`; the standardized residual `z_L` is the part of the view the baseline did not already know. |
 | **Black-Litterman** | Baseline and LLM views enter as stacked identity views, scaled by trailing rank IC, Kronos spread, and rating width. |
-| **Optimize** | v2 phase 1 enables MVO with a 5 percent cap. Its baseline-only portfolio is `mvo__Q0`; a steered portfolio is `mvo__<model>__<prompt-id>`. |
+| **Optimize** | Five strategies read the same posterior: MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, each with a 5 percent cap and no shorts. Each strategy has a baseline-only portfolio `<strategy>__Q0` and one steered portfolio per rating source, `<strategy>__<model>__<prompt-id>`; HRP and equal weight are forecast-free controls. |
 | **Simulate** | Monday-open rebalance at raw ledger prices, 10 bps costs, daily stop-loss (-8%) and take-profit (+15%), dividends and splits handled. |
 | **Evaluate** | Weekly rank IC gaps (H1 to H3), pre-registered splits (H4), factor regressions and a shuffled-ratings test (H5), all with Holm correction. |
 
-The planned strategies are MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, with HRP and equal weight as controls. Portfolio identity separates the rating source (`<model>__<prompt-id>`) from the portfolio using it. Rank IC is stored once per source. v2 phase 1 enables MVO only and no controls; with the current four-model registry and six enabled prompt configurations, the default run writes one `mvo__Q0` plus 24 steered portfolios. `skills_5` is disabled by default. The test config selects two stub models and `bare`, `placebo`, `skills_1`, and `skills_2`. A null result is a valid result; the evaluation reports the minimum detectable gap and never tunes toward a positive finding.
+Portfolio count: `(models x prompt kinds + 1) x 5 + 2`; with 2 models and 7 prompt kinds that is 77 portfolios from 14 rating sources. LLM calls per week are `models x prompt kinds x stocks`; strategies add portfolios, not calls. Portfolio identity separates the rating source (`<model>__<prompt-id>`) from the strategy that trades it, so every source is judged under every strategy against that strategy's own Q0.
 
 ---
 
@@ -50,7 +50,7 @@ The planned strategies are MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K,
                                                  |                       |
                                           J5 collect batches ──> J6 validate (N1 failure rule)
                                                                          |
-                                                              J7 weights (BL + MVO, strategy Q0, fallbacks)
+                                                              J7 weights (BL, five strategies + Q0 each, controls)
                                                                          |
             next weekend: J8 replay from the price ledger + likely-rating IC ──> J9 dated CSV backup
 ```
@@ -181,7 +181,21 @@ GitLab CI (`.gitlab-ci.yml`) runs lint, tests, and the repository checks on ever
 
 ## Going live
 
-The live study needs accounts, keys, a desktop GPU, the real skills files, and a frozen stock list. The ordered checklist is v2 phase 15 of `PLAN2.md`; `docs/desktop_checklist.md` covers each weekend; `docs/runbook.md` covers bad Saturdays. Items that cannot be verified offline are marked `UNVERIFIED` in code and listed in `PROGRESS.md`; `scripts/smoke_real_services.py` exercises each one with a real key.
+The live study runs on ARCTIC: the LiteLLM gateway serves the open-weight models, Kronos runs on a GPU
+node, and the weekend pipeline and the shuffle array run on CPU nodes. The ordered checklist is v2 phase
+15 of `PLAN2.md`; `docs/arctic_setup.md` is the first-person setup list (env file, venv, model weights,
+licenses, VPN, quotas), `docs/runbook.md` section 9 is the weekend in both network modes with the D2
+steps, and `docs/arctic_gpu_request.md` is the allocation request. `docs/desktop_checklist.md` is the v1
+desktop checklist, kept until phase 15 D decides what replaces it.
+
+```
+cp scripts/arctic/arctic.env.example scripts/arctic/arctic.env   # fill every TBD (phase 15 C)
+bash scripts/arctic/submit_weekend.sh --dry-run                  # sbatch commands and the walltime check
+bash scripts/arctic/submit_weekend.sh                            # the weekend; prints job ids and rerun commands
+python scripts/run_weekend.py --from J4 --gateway-fallback       # D2, after sbatch scripts/arctic/llm_fallback.sbatch
+```
+
+The only provisional study decision is D3, the paid API budget; see `docs/open_questions.md`.
 
 ---
 
@@ -194,7 +208,9 @@ The live study needs accounts, keys, a desktop GPU, the real skills files, and a
 | `docs/design.md` | One section per pipeline stage with the exact formulas |
 | `docs/config_reference.md` | Every config key with default, meaning, and decision id |
 | `docs/open_questions.md` | Decision table with config locations and code tags |
-| `docs/runbook.md` | Status, reruns, every failure and its fallback, restore from backup |
+| `docs/runbook.md` | Status, reruns, every failure and its fallback, restore from backup, the ARCTIC weekend |
+| `docs/arctic_setup.md` | First-person ARCTIC setup list: env file, venv, model weights, licenses, network, quotas |
+| `docs/arctic_gpu_request.md` | The ARCTIC allocation request (phase 15 D decides its final form) |
 | `docs/gitlab_setup.md` | Create the project, push, confirm CI |
 | `docs/desktop_checklist.md` | Before, during, and after each weekend run |
 
@@ -202,6 +218,17 @@ License: MIT.
 
 ## Design choices
 
+The five study design choices, with value, config key, and reason (they match `config/study.yaml`):
+
+- **K1, Kronos spread to baseline uncertainty** (`views.kronos_spread_clip`): Omega_b,ii = tau Sigma_ii clip(s_i / median(s), 0.25, 4). Scaling by the median keeps the average baseline uncertainty at the v1 level, so the spread only shifts trust between stocks. The clip stops one unusual forecast from making a view almost certain or almost ignored.
+- **S4, Mean-CVaR lambda = 1.0** (`strategies.cvar.lam`): expected return and tail loss are both weekly returns, so equal weight needs no tuning and is not fit to past returns.
+- **S5, Robust MVO kappa = 1.0** (`strategies.robust.kappa`): the worst case is taken over a one standard deviation ellipsoid of the posterior mean, a neutral setting not fit to past returns.
+- **G3b, median width split** (`eval.h3b`): splitting at each week's median gives two groups of similar size, so neither group's rank IC is much noisier than the other; weeks with a group under 10 stocks are skipped.
+- **P1, skills length tolerance 5%** (`llm.skills_length_tolerance`): keeps the skills files close enough in length that length cannot explain differences between them; the placebo stays within 2% of their mean.
+
+D3, the paid API budget, is the only provisional decision; see `docs/open_questions.md`. Every other entry below is a build-time choice, newest first, tagged "chosen during build" when the plan left it open.
+
+- **v2 phase 14 e2e eval without the in-process shuffle (chosen during build)**: the v1 rehearsal test ran `run_eval` with 2 shuffles over every portfolio, 10.7 minutes on its own with 77 portfolios; it now skips the shuffle, which `test_twenty_shuffles_in_four_shards` and the phase 11 integration tests cover, keeping e2e under the 15-minute bound without shrinking the config.
 - **v2 phase 13 one shared rehearsal run (chosen during build)**: the e2e fixture `e2e_root` is the 30-week rehearsal itself, with the injected failures on fixed week indexes (`tests/e2e/conftest.py::INJECTIONS`: 3 source failure, 6 solver failure in every optimizing strategy, 9 lock-deadline cutoff, 12 gateway health failure recovered with `--gateway-fallback`), and the planted delisting from the synthetic world. The v1 invariants skip those four weeks; a second 30-week run would have doubled CI time.
 - **v2 phase 13 solver failure by configuration (chosen during build)**: the failure week points every solver list at `NO_SUCH_SOLVER` through the study config for that week only, so each strategy's own failure path runs (previous weights, `fallback_flag = solver_failed`) without patching the optimizers.
 - **v2 phase 13 lock cutoff by a file-counting clock (chosen during build)**: the rehearsal clock passes the lock deadline once J7 has written `LOCK_CUTOFF_AFTER_FILES` weight files, so completed portfolios keep their weights and the rest get Q0 with reason `lock_deadline`, deterministically.
@@ -225,9 +252,7 @@ License: MIT.
 - **DECISION(G1), portfolio guardrails** (`optimizer.max_weight`): all strategies and controls use a 5 percent cap with no short positions, matching the same investability limits.
 - **DECISION(S2), forecast-free controls**: HRP and equal weight do not use LLM views or Q0 weights, so they provide strategy-independent comparators.
 - **DECISION(S1), enabled strategy package**: run MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, with HRP and equal weight controls, to compare each planned allocation rule under shared guardrails.
-- **DECISION(S4), Mean-CVaR lambda = 1.0** (`strategies.cvar.lam`): expected return and tail loss use weekly-return units, so equal weighting avoids tuning against past returns.
 - **DECISION(S3), Mean-CVaR scenarios** (`strategies.cvar.n_scenarios`, `strategies.cvar.beta`): 10,000 posterior scenarios at a 0.95 tail level define a reproducible weekly tail-risk objective.
-- **DECISION(S5), Robust MVO kappa = 1.0** (`strategies.robust.kappa`): a one-standard-deviation ellipsoid is a neutral uncertainty radius that is not fit to past returns.
 - **DECISION(S6), Resampled MVO draws** (`strategies.resampled.n_draws`): 200 draws balance Monte Carlo stability with a bounded number of solver runs.
 - **DECISION(S7), Top-K** (`strategies.topk.k`): selecting 20 names gives a fixed, interpretable equal-weight comparator.
 - **DECISION(S1), strategy-aware portfolio keys**: a strategy, source, Q0, or control has an unambiguous identity, while source-level IC remains shared across strategies.
@@ -236,7 +261,6 @@ License: MIT.
 - **Lock-deadline fallback (chosen during build)**: preserve completed portfolios and copy strategy-specific Q0 files for unfinished portfolios, making each decision traceable to its actual source.
 - **v2 phase 8 tests run under `config/study_test.yaml` (chosen during build)**: the shared test fixtures load the test config (2 stub models x 4 prompt types, 2,000 CVaR scenarios, 20 resampled draws) because the full study config gave 129 portfolios per week and a 12-minute fixture setup; tests that need an API model add the two API stubs to `llm.model_ids`.
 - **v2 phase 8 J7 tests live in `tests/integration/` (chosen during build)**: `test_v2_phase8_jobs.py` runs J1 to J8 on the shared pipeline fixture, so it sits with the other job-level tests; the pure fallback-plan and hash tests stay in `tests/unit/`.
-- **DECISION(K1), Kronos spread to baseline uncertainty** (`views.kronos_spread_clip`): `Omega_b,ii = tau Sigma_ii clip(k_sd_i / median(k_sd), 0.25, 4)`. Scaling by the median keeps median baseline uncertainty at the v1 level, so spread shifts trust between stocks. The clip stops one unusual forecast from making a view almost certain or almost ignored.
 - **Seeded stub spread (chosen during build)**: use a lognormal with median 1 percent and log sigma 0.5; a separate stream seeded by `stub_seed + 1` preserves the existing `k` samples.
 - **Kronos sample adapter (chosen during build)**: use `predict_paths` when exposed and otherwise make repeated `sample_count=1` calls, matching the current upstream documentation that multi-sample outputs are averaged.
 - **No valid Kronos paths (chosen during build)**: set `k` and `k_sd` to NaN so baseline combination excludes the ticker instead of inventing a return.
@@ -249,7 +273,6 @@ License: MIT.
 - **View-layer width conversion (chosen during build)**: calculate `c_i` in `build_views` so validated rating widths directly determine LLM view uncertainty.
 - **Empty endpoint metadata (chosen during build)**: keep the output column stable until a provider exposes the resolved serving endpoint.
 - **DECISION(B1), prompt configurations**: compare `bare`, `placebo`, and five named skills prompts, with `skills_5` disabled by default, so skills sources can be added without changing discovery code.
-- **DECISION(P1), prompt length tolerances**: keep each enabled skills file within 5 percent of the skills mean and placebo within 2 percent of that mean, controlling for prompt length.
 - **Equal-length neutral skills placeholders (chosen during build)**: use equal-length text with distinct configuration labels so each placeholder has its own prompt hash until the researcher replaces them.
 - **Stub noise progression (chosen during build)**: use `3.0` for both controls and `1.2`, `1.0`, `0.8`, `0.6`, and `0.4` for `skills_1` to `skills_5` to create distinct synthetic skill effects below the controls.
 - **DECISION(D1), open-weight registry**: enable Gemma 4 31B and MiniMax M2.7 through LiteLLM, keep requested unprovisioned models disabled, and retain the two API models so the registry matches the study plan.

@@ -16,7 +16,7 @@ date and reason and flagged in the analysis. Code never changes a decision value
 | D4 | temperature | 0 for all models | confirmed |
 | B1 | prompt types | bare, placebo, and 4 to 5 similar-length specialized skills files; one placebo matched to mean skills length | confirmed |
 | B4 | universe size | 100 to 300, set after ARCTIC allocation is known | confirmed |
-| C3 | output schema | JSON low, likely, high integers in [-5, 5], rationale; low <= likely <= high; no confidence field | confirmed |
+| C3 | output schema | JSON low, likely, high integers in [-5, 5], rationale; low <= likely <= high; no separate certainty field | confirmed |
 | E1 | LLM view uncertainty | width = high - low; c = clip(1 - width/10, 0.1, 1); Omega_L,ii = tau Sigma_ii / c | confirmed |
 | E2 | IC for LLM view | IC of the residualized likely score | confirmed |
 | E6 | baseline view uncertainty | spread of Kronos's 20 sampled paths, mapped by K1 | confirmed |
@@ -56,8 +56,8 @@ The table below records the values used before PLAN2 superseded them.
 | A6 | cold start | first 5 live weeks use IC 0.02 | confirmed | `views.cold_start_weeks`, `views.cold_start_ic`, `decisions[A6]` | `views/ic.py` |
 | C1 | prompt fields | ticker, company name, sector, news | confirmed | `llm.prompt_fields`, `decisions[C1]` | `llm/prompts.py` |
 | C2 | stock with no news | still call the model with the fixed sentence; no tools or web search | confirmed | `llm.no_news_sentence`, `decisions[C2]` | `llm/prompts.py` |
-| C4 | skills file token cap | 6000 | provisional | `llm.skills_token_cap`, `decisions[C4]` | `scripts/check_placebo_length.py` |
-| C7 | rationale token cap | 150 | provisional | `llm.rationale_token_cap`, `decisions[C7]` | `llm/validate.py` |
+| C4 | skills file token cap | 6000 | confirmed, v1 value, rechecked in phase 15 G | `llm.skills_token_cap`, `decisions[C4]` | `scripts/check_placebo_length.py` |
+| C7 | rationale token cap | 150 | confirmed, v1 value, rechecked in phase 15 G | `llm.rationale_token_cap`, `decisions[C7]` | `llm/validate.py` |
 | E2 | IC used to scale the LLM view | IC of the residualized signal | confirmed | `views.ic_signal_for_llm`, `decisions[E2]` | `views/residualize.py`, `optimize/__init__.py` |
 | E3 | combined score for H2 | ranked Black-Litterman tilt | confirmed | `eval.combined_signal`, `decisions[E3]` | `pipeline/jobs.py` (`update_ic_history`), `eval/hypotheses.py` |
 | E4 | Kronos input prices | adjusted OHLCV | confirmed | `baseline.kronos.input_prices`, `decisions[E4]` | `baseline/combine.py` |

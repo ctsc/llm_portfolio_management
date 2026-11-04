@@ -1,8 +1,31 @@
-# ARCTIC setup (v2 phase 12)
+# ARCTIC setup
 
-Everything cluster-specific lives in `scripts/arctic/arctic.env` (copy of
-`arctic.env.example`). Every value starts as `TBD` and the scripts refuse to run until it is
-filled in; that happens in v2 phase 15 C once the allocation is known.
+This is my setup list for running the study on ARCTIC. Everything cluster-specific lives in
+`scripts/arctic/arctic.env`, my copy of `arctic.env.example`. Every value starts as `TBD` and the
+scripts refuse to run until I fill it in; I do that in v2 phase 15 C once I know the allocation.
+
+## My checklist
+
+1. **Environment file.** `cp scripts/arctic/arctic.env.example scripts/arctic/arctic.env`, then fill
+   every row of the table below from the allocation email and `sinfo`. The file is ignored by git.
+2. **Python.** `module load $PYTHON_MODULE`, `python -m venv $VENV_PATH`, `source $VENV_PATH/bin/activate`,
+   `pip install -e ".[dev]"` from the checkout, then `pytest tests/unit -q` once on the login node.
+3. **Model weights in `HF_HOME`.** On a node with network access I run `huggingface-cli download` for the
+   Kronos checkpoint and for every model with `fallback_eligible: true` in `config/models.yaml`, so
+   `kronos.sbatch` and `llm_fallback.sbatch` never download on a compute node.
+4. **Licenses.** Gemma and Llama are gated on Hugging Face: I accept each license with my account and log
+   in with `huggingface-cli login` before step 3, or the downloads fail with 401.
+5. **Gateway access.** The LiteLLM gateway needs my key in `ARCTIC_LITELLM_API_KEY` (in `$HOME/.env`,
+   mode 600, never in the repo) and, if it sits behind the campus network, the VPN or the login node's
+   network; `python scripts/smoke_real_services.py --dry-run` prints the payloads, and the live smoke
+   test confirms one call per model.
+6. **Network mode.** I check whether a compute node can reach the gateway (`srun --pty curl -sI $base_url`);
+   if not, `ARCTIC_NETWORK_MODE=login`.
+7. **Quotas.** I check `$DATA_ROOT` space (the 30-week synthetic run is a few hundred MB; the live run with
+   backups and shuffle shards needs a few GB), the GPU hours for Kronos (one short job per week plus the
+   fallback server when needed), and the CPU hours for the shuffle against `scripts/benchmark_pipeline.py`.
+8. **Dry run.** `bash scripts/arctic/submit_weekend.sh --dry-run` prints the sbatch commands and the
+   walltime check without submitting.
 
 | Variable | Meaning | Filled in |
 |---|---|---|
@@ -49,7 +72,7 @@ passes the check but fails mid-J4 leaves the affected sources failed by N1, or r
 
 ## Pulling results off the cluster
 
-Set `backup.rsync_target` (for example `user@laptop:/backups/portstudy`) and J9 runs
+I set `backup.rsync_target` (for example `user@laptop:/backups/portstudy`) and J9 runs
 `rsync -a --partial` of the dated backup folder and its zip after writing them; a failed rsync is
-printed and logged, never raised. Serving tool for the fallback server: vLLM assumed
-(`# UNVERIFIED`), chosen at setup.
+printed and logged, never raised. I have not verified the serving tool for the fallback server: vLLM is assumed
+(`# UNVERIFIED`) and I choose it at setup.

@@ -16,8 +16,16 @@ gives the id from `PLAN2.md` section 0.3 where one applies; code tags each use w
 | `FINNHUB_API_KEY` | Finnhub earnings calendar. |
 | `FRED_API_KEY` | FRED DTB3 series. |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | API models (batch endpoints). |
+| `ARCTIC_LITELLM_API_KEY` | Bearer key for the ARCTIC LiteLLM gateway (`llm.gateway.base_url`); never logged. |
+| `ARCTIC_FALLBACK_API_KEY` | Key for the D2 fallback server, if it requires one (optional). |
+| `ARCTIC_ENV` | Path of the filled-in `scripts/arctic/arctic.env` (default: next to the scripts). |
+| `ARCTIC_NETWORK_MODE` | `compute` or `login`, from `arctic.env`; selects which jobs run where. |
+| `PORTSTUDY_WEEK`, `PORTSTUDY_FROM`, `PORTSTUDY_GATEWAY_FALLBACK` | Set by `submit_weekend.sh` for the sbatch jobs: week, first job, D2 flag. |
+| `PORTSTUDY_SHARDS` | Shard plan CSV read by `shuffle_array.sbatch` (default `data/shuffle/shards.csv`). |
+| `PORTSTUDY_FALLBACK_PORT` | Port of the D2 fallback server (default 8000). |
+| `PORTSTUDY_E2E_DIGEST_FILE` | Tests only: where the e2e suite writes its output digest. |
 
-Keys go in a `.env` file on the desktop only; `scripts/smoke_real_services.py` loads it.
+Keys go in a `.env` file outside the repository (on ARCTIC, in `$HOME`, mode 600); `scripts/smoke_real_services.py` loads it and `check_secrets.py` fails on any key committed by mistake.
 
 ## study.yaml
 

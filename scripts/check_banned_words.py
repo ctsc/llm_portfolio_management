@@ -30,6 +30,9 @@ SKIP_FILES = {"PLAN.md", "PLAN2.md", Path(__file__).name}
 EM_DASH = "\u2014"
 # The banned condition word, built from parts so this file does not contain it literally.
 BANNED_WORD = re.compile(r"\b" + "a" + "rm" + r"s?\b", re.IGNORECASE)
+# docs/arctic_setup.md is written in the first person (v2 phase 14).
+FIRST_PERSON_FILE = "arctic_setup.md"
+THIRD_PERSON = re.compile(r"\bthe (researcher|student)\b", re.IGNORECASE)
 
 
 def _rel(p: Path) -> str:
@@ -65,6 +68,8 @@ def check(paths: list[Path]) -> list[str]:
                 problems.append(f"{_rel(p)}:{i}: em dash")
             if BANNED_WORD.search(line):
                 problems.append(f"{_rel(p)}:{i}: banned condition word")
+            if p.name == FIRST_PERSON_FILE and THIRD_PERSON.search(line):
+                problems.append(f"{_rel(p)}:{i}: third person in a first-person document")
     return problems
 
 

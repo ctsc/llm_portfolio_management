@@ -561,3 +561,27 @@ Built:
 Changed v1 tests and reasons: `test_full_run_synthetic.py` as above, because the shared run now contains the injected failure weeks.
 
 e2e runtime (this machine, `pytest tests/e2e` alone): 13 min 1 s wall for 17 tests, of which the 30-week rehearsal fixture takes 9 min 35 s and `test_failure_week` 2 min; under the 15-minute bound, so the test config was not shrunk. Two runs give the same output digest (`PORTSTUDY_E2E_DIGEST_FILE`).
+
+## v2 phase 14: documentation and final checklist
+
+Built:
+- `README.md`: v2 scope in "How the study works" (five strategies, controls, the portfolio count formula, calls per week), "Going live" on ARCTIC with the commands, the **Design choices** section opening with K1, S4, S5, G3b, and P1 in the plan's wording (value, config key, reason) and the D3 pointer to `docs/open_questions.md`, documentation table rows for `docs/arctic_setup.md` and `docs/arctic_gpu_request.md`.
+- `docs/design.md`: "v2 in one page" (rating source vs portfolio, the strategy package, posterior covariance, both uncertainty formulas, common random numbers, the fallback chain, the single-endpoint rule, the 5 percent cap at each rebalance with drift between rebalances).
+- `docs/runbook.md` section 9: the ARCTIC weekend in both network modes, the D2 steps, backups and rsync, the post-run shuffle array and eval.
+- `docs/config_reference.md`: `backup.rsync_target` and the environment variables `ARCTIC_LITELLM_API_KEY`, `ARCTIC_FALLBACK_API_KEY`, `ARCTIC_ENV`, `ARCTIC_NETWORK_MODE`, `PORTSTUDY_CONFIG`, `PORTSTUDY_WEEK`, `PORTSTUDY_FROM`, `PORTSTUDY_GATEWAY_FALLBACK`, `PORTSTUDY_SHARDS`, `PORTSTUDY_FALLBACK_PORT`, `PORTSTUDY_E2E_DIGEST_FILE`.
+- `docs/open_questions.md`: D3 is the only provisional row; C4 and C7 are marked confirmed v1 values (PLAN2 section 0.3 lists them as unchanged from v1) and are rechecked in phase 15 G. The C3 wording no longer uses the retired single-point field name.
+- `docs/arctic_setup.md`: rewritten in the first person with the checklist (env file, venv, model weights in `HF_HOME`, Hugging Face license acceptance for Gemma and Llama, gateway key and VPN, network mode probe, quotas, dry run).
+- `scripts/check_banned_words.py`: flags "the researcher" and "the student" in `docs/arctic_setup.md`.
+- Left in place, as the plan asks: `docs/arctic_gpu_request.md` (untracked on purpose until phase 15 D) and `docs/desktop_checklist.md`.
+
+Final checks (item 9): em dash scan and banned words (`check_banned_words.py`), `ruff check src tests scripts`, `mypy src scripts`, the full suite (unit, integration, e2e), `check_secrets.py`, and `grep -rni "qwen\|ollama\|confidence" src/ config/` (tracked files; the stale v1 `ollama` provider module was removed in v2 phase 4, and only build artefacts under `__pycache__`/`egg-info` still mention it). All passed at this commit: ruff and mypy clean, 315 unit and integration tests, 17 e2e tests (two runs with the same output digest), no em dash, no banned word, no secret, no stale reference.
+
+v2 phase 13 follow-up recorded here: the v1 rehearsal test called `run_eval` with a 2-shuffle H5 over all 77 portfolios, which alone took 10.7 minutes once the strategy package was in; it now runs the eval with `skip_shuffle=True` (the shuffle is exercised by `test_twenty_shuffles_in_four_shards` and the v2 phase 11 integration tests). Measured e2e runtime after that change: 14 min 13 s wall for 17 tests on this machine (the 30-week rehearsal fixture 10 min 22 s, `test_failure_week` 2 min 12 s), under the 15-minute bound.
+
+UNVERIFIED items still open for phase 15:
+- Every ARCTIC value in `scripts/arctic/arctic.env.example` (account, partitions, GRES, walltimes, module, venv, data root, `HF_HOME`, network mode, array throttle).
+- The serving command in `scripts/arctic/llm_fallback.sbatch` (vLLM assumed) and the fallback-eligible model ids.
+- Gateway behaviour: JSON mode, seeds, rate limits, MiniMax reasoning output, small-model ids; the gateway key is read from `ARCTIC_LITELLM_API_KEY` and redacted in logs.
+- Kronos per-path sampling (`predict_paths`) on the real checkpoint; the 20-call fallback costs about 20x the GPU time.
+- The v2 phase 9 projection: about 16,600 shuffle CPU hours at 300 stocks against the 15,000 requested; universe size 100 in `config/study.yaml` until the allocation is known.
+- D3, the paid API budget, after the phase 15 G test prompts.

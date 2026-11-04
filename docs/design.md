@@ -220,3 +220,31 @@ atomically with `complete: true`, skips a complete file, and reruns a file witho
 in-process first. A portfolio with no clean weeks is written as skipped and reported. The primary paired p-value is the exact sign-flip
 permutation; Newey-West is reported beside it. Gaps below the minimum detectable gap are
 inconclusive, not evidence of no effect. A null result is acceptable.
+
+## v2 in one page
+
+- **Rating source vs portfolio.** A rating source is `(model, prompt kind)`; it produces one set of
+  low/likely/high ratings per stock and week. A portfolio is `(strategy, source)`, a strategy's own
+  Q0, or a control. Sources are what the LLM calls pay for; portfolios are what the simulator runs.
+  Count: `(models x prompt kinds + 1) x 5 + 2`.
+- **Strategy package.** MVO, Mean-CVaR (10,000 posterior scenarios, beta 0.95, lambda 1), Robust MVO
+  (kappa 1), Resampled MVO (200 draws), Top-K (20 names, equal weight); controls HRP and equal weight
+  never read views or Q0 weights.
+- **Posterior covariance.** Black-Litterman returns `mu_BL` and `M = inv(inv(tau Sigma) + P' inv(Omega) P)`,
+  the covariance of the posterior mean; CVaR scenarios draw from `Sigma + M`, Robust uses `chol(M)`,
+  Resampled draws `mu_d = mu_BL + chol(M) z_d`.
+- **Uncertainty.** Baseline `Omega_b,ii = tau Sigma_ii clip(s_i / median(s), 0.25, 4)` with `s_i` the
+  Kronos path spread (K1); LLM `Omega_L,ii = tau Sigma_ii / c_i`, `c_i = clip(1 - width_i / 10, 0.1, 1)`.
+- **Common random numbers.** Scenario and draw matrices are seeded by `(seed, week, strategy)`, so every
+  source, each Q0, and every shuffle of one strategy see the same `Z` in one week; differences between
+  portfolios come from the views alone.
+- **Fallback chain.** Solver failure -> previous weights -> the same strategy's Q0 -> equal weight. A
+  failed source (crash, invalid storm, batch not back, gateway health failure) trades its strategy's Q0
+  with `decision_source = fallback_q0`; `IC_L = 0` drops the LLM view rows and the weights equal Q0 exactly.
+- **Single endpoint per source and week.** A source runs on the gateway or on the D2 fallback server,
+  never both: the endpoint file must name the current week and be newer than the run's start, and mixed
+  endpoints in one week are logged and flagged.
+- **Guardrails at each rebalance.** The 5 percent cap, no shorts, and full investment hold at every
+  rebalance for every strategy and control; between rebalances weights drift with prices, as in v1, so a
+  position can sit above 5 percent until Monday's open. Stops (-8 percent, +15 percent) and the 10 bps
+  cost are unchanged.

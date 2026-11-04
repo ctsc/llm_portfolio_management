@@ -225,7 +225,7 @@ decisions:
     value: "100 to 300, set after ARCTIC allocation is known"
     status: confirmed
   - id: C3
-    value: "JSON low, likely, high integers in [-5, 5], rationale; low <= likely <= high; no confidence field"
+    value: "JSON low, likely, high integers in [-5, 5], rationale; low <= likely <= high; no separate certainty field"
     status: confirmed
   - id: A2
     value: week_after_pilot

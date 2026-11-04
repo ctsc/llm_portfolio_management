@@ -119,3 +119,47 @@ portstudy shuffle collect                                   # fails listing miss
 Shards can run in any order and any number of times; a complete shard file is skipped and a
 half-written one (no `complete` marker) is rerun. `collect` writes `h5_shuffle.csv` and the
 distributions to the report folder with Holm applied within each strategy.
+
+## 9. The ARCTIC weekend
+
+Setup is in `docs/arctic_setup.md`; everything below assumes `scripts/arctic/arctic.env` is filled in.
+
+**Compute mode** (`ARCTIC_NETWORK_MODE=compute`, compute nodes reach the internet):
+
+```
+bash scripts/arctic/submit_weekend.sh            # kronos.sbatch (J1, J2) then weekend.sbatch (J3 to J9) afterok
+```
+
+**Login mode** (`ARCTIC_NETWORK_MODE=login`, only the login node has network):
+
+```
+bash scripts/arctic/submit_weekend.sh            # J1 here, kronos.sbatch (J2), J3 to J5 here, weekend.sbatch (J6 to J9) afterok
+```
+
+Both print the job ids, the log paths under `logs/arctic/`, and the exact rerun command for each job.
+The script warns when `WEEKEND_WALLTIME` ends after the Monday 09:00 ET lock; shorten the walltime or
+submit earlier. A job killed by walltime mid-J7 is resumed with `python scripts/run_weekend.py --from J7`.
+
+**D2, gateway down.** Before J4 the pipeline sends one tiny prompt per gateway model. On a failure it
+prints these steps and continues with the affected sources marked failed (they trade their strategy's Q0):
+
+```
+sbatch scripts/arctic/llm_fallback.sbatch                       # serves the fallback-eligible models
+python scripts/run_weekend.py --from J4 --gateway-fallback      # eligible models move to the fallback endpoint
+```
+
+The second command reruns J4 (the registry changed, so its inputs hash changed), J6, J7 and J9. Models
+that are not fallback-eligible stay failed for that week.
+
+**Backups.** J9 writes `data/backups/<week>_<timestamp>/` and a zip, and with `backup.rsync_target` set
+copies both with `rsync -a --partial`; a failed rsync is printed and logged, never raised. Restore as in
+section 5.
+
+**After the last week.**
+
+```
+portstudy shuffle plan --out data/shuffle/shards.csv
+sbatch --array=0-$(( $(wc -l < data/shuffle/shards.csv) - 2 ))%${SHUFFLE_MAX_PARALLEL} scripts/arctic/shuffle_array.sbatch
+portstudy shuffle collect                                       # fails loudly on missing shards
+portstudy eval                                                  # report under data/outputs/report/
+```
