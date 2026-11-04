@@ -32,11 +32,13 @@ lint:
     - ruff check src tests scripts
     - mypy src scripts
 
+# Every push: lint, type check, unit tests. Default branch only: integration and e2e.
+# Slow benchmarks run by hand (v2 phase 13).
 test:
   stage: test
   <<: *install
   script:
-    - pytest tests/unit tests/integration --cov=portstudy --cov-report=term --cov-report=xml
+    - pytest tests/unit --cov=portstudy --cov-report=term --cov-report=xml
   coverage: '/TOTAL.*\s+(\d+%)$/'
   artifacts:
     when: always
@@ -45,6 +47,14 @@ test:
         coverage_format: cobertura
         path: coverage.xml
     expire_in: 1 week
+
+integration:
+  stage: test
+  <<: *install
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - pytest tests/integration
 
 # End-to-end rehearsal only on the default branch, to save the free-tier minutes.
 e2e:
@@ -55,6 +65,13 @@ e2e:
   script:
     - pytest tests/e2e -q
 
+slow:
+  stage: test
+  <<: *install
+  when: manual
+  script:
+    - pytest -m slow tests
+
 checks:
   stage: checks
   <<: *install
@@ -63,4 +80,4 @@ checks:
     - python scripts/check_placebo_length.py
     - python scripts/check_banned_words.py
     - python scripts/check_secrets.py
-    - yamllint -c .yamllint .gitlab-ci.yml config/study.yaml config/models.yaml config/prompts_manifest.yaml
+    - yamllint -c .yamllint .gitlab-ci.yml config/study.yaml config/study_test.yaml config/models.yaml config/prompts_manifest.yaml

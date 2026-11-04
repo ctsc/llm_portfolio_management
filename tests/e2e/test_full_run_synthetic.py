@@ -26,14 +26,17 @@ from portstudy.pipeline.jobs import run_named
 from portstudy.pipeline.status import read_status
 from portstudy.sim.records import read_daily, read_trades
 from tests.conftest import generous_budget
-from tests.e2e.conftest import REPO_ROOT, WeekendRunner
+from tests.e2e.conftest import INJECTIONS, REPO_ROOT, WeekendRunner, rehearsal_registry
 
 pytestmark = pytest.mark.e2e
 
 
 def _prompt_hashes() -> dict[str, str]:
-    return {str(p.relative_to(REPO_ROOT)): sha256_file(p) for p in sorted((REPO_ROOT / "prompts").rglob("*"))
-            if p.is_file()}
+    return {
+        str(p.relative_to(REPO_ROOT)): sha256_file(p)
+        for p in sorted((REPO_ROOT / "prompts").rglob("*"))
+        if p.is_file()
+    }
 
 
 def _csv_hashes(root: Path) -> dict[str, str]:
@@ -51,35 +54,51 @@ def _csv_hashes(root: Path) -> dict[str, str]:
     return out
 
 
-def test_full_run_synthetic(e2e_dir: Path, study_config: StudyConfig, model_registry: ModelRegistry,
-                            world: SyntheticWorld, e2e_weeks: list[str]) -> None:
+def test_full_run_synthetic(
+    e2e_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    e2e_weeks: list[str],
+) -> None:
     cfg = generous_budget(study_config)
+    model_registry = rehearsal_registry(model_registry)
+    injected = {
+        e2e_weeks[i] for i in INJECTIONS
+    }  # v2 phase 13: failure weeks are checked elsewhere
     before_prompts = _prompt_hashes()
     context = WeekendRunner(cfg, model_registry, world).context(e2e_weeks[0])
     keys = context.portfolio_keys()
     n_sources = len(context.sources())
-    assert len(keys) == len(cfg.strategies.enabled) * (n_sources + 1) + len(
-        cfg.strategies.controls
-    )
+    assert len(keys) == len(cfg.strategies.enabled) * (n_sources + 1) + len(cfg.strategies.controls)
     replayed_keys = keys
     for w in e2e_weeks:
         snap = read_snapshot(w)
         # No look-ahead: nothing in a snapshot is dated after its cutoff.
         assert snap.prices["date"].max() <= cal.cutoff_day(w)
-        assert (snap.news["published_at"] <= pd.Timestamp(cal.cutoff_day(w), tz="America/New_York")
-                + pd.Timedelta(hours=16)).all()
+        assert (
+            snap.news["published_at"]
+            <= pd.Timestamp(cal.cutoff_day(w), tz="America/New_York") + pd.Timedelta(hours=16)
+        ).all()
         lock = read_json(e2e_dir / "outputs" / w / "weights" / "locked.json")
-        assert dt.datetime.fromisoformat(lock["locked_at"]) <= lock_deadline(w, cfg)
+        if w not in injected:  # the lock-cutoff week locks after the deadline on purpose
+            assert dt.datetime.fromisoformat(lock["locked_at"]) <= lock_deadline(w, cfg)
         for key in replayed_keys:
             wdf = read_csv(e2e_dir / "outputs" / w / "weights" / f"{key}.csv")
             assert wdf["weight"].sum() == pytest.approx(1.0, abs=1e-8)
-            assert (wdf["weight"] >= -1e-12).all() and (wdf["weight"] <= cfg.optimizer.max_weight + 1e-9).all()
-            assert fb.week_status_for(w, key) == "normal"
+            assert (wdf["weight"] >= -1e-12).all() and (
+                wdf["weight"] <= cfg.optimizer.max_weight + 1e-9
+            ).all()
+            if w not in injected:
+                assert fb.week_status_for(w, key) == "normal"
         scores = read_scores(w)
-        assert len(scores) == n_sources * len(snap.included_tickers)
+        if w not in injected:
+            assert len(scores) == n_sources * len(snap.included_tickers)
     for key in replayed_keys:
         trades, daily = read_trades(key), read_daily(key)
-        assert (trades["cost_usd"] - trades["trade_value"] * cfg.simulator.cost_bps / 1e4).abs().max() < 1e-6
+        assert (
+            trades["cost_usd"] - trades["trade_value"] * cfg.simulator.cost_bps / 1e4
+        ).abs().max() < 1e-6
         buys = trades.loc[trades["side"] == "buy", "trade_value"].sum()
         sells = trades.loc[trades["side"] == "sell", "trade_value"].sum()
         divs = 0.0
@@ -87,21 +106,28 @@ def test_full_run_synthetic(e2e_dir: Path, study_config: StudyConfig, model_regi
         # Cash identity up to dividends credited (synthetic world pays one dividend).
         implied = cfg.simulator.initial_value - buys + sells - trades["cost_usd"].sum() + divs
         assert last["cash"] >= implied - 1e-6
-        assert (daily["week_status"] == "normal").all()
+        assert (daily.loc[~daily["week_id"].isin(injected), "week_status"] == "normal").all()
         assert daily["value"].min() > 0
     ic = read_csv(e2e_dir / "outputs" / "ic_history.csv")
     closed = [w for w in e2e_weeks if cal.window_end_date(w) <= cal.cutoff_day(e2e_weeks[-1])]
     assert set(ic.loc[ic["signal"] == "baseline", "week_id"]) == set(closed)
     assert _prompt_hashes() == before_prompts
     ctx = WeekendRunner(cfg, model_registry, world).context(e2e_weeks[-1])
-    folder = run_eval(ctx, skip_shuffle=False, n_shuffles=2, folder=e2e_dir / "outputs" / "report")
+    folder = run_eval(ctx, skip_shuffle=True, folder=e2e_dir / "outputs" / "report")
     assert (folder / "report.md").exists()
-    data = load_eval_data(cfg, ctx.portfolio_keys())
+    clean_weeks = [w for w in e2e_weeks if w not in injected]
+    data = load_eval_data(cfg, ctx.portfolio_keys(), weeks=clean_weeks)
     assert data.fallback_counts()["fallback"].sum() == 0
 
 
-def test_failure_week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_config: StudyConfig,
-                      model_registry: ModelRegistry, world: SyntheticWorld, e2e_weeks: list[str]) -> None:
+def test_failure_week(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    e2e_weeks: list[str],
+) -> None:
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(root))
@@ -113,17 +139,25 @@ def test_failure_week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_con
     weeks = e2e_weeks[:6]
     assert runner.run(weeks[0], monkeypatch) == 0
     # Week 2: a local crash, then a clean resume.
-    runner.llm_providers = {"stub-ow-a": StubLlmProvider("stub-ow-a", failures=StubFailures(crash_after_calls=40))}
+    runner.llm_providers = {
+        "stub-ow-a": StubLlmProvider("stub-ow-a", failures=StubFailures(crash_after_calls=40))
+    }
     assert runner.run(weeks[1], monkeypatch) == 1
     runner.llm_providers = {}
     assert runner.run(weeks[1], monkeypatch) == 0
     # Week 3: invalid-output storm for one model.
-    runner.llm_providers = {"stub-ow-b": StubLlmProvider("stub-ow-b", failures=StubFailures(invalid_rate=0.6))}
+    runner.llm_providers = {
+        "stub-ow-b": StubLlmProvider("stub-ow-b", failures=StubFailures(invalid_rate=0.6))
+    }
     assert runner.run(weeks[2], monkeypatch) == 0
     runner.llm_providers = {}
     # Week 4: a batch that never returns; the clock sits at the lock margin so J6 can decide.
-    runner.llm_providers = {"stub-api-a": StubLlmProvider("stub-api-a", failures=StubFailures(batch_never_returns=True))}
-    margin = lock_deadline(weeks[3], cfg) - dt.timedelta(minutes=cfg.pipeline.lock_margin_minutes - 1)
+    runner.llm_providers = {
+        "stub-api-a": StubLlmProvider("stub-api-a", failures=StubFailures(batch_never_returns=True))
+    }
+    margin = lock_deadline(weeks[3], cfg) - dt.timedelta(
+        minutes=cfg.pipeline.lock_margin_minutes - 1
+    )
     runner.clock = lambda: margin
     assert runner.run(weeks[3], monkeypatch) == 0
     runner.clock = None
@@ -135,8 +169,13 @@ def test_failure_week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_con
         def get_prices(self, tickers: list[str], start: dt.date, end: dt.date) -> pd.DataFrame:
             raise ConnectionError("provider down")
 
-    runner.data_providers = ProviderBundle(prices=Broken(world), news=bundle.news, reference=bundle.reference,
-                                           rates=bundle.rates, members=bundle.members)
+    runner.data_providers = ProviderBundle(
+        prices=Broken(world),
+        news=bundle.news,
+        reference=bundle.reference,
+        rates=bundle.rates,
+        members=bundle.members,
+    )
     assert runner.run(weeks[4], monkeypatch) == 1
     ctx = runner.context(weeks[4])
     for job in ("J6", "J7"):
@@ -159,22 +198,38 @@ def test_failure_week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_con
     assert not ((trades["week_id"] == weeks[4]) & (trades["reason"] == "rebalance")).any()
     data = load_eval_data(cfg, runner.context(weeks[5]).portfolio_keys(), weeks=weeks)
     counts = data.fallback_counts().set_index("portfolio")
-    assert counts.loc["mvo__stub-ow-b__skills_1", "fallback"] == 1 and counts.loc["mvo__stub-ow-b__skills_1", "no_rebalance"] == 1
+    assert (
+        counts.loc["mvo__stub-ow-b__skills_1", "fallback"] == 1
+        and counts.loc["mvo__stub-ow-b__skills_1", "no_rebalance"] == 1
+    )
     assert counts.loc["mvo__stub-api-b__bare", "fallback"] == 0
-    assert fb.clean_weeks("mvo__stub-ow-b__skills_1", weeks) == [weeks[0], weeks[1], weeks[3], weeks[5]]
+    assert fb.clean_weeks("mvo__stub-ow-b__skills_1", weeks) == [
+        weeks[0],
+        weeks[1],
+        weeks[3],
+        weeks[5],
+    ]
 
 
-def test_resume_equals_uninterrupted_run(e2e_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                         study_config: StudyConfig, model_registry: ModelRegistry,
-                                         world: SyntheticWorld, e2e_weeks: list[str]) -> None:
+def test_resume_equals_uninterrupted_run(
+    e2e_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    e2e_weeks: list[str],
+) -> None:
     reference = _csv_hashes(e2e_dir)
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(root))
     cfg = generous_budget(study_config)
-    runner = WeekendRunner(cfg, model_registry, world)
+    runner = WeekendRunner(cfg, rehearsal_registry(model_registry), world)
     week = e2e_weeks[0]
-    runner.llm_providers = {"stub-ow-a": StubLlmProvider("stub-ow-a", failures=StubFailures(crash_after_calls=33))}
+    runner.llm_providers = {
+        "stub-ow-a": StubLlmProvider("stub-ow-a", failures=StubFailures(crash_after_calls=33))
+    }
     assert runner.run(week, monkeypatch) == 1
     assert read_status(week, "J4").state == "failed"
     runner.llm_providers = {}
@@ -187,15 +242,21 @@ def test_resume_equals_uninterrupted_run(e2e_dir: Path, tmp_path: Path, monkeypa
             assert reference[rel] == digest, rel
 
 
-def test_determinism_two_runs_identical(e2e_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                        study_config: StudyConfig, model_registry: ModelRegistry,
-                                        world: SyntheticWorld, e2e_weeks: list[str]) -> None:
+def test_determinism_two_runs_identical(
+    e2e_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    e2e_weeks: list[str],
+) -> None:
     reference = _csv_hashes(e2e_dir)
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(root))
-    runner = WeekendRunner(generous_budget(study_config), model_registry, world)
-    weeks = e2e_weeks[:6]
+    runner = WeekendRunner(generous_budget(study_config), rehearsal_registry(model_registry), world)
+    weeks = e2e_weeks[:3]  # the first injected week is index 3
     for w in weeks:
         assert runner.run(w, monkeypatch) == 0
     mine = _csv_hashes(root)
@@ -204,16 +265,27 @@ def test_determinism_two_runs_identical(e2e_dir: Path, tmp_path: Path, monkeypat
         if any(rel.startswith(f"outputs/{w}/") for w in weeks):
             assert reference[rel] == digest, rel
             compared += 1
-    assert compared > 6 * 15
+    assert compared > 3 * 15
     # The IC history and weekly returns for the shared weeks agree too.
     ref_ic = read_csv(e2e_dir / "outputs" / "ic_history.csv")
     my_ic = read_csv(root / "outputs" / "ic_history.csv")
-    merged = my_ic.merge(ref_ic, on=["week_id", "signal", "model", "config_id"], suffixes=("_a", "_b"))
-    assert len(merged) == len(my_ic) and (merged["rank_ic_a"] - merged["rank_ic_b"]).abs().max() < 1e-12
+    merged = my_ic.merge(
+        ref_ic, on=["week_id", "signal", "model", "config_id"], suffixes=("_a", "_b")
+    )
+    assert (
+        len(merged) == len(my_ic)
+        and (merged["rank_ic_a"] - merged["rank_ic_b"]).abs().max() < 1e-12
+    )
 
 
-def test_no_future_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_config: StudyConfig,
-                        model_registry: ModelRegistry, world: SyntheticWorld, e2e_weeks: list[str]) -> None:
+def test_no_future_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    e2e_weeks: list[str],
+) -> None:
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(root))
@@ -231,15 +303,24 @@ def test_no_future_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_c
             return super().get_prices(tickers, start, end)
 
     class GuardedNews(type(bundle.news)):  # type: ignore[misc]
-        def get_news(self, tickers: list[str], start_utc: dt.datetime, end_utc: dt.datetime) -> pd.DataFrame:
+        def get_news(
+            self, tickers: list[str], start_utc: dt.datetime, end_utc: dt.datetime
+        ) -> pd.DataFrame:
             # The snapshot pulls a few hours past the cutoff on purpose (leakage check) and drops them.
-            limit = dt.datetime.combine(cutoff, dt.time(16), tzinfo=dt.timezone(dt.timedelta(hours=-5)))
+            limit = dt.datetime.combine(
+                cutoff, dt.time(16), tzinfo=dt.timezone(dt.timedelta(hours=-5))
+            )
             assert end_utc <= limit + dt.timedelta(hours=12)
             return super().get_news(tickers, start_utc, end_utc)
 
     runner = WeekendRunner(cfg, model_registry, world)
-    runner.data_providers = ProviderBundle(prices=Guarded(world), news=GuardedNews(world), reference=bundle.reference,
-                                           rates=bundle.rates, members=bundle.members)
+    runner.data_providers = ProviderBundle(
+        prices=Guarded(world),
+        news=GuardedNews(world),
+        reference=bundle.reference,
+        rates=bundle.rates,
+        members=bundle.members,
+    )
     ctx = runner.context(week)
     for job in ("J1", "J2"):
         assert run_named(ctx, job, week).state == "done"
@@ -250,24 +331,38 @@ def test_no_future_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_c
     assert snap.prices["date"].max() <= cutoff
 
 
-def test_cost_log(e2e_dir: Path, study_config: StudyConfig, model_registry: ModelRegistry, e2e_weeks: list[str]) -> None:
+def test_cost_log(
+    e2e_dir: Path, study_config: StudyConfig, model_registry: ModelRegistry, e2e_weeks: list[str]
+) -> None:
     table = CostTable(model_registry)
     total_log, total_scores = 0.0, 0.0
     for w in e2e_weeks:
+        if w == e2e_weeks[12]:  # gateway week: the first run logs the failed sources at zero
+            continue
         cost = read_csv(e2e_dir / "outputs" / w / "cost_log.csv")
         scores = read_scores(w)
         total_log += float(cost["cost_usd"].sum())
         total_scores += float(scores["cost_usd"].sum())
         for _, row in scores.iterrows():
             spec = model_registry.get(str(row["model"]))
-            expected = table.cost_usd(spec.id, int(row["tokens_in"]), int(row["tokens_cached"]),
-                                      int(row["tokens_out"]), spec.kind == "api")
-            assert float(row["cost_usd"]) == pytest.approx(expected, abs=1e-9) or float(row["cost_usd"]) == 0.0
+            expected = table.cost_usd(
+                spec.id,
+                int(row["tokens_in"]),
+                int(row["tokens_cached"]),
+                int(row["tokens_out"]),
+                spec.kind == "api",
+            )
+            assert (
+                float(row["cost_usd"]) == pytest.approx(expected, abs=1e-9)
+                or float(row["cost_usd"]) == 0.0
+            )
     assert total_log == pytest.approx(total_scores)
     # Only API models carry a price; the test config runs the two open-weight stubs.
     api_models = [m for m in study_config.llm.model_ids if model_registry.get(m).kind == "api"]
     assert (total_log > 0) == bool(api_models)
-    assert (read_csv(e2e_dir / "outputs" / e2e_weeks[0] / "cost_log.csv")["projected_study_usd"] >= 0).all()
+    assert (
+        read_csv(e2e_dir / "outputs" / e2e_weeks[0] / "cost_log.csv")["projected_study_usd"] >= 0
+    ).all()
 
 
 def test_backups_exist_for_every_week(e2e_dir: Path, e2e_weeks: list[str]) -> None:

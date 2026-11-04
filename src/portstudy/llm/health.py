@@ -27,6 +27,7 @@ class HealthReport:
     ok: list[str] = field(default_factory=list)
     failed: dict[str, str] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)  # not on the gateway (fallback or stub)
+    previous: list[dict[str, Any]] = field(default_factory=list)  # earlier checks this week
 
     @property
     def healthy(self) -> bool:
@@ -93,6 +94,10 @@ def gateway_health_check(ctx: RunContext, week_id: str, runner: WeekRunner) -> H
             report.ok.append(model_id)
         except Exception as exc:  # any transport or provider failure counts as unhealthy
             report.failed[model_id] = f"{type(exc).__name__}: {exc}"
+    earlier = read_health(week_id)
+    if earlier is not None:
+        report.previous = [{k: v for k, v in earlier.to_dict().items() if k != "previous"}]
+        report.previous += earlier.previous
     write_json_atomic(report.to_dict(), health_path(week_id))
     return report
 

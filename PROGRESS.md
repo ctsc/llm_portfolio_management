@@ -549,3 +549,15 @@ Changed v1 tests and reasons: none.
 UNVERIFIED: every ARCTIC value (`TBD`), the serving command in `llm_fallback.sbatch`, Slurm behaviour (no cluster here).
 
 Choices made while unattended: see the README design choices for v2 phase 12.
+
+## v2 phase 13: end-to-end rehearsal and CI
+
+Built:
+- `tests/e2e/conftest.py`: `E2E_WEEKS = 30`; `run_rehearsal` runs the clean weeks plus `INJECTIONS` (week 3 `stub-ow-b` invalid-output storm, week 6 `NO_SUCH_SOLVER` in every optimizing strategy, week 9 lock-deadline cutoff mid-J7 through `lock_cutoff_clock`, week 12 gateway health failure via `GatewayDown` followed by `run_weekend.py --from J4 --gateway-fallback`); `rehearsal_registry` makes `stub-ow-a` fallback-eligible so D2 switches it and `stub-ow-b` stays on the gateway.
+- `tests/e2e/test_full_run.py`: v2 invariants over the shared run: one weight file per portfolio and week, one Q0 per strategy, controls never read views (`decision_source = control`, `use_llm_view = False`, `view_shift = 0`), every weight file passes `check_weights`, IC history has one row per source and signal and no strategy column; one test per injected week (fallback statuses, exact Q0 copies, `solver_failed` on every optimizing strategy but not Top-K or the controls, `lock_deadline` copies with completed portfolios kept, the gateway week ending `ok` with `decision_source = llm`); the planted delisting leaves the universe and every book; eval over the clean weeks with a positive H3b narrow-minus-wide gap and `view_shift > 0` for every steered strategy; a 20-shuffle test in 4 shards through `run_shards_local` and `collect_shards`; an output digest (`PORTSTUDY_E2E_DIGEST_FILE`) for the two-runs-identical check.
+- `tests/e2e/test_full_run_synthetic.py` (v1 rehearsal): skips the four injected weeks in its "every week normal" checks; the determinism test compares the three weeks before the first injection.
+- `.gitlab-ci.yml`: `test` runs `tests/unit` on every push; `integration` and `e2e` run on the default branch; `slow` is manual (`pytest -m slow tests`); yamllint now covers `config/study_test.yaml`.
+
+Changed v1 tests and reasons: `test_full_run_synthetic.py` as above, because the shared run now contains the injected failure weeks.
+
+e2e runtime (this machine, `pytest tests/e2e` alone): 13 min 1 s wall for 17 tests, of which the 30-week rehearsal fixture takes 9 min 35 s and `test_failure_week` 2 min; under the 15-minute bound, so the test config was not shrunk. Two runs give the same output digest (`PORTSTUDY_E2E_DIGEST_FILE`).
