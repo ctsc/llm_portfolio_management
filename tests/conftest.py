@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture(scope="session")
 def study_config() -> StudyConfig:
-    return load_study_config(REPO_ROOT / "config" / "study.yaml")
+    return load_study_config(REPO_ROOT / "config" / "study_test.yaml")
 
 
 @pytest.fixture(scope="session")

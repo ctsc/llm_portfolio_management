@@ -36,15 +36,14 @@ def test_report_builds_on_synthetic_run(pipeline_dir: Path, study_config: StudyC
     md = (folder / "report.md").read_text(encoding="utf-8")
     assert "Minimum detectable gap" in md and "Fallback counts" in md and "inconclusive" in md
     shuffle = pd.read_csv(folder / "h5_shuffle.csv")
-    shuffle_portfolios = set(ctx.portfolio_keys()) - set(cfg.strategies.controls)
+    shuffle_portfolios = set(ctx.portfolio_keys()) - set(ctx.control_keys())  # controls: no family
     assert set(shuffle["portfolio"]) == shuffle_portfolios
     assert len(shuffle) == len(shuffle_portfolios) and (shuffle["n_shuffles"] == 3).all()
     assert shuffle["p_total_return"].between(0, 1).all()
     assert (shuffle["p_total_return_holm"] >= shuffle["p_total_return"] - 1e-12).all()
     metrics = pd.read_csv(folder / "portfolio_metrics_as_traded.csv")
     assert set(metrics["portfolio"]) == set(ctx.portfolio_keys())
-    replayed_metrics = metrics.loc[~metrics["portfolio"].isin(cfg.strategies.controls)]
-    assert replayed_metrics["total_cost_usd"].gt(0).all()
+    assert metrics["total_cost_usd"].gt(0).all()
     # Rerunning a shuffle hits the cache and gives the identical result.
     weeks = data.weeks
     first = one_shuffle(cfg, "mvo__stub-ow-a__skills_1", weeks, cfg.eval.shuffle.seed, 0)

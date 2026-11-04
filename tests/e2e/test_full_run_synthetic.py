@@ -19,7 +19,6 @@ from portstudy.eval.report import run_eval
 from portstudy.hashing import sha256_file
 from portstudy.io import read_csv, read_json
 from portstudy.llm.cost import CostTable
-from portstudy.llm.prompts import load_manifest
 from portstudy.llm.providers.stub import StubFailures, StubLlmProvider
 from portstudy.llm.runner import lock_deadline, read_scores
 from portstudy.pipeline import fallback as fb
@@ -58,11 +57,11 @@ def test_full_run_synthetic(e2e_dir: Path, study_config: StudyConfig, model_regi
     before_prompts = _prompt_hashes()
     context = WeekendRunner(cfg, model_registry, world).context(e2e_weeks[0])
     keys = context.portfolio_keys()
-    n_sources = len(model_registry.enabled(synthetic=True)) * len(load_manifest().enabled())
+    n_sources = len(context.sources())
     assert len(keys) == len(cfg.strategies.enabled) * (n_sources + 1) + len(
         cfg.strategies.controls
     )
-    replayed_keys = [key for key in keys if key not in context.control_keys()]
+    replayed_keys = keys
     for w in e2e_weeks:
         snap = read_snapshot(w)
         # No look-ahead: nothing in a snapshot is dated after its cutoff.
@@ -77,7 +76,7 @@ def test_full_run_synthetic(e2e_dir: Path, study_config: StudyConfig, model_regi
             assert (wdf["weight"] >= -1e-12).all() and (wdf["weight"] <= cfg.optimizer.max_weight + 1e-9).all()
             assert fb.week_status_for(w, key) == "normal"
         scores = read_scores(w)
-        assert len(scores) == 24 * len(snap.included_tickers)
+        assert len(scores) == n_sources * len(snap.included_tickers)
     for key in replayed_keys:
         trades, daily = read_trades(key), read_daily(key)
         assert (trades["cost_usd"] - trades["trade_value"] * cfg.simulator.cost_bps / 1e4).abs().max() < 1e-6
@@ -107,6 +106,9 @@ def test_failure_week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_con
     root.mkdir()
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(root))
     cfg = generous_budget(study_config)
+    # The test config lists the open-weight stubs; week 4 needs an API model for its stuck batch.
+    api_ids = [*cfg.llm.model_ids, "stub-api-a", "stub-api-b"]
+    cfg = cfg.model_copy(update={"llm": cfg.llm.model_copy(update={"model_ids": api_ids})})
     runner = WeekendRunner(cfg, model_registry, world)
     weeks = e2e_weeks[:6]
     assert runner.run(weeks[0], monkeypatch) == 0
@@ -143,12 +145,11 @@ def test_failure_week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_con
     # Week 6: normal again; its catch-up step replays everything.
     assert runner.run(weeks[5], monkeypatch) == 0
 
-    manifest = load_manifest()
-    for conf in manifest.enabled():
-        assert fb.week_status_for(weeks[1], f"mvo__stub-ow-a__{conf.id}") == "normal"
-        assert fb.week_status_for(weeks[2], f"mvo__stub-ow-b__{conf.id}") == "fallback"
-        assert fb.week_status_for(weeks[3], f"mvo__stub-api-a__{conf.id}") == "fallback"
-        assert fb.week_status_for(weeks[3], f"mvo__stub-api-b__{conf.id}") == "normal"
+    for conf_id in cfg.llm.prompt_ids:
+        assert fb.week_status_for(weeks[1], f"mvo__stub-ow-a__{conf_id}") == "normal"
+        assert fb.week_status_for(weeks[2], f"mvo__stub-ow-b__{conf_id}") == "fallback"
+        assert fb.week_status_for(weeks[3], f"mvo__stub-api-a__{conf_id}") == "fallback"
+        assert fb.week_status_for(weeks[3], f"mvo__stub-api-b__{conf_id}") == "normal"
     assert fb.week_status_for(weeks[4], "mvo__Q0") == "no_rebalance"
     daily = read_daily("mvo__stub-ow-b__skills_1")
     assert set(daily.loc[daily["week_id"] == weeks[2], "week_status"]) == {"fallback"}
@@ -263,7 +264,9 @@ def test_cost_log(e2e_dir: Path, study_config: StudyConfig, model_registry: Mode
                                       int(row["tokens_out"]), spec.kind == "api")
             assert float(row["cost_usd"]) == pytest.approx(expected, abs=1e-9) or float(row["cost_usd"]) == 0.0
     assert total_log == pytest.approx(total_scores)
-    assert total_log > 0
+    # Only API models carry a price; the test config runs the two open-weight stubs.
+    api_models = [m for m in study_config.llm.model_ids if model_registry.get(m).kind == "api"]
+    assert (total_log > 0) == bool(api_models)
     assert (read_csv(e2e_dir / "outputs" / e2e_weeks[0] / "cost_log.csv")["projected_study_usd"] >= 0).all()
 
 

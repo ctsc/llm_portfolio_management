@@ -107,9 +107,11 @@ def test_test_config_selects_expected_sources_and_portfolio_count() -> None:
         "stub-ow-b__skills_1",
         "stub-ow-b__skills_2",
     ]
+    enabled = ctx.cfg.strategies.enabled
     assert ctx.portfolio_keys() == [
-        "mvo__Q0",
-        *[f"mvo__{source.key}" for source in ctx.sources()],
+        *[f"{strategy}__Q0" for strategy in enabled],
+        *ctx.cfg.strategies.controls,
+        *[f"{strategy}__{source.key}" for strategy in enabled for source in ctx.sources()],
     ]
     assert len(ctx.portfolio_keys()) == (
         len(ctx.cfg.strategies.enabled)

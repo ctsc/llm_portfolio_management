@@ -446,3 +446,35 @@ Choices made while unattended:
 - Label non-solver portfolios `deterministic` and set their unused objective to NaN.
 - Retry a covariance Cholesky factorization once with diagonal jitter `1e-12 * max(trace(M) / N, 1)`.
 - Add `highspy>=1.7` as the optional HIGHS solver extra; the repository environment already provides an importable `highspy`, so no package installation was needed.
+
+## v2 phase 8: weights and replay over strategies
+
+Built:
+- Added shared Q0/source posterior generation and persisted the required source-level posterior CSVs. Weight metadata records the covariance-of-mean SHA-256, strategy diagnostics, solver/fallback fields, endpoint, decision source, and view shift.
+- Wired J7 to produce Q0 weights, HRP/EW controls, then source portfolios; source failure and lock-deadline paths copy strategy-specific Q0 files and metadata.
+- Changed fallback plans to source keys, replay plans to use persisted `decision_source`, and IC history to read baseline/raw/residual/combined signals from source posteriors.
+- Added strategy-grouped status summaries and updated the test config to enable all strategies and both controls.
+- Updated README, design, runbook, config reference, and Phase 8 integration assertions.
+
+Changed v1 tests and reasons:
+- `tests/integration/test_phase10_pipeline.py`: assert source-keyed fallback reasons while retaining per-strategy fallback outputs.
+- `tests/integration/test_phase11_report.py`: include controls in replay and shuffle expectations now that Phase 8 writes and replays them.
+- `tests/e2e/test_full_run_synthetic.py`: include controls in replay assertions and derive score counts from configured sources; `test_failure_week` adds the API stubs to `llm.model_ids` because the test config lists only the open-weight stubs.
+- `tests/integration/test_phase10_pipeline.py` `test_j3_cost_cap_blocks_then_allow_over_budget` adds the API stubs because only API models carry a price, so the cap cannot trip on open-weight stubs alone.
+- `tests/e2e/test_full_run_synthetic.py` `test_cost_log`: the total cost must be positive exactly when the run includes an API model.
+- `tests/unit/test_v2_phase1_config_identity.py`: the test-config portfolio order now covers every enabled strategy and control (Q0s, controls, then steered keys) instead of MVO only.
+- `tests/unit/test_phase1_scaffold.py`: `test_config_loads_and_has_decisions` loads `config/study.yaml` itself because it checks the study file's decision list.
+- `tests/conftest.py`: the shared `study_config` fixture now loads `config/study_test.yaml`. Under `config/study.yaml` (4 stub models x 6 prompt types x 5 strategies = 129 portfolios, 10,000 CVaR scenarios, 200 resampled draws) the 3-week pipeline fixture took 720 s to build and one J1 to J9 test took 250 s. Tests that counted sources from the registry and manifest now count them from the run context or `cfg.llm`; `test_j5_batch_never_returns_is_a_labeled_fallback` adds the API stubs.
+
+Tests added:
+- `tests/integration/test_v2_phase8_jobs.py`: weight file count and `check_weights` on every file, posterior files per source, forced source failure copies each strategy's Q0 with `fallback_q0` and `view_shift` 0, dropped LLM view (cold-start IC 0) byte-identical to the strategy's Q0, lock deadline mid-loop labels unfinished sources `lock_deadline`, IC history has one row per source and signal per week, forced J7 and J8 reruns give identical file hashes and trade records.
+- `tests/unit/test_v2_phase8_jobs.py`: source-keyed fallback status applies to every strategy; covariance-of-mean hash is stable and sensitive.
+
+Runtime under the test config (8 cores, VM): e2e 25-week setup 494 s, `test_failure_week` 130 s, `test_determinism_two_runs_identical` 90 s, whole `tests/e2e` about 13 min; the slowest unit/integration items are the LiteLLM 429-storm fixture (42 s), the 30 consecutive snapshots (29 s), and the J7/J8 rerun test (28 s). `scripts/run_weekend.py print_summary` skips the `.meta.json` entries that `locked.json` now lists.
+
+Choices made while unattended:
+- Tests run under `config/study_test.yaml` (see the README design choice); the "30-week integration test" in the Phase 8 done-when is read as the e2e synthetic run (`tests/e2e`, 25 trading weeks on the 30 snapshot weeks of `tests/conftest.py`) with all five strategies and both controls under the test config.
+- The J7 integration tests live in `tests/integration/` because they run J1 to J8 on the shared pipeline fixture.
+- Compute one posterior and covariance-of-mean per rating source and reuse it across strategies, so allocation is the only strategy-dependent input.
+- Keep source-level failure and fallback reasons in J6; J7 copies outputs separately for each strategy.
+- If the deadline arrives during J7, preserve completed portfolios and use Q0 copies for unfinished portfolios.

@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from portstudy.io import read_json, write_json_atomic
 from portstudy.paths import outputs_dir, week_output_dir
-from portstudy.types import WeekStatus
+from portstudy.types import PortfolioId, RatingSource, WeekStatus
 
 PortfolioStatus = Literal["normal", "fallback", "no_rebalance"]
 
@@ -32,7 +32,24 @@ class FallbackPlan:
     def status_for(self, portfolio: str) -> PortfolioStatus:
         if self.no_rebalance:
             return "no_rebalance"
-        return self.statuses.get(portfolio, "normal")
+        try:
+            source = PortfolioId.parse(portfolio).source
+        except ValueError:
+            try:
+                source = RatingSource.parse(portfolio)
+            except ValueError:
+                source = None
+        return self.statuses.get(source.key, "normal") if source is not None else "normal"
+
+    def reason_for(self, portfolio: str) -> str:
+        try:
+            source = PortfolioId.parse(portfolio).source
+        except ValueError:
+            try:
+                source = RatingSource.parse(portfolio)
+            except ValueError:
+                source = None
+        return self.reasons.get(source.key, "") if source is not None else ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -79,6 +96,11 @@ def read_log(week_id: str) -> list[dict[str, Any]]:
 
 def week_status_for(week_id: str, portfolio: str) -> WeekStatus:
     """As-traded status for a portfolio in a week, from the fallback log written by J7."""
+    plan = read_plan(week_id)
+    if plan is not None:
+        status = plan.status_for(portfolio)
+        if status != "normal":
+            return status
     for e in read_log(week_id):
         if e.get("portfolio") in (portfolio, "*"):
             kind = str(e.get("status", "normal"))

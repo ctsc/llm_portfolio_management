@@ -15,7 +15,6 @@ from portstudy import calendar as cal
 from portstudy import io as pio
 from portstudy.config import (
     ModelRegistry,
-    StudyConfig,
     load_model_registry,
     load_study_config,
 )
@@ -27,7 +26,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # Config -------------------------------------------------------------------------------------
 
 
-def test_config_loads_and_has_decisions(study_config: StudyConfig) -> None:
+def test_config_loads_and_has_decisions() -> None:
+    # The study file itself, not the test config the shared fixture loads.
+    study_config = load_study_config(REPO_ROOT / "config" / "study.yaml")
     assert study_config.views.tau == 0.05
     assert study_config.optimizer.max_weight == 0.05
     assert study_config.simulator.cost_bps == 10

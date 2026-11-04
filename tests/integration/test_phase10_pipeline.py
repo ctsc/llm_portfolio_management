@@ -52,6 +52,15 @@ def run_week(ctx: RunContext, week: str, jobs: list[str] = ALL_JOBS) -> dict[str
     return {j: run_named(ctx, j, week).state for j in jobs}
 
 
+API_STUBS = ["stub-api-a", "stub-api-b"]
+
+
+def with_api_models(cfg: StudyConfig) -> StudyConfig:
+    """The test config lists the two open-weight stubs; batch tests add the API stubs."""
+    ids = [*cfg.llm.model_ids, *API_STUBS]
+    return cfg.model_copy(update={"llm": cfg.llm.model_copy(update={"model_ids": ids})})
+
+
 def test_every_job_runs_alone_and_rerun_is_idempotent(pipeline_dir: Path, study_config: StudyConfig,
                                                      model_registry: ModelRegistry, world: SyntheticWorld,
                                                      inject_week: str) -> None:
@@ -60,7 +69,7 @@ def test_every_job_runs_alone_and_rerun_is_idempotent(pipeline_dir: Path, study_
     first = run_week(ctx, inject_week)
     assert all(s == "done" for s in first.values()), first
     scores = read_scores(inject_week)
-    n_models, n_conf = len(model_registry.enabled(synthetic=True)), len(load_manifest().enabled())
+    n_models, n_conf = len(ctx.models()), len(ctx.prompt_ids())
     assert len(scores) == n_models * n_conf * 100 and not scores.duplicated(["model", "config_id", "ticker"]).any()
     trades_before = {k: len(read_trades(k)) for k in ctx.portfolio_keys()}
     daily_before = read_daily("mvo__Q0")
@@ -93,7 +102,7 @@ def test_j4_crash_then_resume(pipeline_dir: Path, study_config: StudyConfig, mod
     healthy = StubLlmProvider("stub-ow-a")
     ctx2 = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-ow-a": healthy})
     assert run_named(ctx2, "J4", inject_week).state == "done"
-    assert healthy.calls == 600 - 50
+    assert healthy.calls == len(ctx2.prompt_ids()) * 100 - 50
     rest = run_week(ctx2, inject_week, ["J5", "J6", "J7"])
     assert all(s == "done" for s in rest.values())
     assert fb.week_status_for(inject_week, "mvo__stub-ow-a__bare") == "normal"
@@ -102,7 +111,7 @@ def test_j4_crash_then_resume(pipeline_dir: Path, study_config: StudyConfig, mod
 def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_config: StudyConfig,
                                                       model_registry: ModelRegistry, world: SyntheticWorld,
                                                       inject_week: str) -> None:
-    cfg = _cfg(study_config)
+    cfg = with_api_models(_cfg(study_config))
     stuck = StubLlmProvider("stub-api-a", failures=StubFailures(batch_never_returns=True))
     ctx = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-api-a": stuck})
     run_week(ctx, inject_week, ["J1", "J2", "J3", "J4"])
@@ -116,10 +125,10 @@ def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_
     assert run_named(late, "J6", inject_week).state == "done"
     plan = fb.read_plan(inject_week)
     assert plan is not None
-    for conf in load_manifest().enabled():
-        assert plan.status_for(f"mvo__stub-api-a__{conf.id}") == "fallback"
-        assert plan.reasons[f"mvo__stub-api-a__{conf.id}"] == "batch_not_ready_by_lock"
-        assert plan.status_for(f"mvo__stub-api-b__{conf.id}") == "normal"
+    for conf_id in cfg.llm.prompt_ids:
+        assert plan.status_for(f"mvo__stub-api-a__{conf_id}") == "fallback"
+        assert plan.reason_for(f"mvo__stub-api-a__{conf_id}") == "batch_not_ready_by_lock"
+        assert plan.status_for(f"mvo__stub-api-b__{conf_id}") == "normal"
     assert run_named(late, "J7", inject_week).state == "done"
     q0 = read_weights(inject_week, "mvo__Q0")
     fbw = read_weights(inject_week, "mvo__stub-api-a__bare")
@@ -150,8 +159,8 @@ def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_
 def test_j3_cost_cap_blocks_then_allow_over_budget(pipeline_dir: Path, study_config: StudyConfig,
                                                    model_registry: ModelRegistry, world: SyntheticWorld,
                                                    inject_week: str) -> None:
-    tight = study_config.model_copy(update={"llm": study_config.llm.model_copy(
-        update={"cost_goal_usd": 0.001, "cost_warn_usd": 0.001})})
+    tight = with_api_models(study_config.model_copy(update={"llm": study_config.llm.model_copy(
+        update={"cost_goal_usd": 0.001, "cost_warn_usd": 0.001})}))
     ctx = make_ctx(tight, model_registry, world, inject_week)
     run_week(ctx, inject_week, ["J1", "J2"])
     with pytest.raises(JobFailed) as info:
@@ -174,11 +183,11 @@ def test_invalid_rate_above_threshold_falls_back(pipeline_dir: Path, study_confi
     plan = fb.read_plan(inject_week)
     assert plan is not None
     for strategy in cfg.strategies.enabled:
-        for conf in load_manifest().enabled():
-            key = f"{strategy}__stub-ow-b__{conf.id}"
+        for conf_id in cfg.llm.prompt_ids:
+            key = f"{strategy}__stub-ow-b__{conf_id}"
             assert plan.status_for(key) == "fallback"
-            assert "invalid_rate" in plan.reasons[key]
-            assert plan.status_for(f"{strategy}__stub-ow-a__{conf.id}") == "normal"
+            assert "invalid_rate" in plan.reason_for(key)
+            assert plan.status_for(f"{strategy}__stub-ow-a__{conf_id}") == "normal"
     pd.testing.assert_frame_equal(
         read_weights(inject_week, "mvo__Q0"),
         read_weights(inject_week, "mvo__stub-ow-b__skills_1"),
@@ -186,7 +195,7 @@ def test_invalid_rate_above_threshold_falls_back(pipeline_dir: Path, study_confi
     log = fb.read_log(inject_week)
     assert sum(1 for e in log if e["status"] == "fallback") == len(
         cfg.strategies.enabled
-    ) * len(load_manifest().enabled())
+    ) * len(cfg.llm.prompt_ids)
 
 
 def test_j1_data_failure_gives_no_rebalance(pipeline_dir: Path, study_config: StudyConfig,
@@ -281,5 +290,5 @@ def test_run_weekend_resumes_after_each_step(pipeline_dir: Path, study_config: S
     assert rc == 0, out
     assert f"Summary for {inject_week}" in out and "locked_at" in out
     assert all(st.state in ("done", "skipped") for job, st in all_statuses(inject_week).items() if job != "J8")
-    n_models, n_conf = len(model_registry.enabled(synthetic=True)), len(load_manifest().enabled())
+    n_models, n_conf = len(study_config.llm.model_ids), len(study_config.llm.prompt_ids)
     assert len(read_scores(inject_week)) == n_models * n_conf * 100

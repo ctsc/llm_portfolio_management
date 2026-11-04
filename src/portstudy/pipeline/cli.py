@@ -11,7 +11,7 @@ import typer
 
 from portstudy.pipeline.context import RunContext, default_context, synthetic_clock
 from portstudy.pipeline.jobs import JOBS, current_week, run_named
-from portstudy.pipeline.status import JobFailed, all_statuses
+from portstudy.pipeline.status import JobFailed, all_statuses, strategy_status_summary
 
 app = typer.Typer(help="Weekly pipeline for the LLM skills study.", no_args_is_help=True)
 
@@ -132,6 +132,20 @@ def status_cmd(
         if st.error:
             line += f" error: {st.error}"
         typer.echo(line)
+    for row in strategy_status_summary(w, ctx):
+        mean_shift = row["mean_view_shift"]
+        shift_text = f"{mean_shift:.6f}" if mean_shift is not None else "n/a"
+        typer.echo(
+            f"strategy {row['strategy']}: solver_failures={row['solver_failures']} "
+            f"mean_view_shift={shift_text}"
+        )
+        for source in row["sources"]:
+            valid_rate = source["valid_rate"]
+            valid_text = f"{valid_rate:.3f}" if valid_rate is not None else "n/a"
+            typer.echo(
+                f"  source {source['source']}: endpoint={source['endpoint'] or 'n/a'} "
+                f"valid_rate={valid_text} fallback_reason={source['fallback_reason'] or 'none'}"
+            )
 
 
 @app.command("replay")

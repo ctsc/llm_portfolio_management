@@ -6,8 +6,8 @@ synthetic:
   n_tickers: 120
 
 strategies:
-  enabled: [mvo]
-  controls: []
+  enabled: [mvo, cvar, robust, resampled, topk]
+  controls: [HRP, EW]
   cvar:
     n_scenarios: 2000
   resampled:

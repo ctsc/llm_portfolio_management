@@ -136,8 +136,9 @@ optimizer guardrails are no short positions and a 5 percent cap (`DECISION(G1)`)
 `1 / strategies.topk.k <= optimizer.max_weight` and
 `optimizer.min_stocks >= ceil(1 / optimizer.max_weight)`.
 
-`config/study_test.yaml` selects two stub models, the three v1 prompt configurations, 2,000
-CVaR scenarios, 20 resampled draws, 20 shuffles, and 120 synthetic tickers.
+`config/study_test.yaml` selects two stub models and four prompt configurations, enables all five
+strategies plus HRP and equal weight, and uses 2,000 CVaR scenarios, 20 resampled draws, 20 shuffles,
+and 120 synthetic tickers.
 
 ### pipeline
 

@@ -22,6 +22,15 @@ equal weights, breaking boundary ties by ticker. Every portfolio is long-only wi
 maximum position. Solver failures share the previous-weight, same-strategy Q0, then equal-weight
 fallback chain. HRP clusters correlation distance from Sigma and never reads mu.
 
+## v2 phase 8 weights and replay
+
+J7 writes one baseline-only posterior, strategy-specific Q0 weights, both controls, and then one
+source-level posterior reused by all strategies. Posterior CSVs retain the inputs and signals needed
+for IC history; the full covariance-of-mean matrix is represented by its SHA-256 in weight metadata.
+Failed sources and sources arriving after the lock deadline copy each strategy's Q0 CSV and metadata.
+The fallback plan is keyed by rating source, while replay plans use each portfolio's persisted
+`decision_source`. HRP and equal weight are replayed like every other portfolio.
+
 ## Week alignment (`calendar.py`)
 
 `week_id` is the ISO week of the cutoff Friday (the prior trading day if the Friday is closed,

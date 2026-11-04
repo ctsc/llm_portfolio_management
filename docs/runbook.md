@@ -16,7 +16,7 @@ environment activated. Add `--synthetic` to any command to work on the synthetic
 | Archived endpoint records | `data/outputs/<week>/llm/archive/<source>.gateway.jsonl` |
 | Batch handles | `data/outputs/<week>/llm/batch_<model>__<config>.json` (deleted once collected) |
 | Fallback plan and log | `data/outputs/<week>/fallback_plan.json` (J6), `fallback_log.json` (J7) |
-| Weights | `data/outputs/<week>/weights/<portfolio>.csv`, `.meta.json`, `locked.json` |
+| Weights and posteriors | `data/outputs/<week>/weights/<portfolio>.csv`, `.meta.json`, `locked.json`; `posterior/<source>.csv` and `posterior/Q0.csv` |
 | Price ledger | `data/ledger/prices_raw.csv`, `corporate_actions.csv` (append-only) |
 | Portfolio records | `data/portfolios/<portfolio>/trades.csv`, `daily.csv` |
 | IC history | `data/outputs/ic_history.csv` |
@@ -30,8 +30,9 @@ portstudy status --week 2026-W46
 ```
 
 One line per job: `pending`, `running`, `done`, `failed`, `skipped`, with timestamps and the
-error text for failures. `running` after a crash means the process died; rerunning the job
-resumes it (every job is idempotent and resumable).
+error text for failures. Strategy summaries show solver failures and mean view shift, with endpoint,
+valid rate, and fallback reason per source. `running` after a crash means the process died; rerunning
+the job resumes it (every job is idempotent and resumable).
 
 ## 3. Rerun one job
 
@@ -85,5 +86,6 @@ folder is also possible, but keep a copy first.
 Models and code never edit prompt files. If a human changes a prompt, bump its `version` in
 `config/prompts_manifest.yaml`, rename the file to carry the version, run
 `python scripts/refresh_manifest.py --write`, commit, and note the change in the analysis.
-Use `config/study_test.yaml` for a small offline run. Any change to a `decisions.*` value after
+Use `config/study_test.yaml` for a small offline run; the test suite's shared `study_config`
+fixture loads it too, so pytest exercises every strategy and control at test scale. Any change to a `decisions.*` value after
 the live start must be logged and versioned the same way (see `docs/open_questions.md`).

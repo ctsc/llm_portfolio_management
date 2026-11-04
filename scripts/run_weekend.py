@@ -143,6 +143,8 @@ def print_summary(week: str) -> None:
         print("  no_rebalance for every portfolio (hold)")
         return
     for name, digest in sorted(lock["files"].items()):
+        if not name.endswith(".csv"):
+            continue  # meta files are locked too but have no status of their own
         key = name[:-4]
         status = fb.week_status_for(week, key) if not PortfolioId.parse(key).is_q0 else "normal"
         print(f"{key:32s} {status:14s} {name:40s} {digest[:16]}")
