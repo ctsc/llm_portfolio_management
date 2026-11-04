@@ -2,7 +2,7 @@
 # Decision IDs refer to section 0.3 of PLAN2.md. Code tags each use with DECISION(<ID>).
 
 universe:
-  size: 100                       # DECISION(B4)
+  size: 100                       # DECISION(B4): 100 to 300, set after the ARCTIC allocation
   source: sp500                   # DECISION(B2): sector balanced, drawn from the S&P 500
   sectors: 11
   min_history_days: 300

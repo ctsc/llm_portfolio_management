@@ -162,7 +162,7 @@ def solve_with(problem: cp.Problem, solvers: Sequence[str]) -> str:
             errors.append(f"{solver}: not installed")
             continue
         try:
-            problem.solve(solver=solver, verbose=False)
+            problem.solve(solver=solver, verbose=False, warm_start=False)
         except Exception as exc:
             errors.append(f"{solver}: {exc}")
             continue

@@ -5,6 +5,10 @@ s.t.      sum(w) = 1,  0 <= w <= max_weight
 
 Solvers are tried in the configured order (OSQP, then CLARABEL). On failure the previous
 week's weights are returned with `fallback_flag = "solver_failed"`.
+
+The problem is compiled once per (tickers, Sigma, delta, cap) with mu as a cvxpy Parameter and
+reused for every later mu (resampled draws, shuffles, each source in a week); `use_cache=False`
+builds the same parametrized problem fresh, so both paths share one canonicalization.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from portstudy.config import OptimizerConfig
+from portstudy.optimize.problem_cache import CachedProblem, cached_problem, matrix_sha256
 
 
 class OptimizerError(RuntimeError):
@@ -58,6 +63,7 @@ def solve_mean_variance(
     cfg: OptimizerConfig,
     previous: pd.Series | None = None,
     solvers: Sequence[str] | None = None,
+    use_cache: bool = True,
 ) -> MVResult:
     tickers = [str(t) for t in mu.index]
     n = len(tickers)
@@ -66,17 +72,25 @@ def solve_mean_variance(
     if cfg.max_weight * n < 1.0:
         raise OptimizerError("max_weight times the stock count is below 1; infeasible")
     sigma = sigma_matrix.loc[tickers, tickers].to_numpy(dtype=float)
-    chol = _cholesky_factor(sigma)
     m = mu.to_numpy(dtype=float)
-    w = cp.Variable(n)
-    risk = cp.sum_squares(chol.T @ w)  # w' Sigma w through the Cholesky factor
-    objective = cp.Maximize(m @ w - (delta / 2.0) * risk)
-    constraints = [cp.sum(w) == 1, w >= 0, w <= cfg.max_weight]
-    problem = cp.Problem(objective, constraints)
+
+    def build() -> CachedProblem:
+        chol = _cholesky_factor(sigma)
+        mu_param = cp.Parameter(n, name="mu")
+        w = cp.Variable(n)
+        risk = cp.sum_squares(chol.T @ w)  # w' Sigma w through the Cholesky factor
+        objective = cp.Maximize(mu_param @ w - (delta / 2.0) * risk)
+        constraints = [cp.sum(w) == 1, w >= 0, w <= cfg.max_weight]
+        return CachedProblem(cp.Problem(objective, constraints), w, mu_param)
+
+    key = ("mvo", tuple(tickers), matrix_sha256(sigma), float(delta), float(cfg.max_weight))
+    compiled = cached_problem(key, build) if use_cache else build()
+    compiled.mu.value = m
+    problem, w = compiled.problem, compiled.weights
     last_error = ""
     for name in solvers or cfg.solvers:
         try:
-            problem.solve(solver=name, verbose=False)
+            problem.solve(solver=name, verbose=False, warm_start=False)
         except Exception as exc:  # solver missing or numerical failure: try the next one
             last_error = f"{name}: {exc}"
             continue

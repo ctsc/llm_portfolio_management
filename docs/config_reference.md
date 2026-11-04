@@ -25,7 +25,7 @@ Keys go in a `.env` file on the desktop only; `scripts/smoke_real_services.py` l
 
 | Key | Default | Meaning | Decision |
 |---|---|---|---|
-| `size` | 100 | Stocks in the study | B4 |
+| `size` | 100 | Stocks in the study; 100 to 300, set after the ARCTIC allocation (`scripts/benchmark_pipeline.py` sizes it) | B4 |
 | `source` | sp500 | Member list source (Wikipedia S&P 500 table) | B2 |
 | `sectors` | 11 | GICS sectors | B2 |
 | `min_history_days` | 300 | Minimum trading days before a stock can be picked or kept | |

@@ -8,6 +8,7 @@ import pandas as pd
 
 from portstudy.config import StudyConfig
 from portstudy.optimize.mean_variance import OptimizerError
+from portstudy.optimize.problem_cache import CachedProblem, cached_problem, matrix_sha256
 from portstudy.optimize.strategies.common import (
     StrategyInputs,
     StrategyResult,
@@ -32,18 +33,34 @@ def run(inputs: StrategyInputs, cfg: StudyConfig) -> StrategyResult:
     except OptimizerError as exc:
         return fallback_chain(inputs, cfg, {"solver_error": str(exc)})
 
-    weights = cp.Variable(n)
-    return_term = mu @ weights
-    uncertainty_term = cfg.strategies.robust.kappa * cp.norm(factor.T @ weights, 2)
-    risk_term = (inputs.delta / 2.0) * cp.quad_form(weights, 0.5 * (sigma + sigma.T))
-    problem = cp.Problem(
-        cp.Maximize(return_term - uncertainty_term - risk_term),
-        [
-            cp.sum(weights) == 1,
-            weights >= 0,
-            weights <= cfg.optimizer.max_weight,
-        ],
+    kappa = cfg.strategies.robust.kappa
+    cap = cfg.optimizer.max_weight
+
+    def build() -> CachedProblem:
+        mu_param = cp.Parameter(n, name="mu")
+        w = cp.Variable(n)
+        return_term = mu_param @ w
+        uncertainty_term = kappa * cp.norm(factor.T @ w, 2)
+        risk_term = (inputs.delta / 2.0) * cp.quad_form(w, 0.5 * (sigma + sigma.T))
+        problem = cp.Problem(
+            cp.Maximize(return_term - uncertainty_term - risk_term),
+            [cp.sum(w) == 1, w >= 0, w <= cap],
+        )
+        return CachedProblem(problem, w, mu_param)
+
+    # R (the cov_mu factor) is part of the key: it changes with every source's views.
+    key = (
+        "robust",
+        tuple(tickers),
+        matrix_sha256(sigma),
+        matrix_sha256(cov_mu),
+        float(kappa),
+        float(inputs.delta),
+        float(cap),
     )
+    compiled = cached_problem(key, build)
+    compiled.mu.value = mu
+    problem, weights = compiled.problem, compiled.weights
     try:
         solver = solve_with(problem, cfg.strategies.robust.solvers)
         raw_weights = pd.Series(

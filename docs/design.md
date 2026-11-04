@@ -31,6 +31,24 @@ Failed sources and sources arriving after the lock deadline copy each strategy's
 The fallback plan is keyed by rating source, while replay plans use each portfolio's persisted
 `decision_source`. HRP and equal weight are replayed like every other portfolio.
 
+## v2 phase 9 scale (`optimize/problem_cache.py`, `data/universe.py`, `scripts/benchmark_pipeline.py`)
+
+Every cvxpy problem is compiled once per constant data and reused with `mu` as a `cp.Parameter`:
+MVO is keyed by (tickers, SHA-256 of Sigma, delta, cap); robust MVO adds the SHA-256 of M, because
+its uncertainty factor changes with every source; mean-CVaR adds M, the week, the seed, and the
+scenario settings, because the scenario shocks `Z L'` are built from `Sigma + M`. Resampled MVO
+therefore compiles once and solves 200 draws against the cached problem, and the shuffle test
+(same week and source, shuffled scores) hits the same entries. Solves run with `warm_start=False`
+so a cached solve equals a fresh build to 1e-9. The cache holds 16 problems (LRU) and the ticker
+tuple is in every key, so a universe change misses rather than reusing stale data.
+
+The universe builder keeps the v1 rule (top floor(size / sectors) per sector by dollar volume,
+then the highest-volume leftovers) and logs `universe_thin_sector` for each sector short of its
+quota, `universe_leftover_slots` with the slots filled from leftovers, and `universe_short` if
+the size still cannot be reached. `scripts/benchmark_pipeline.py` times every strategy and control
+on a synthetic 3-factor covariance at a chosen size and projects the weekly J7 time at the full
+source count and the shuffle CPU hours (weeks x shuffles x steered portfolios x mean solve time).
+
 ## Week alignment (`calendar.py`)
 
 `week_id` is the ISO week of the cutoff Friday (the prior trading day if the Friday is closed,
@@ -138,7 +156,8 @@ Optimizer:  max w' mu - (delta/2) w' Sigma w   s.t. sum w = 1, 0 <= w_i <= 0.05
 `mu` and `M`, returned as `Posterior.cov_mu`. A failed factorization retries once with diagonal
 jitter of `1e-12 * trace(A) / N`, then raises `OptimizerError`. OSQP, then CLARABEL; on failure
 the previous week's weights are used with `fallback_flag = solver_failed`. At least 20 stocks are
-required for the cap.
+required for the cap. The optimizer problem is compiled once per (tickers, Sigma, delta, cap) with
+`mu` as a parameter and reused (see v2 phase 9 above).
 
 ## Simulator (`sim/`)
 

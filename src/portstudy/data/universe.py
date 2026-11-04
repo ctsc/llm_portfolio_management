@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import math
 from pathlib import Path
 
@@ -39,13 +40,16 @@ def build_universe(
     out_path: Path | None = None,
     version: str = "v1",
     print_table: bool = True,
+    logger: logging.Logger | None = None,
 ) -> pd.DataFrame:
     """Rank members within each GICS sector by 60-day average dollar volume and pick the top
-    floor(size / sectors) per sector, then the single highest-volume stock left over.
+    floor(size / sectors) per sector, then the highest-volume stocks left over.
 
     Stocks with fewer than `min_history_days` trading days before `as_of` are dropped first.
-    `universe.extra_tickers` each replace the lowest-volume pick in their sector.
+    `universe.extra_tickers` each replace the lowest-volume pick in their sector. Sectors that
+    cannot fill their quota and the leftover slots used to reach `size` are logged.
     """
+    log = logger or logging.getLogger("portstudy.universe")
     ucfg = cfg.universe
     members = providers.members.get_members(as_of)
     tickers = sorted(members["ticker"].astype(str))
@@ -68,6 +72,21 @@ def build_universe(
     table["rank_in_sector"] = table.groupby("sector").cumcount() + 1
 
     per_sector = math.floor(ucfg.size / ucfg.sectors)
+    available = table.groupby("sector").size()
+    for sector in sorted(set(members["sector"].astype(str))):
+        count = int(available.get(sector, 0))
+        if count < per_sector:
+            log.info(
+                "universe_thin_sector",
+                extra={
+                    "extra_fields": {
+                        "sector": sector,
+                        "quota": per_sector,
+                        "available": count,
+                        "short": per_sector - count,
+                    }
+                },
+            )
     picked = table[table["rank_in_sector"] <= per_sector].copy()
     leftover = table[table["rank_in_sector"] > per_sector]
     n_extra = ucfg.size - len(picked)
@@ -75,6 +94,15 @@ def build_universe(
         top_left = leftover.sort_values(["avg_dollar_volume", "ticker"],
                                         ascending=[False, True]).head(n_extra)
         picked = pd.concat([picked, top_left])
+        log.info(
+            "universe_leftover_slots",
+            extra={"extra_fields": {"slots": n_extra, "filled": len(top_left)}},
+        )
+    if len(picked) < ucfg.size:
+        log.warning(
+            "universe_short",
+            extra={"extra_fields": {"size": ucfg.size, "picked": len(picked)}},
+        )
 
     # Researcher additions replace the lowest-volume pick in the same sector.
     if ucfg.extra_tickers:

@@ -102,7 +102,7 @@ Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_c
 | `portstudy backup --week W [--dry-run]` | Dated CSV backup folder plus zip |
 | `portstudy eval [--skip-shuffle]` | Full evaluation report |
 | `python scripts/make_synthetic_world.py` | Write the seeded synthetic market to `data/synthetic/` |
-| `python scripts/benchmark_pipeline.py` | Seconds per job for one 100-stock week |
+| `python scripts/benchmark_pipeline.py [--n-stocks 300 --sources 3 --weeks 52]` | Seconds per solve per strategy, weekly J7 time, projected shuffle CPU hours; `--jobs` times J1 to J9 once |
 | `python scripts/estimate_cost.py` | Projected API cost from logged token counts |
 | `python scripts/refresh_manifest.py --check\|--write` | Prompt file hashes; a prompt edited without a version bump fails |
 | `python scripts/check_placebo_length.py` | Skills within 5 percent and placebo within 2 percent of the enabled skills mean for every tokenizer |
@@ -202,6 +202,10 @@ License: MIT.
 
 ## Design choices
 
+- **v2 phase 9 compiled-problem cache (chosen during build)**: cvxpy problems are keyed by their constant data (tickers, SHA-256 of Sigma, and for robust and CVaR the SHA-256 of M plus week and seed) with `mu` as a parameter, so resampled draws, every source in a week, and the shuffle test reuse one canonicalization; `warm_start=False` keeps cached and fresh solves identical.
+- **v2 phase 9 benchmark on synthetic matrices (chosen during build)**: `scripts/benchmark_pipeline.py` times the optimizers on a seeded 3-factor covariance instead of a full pipeline week, so the 300-stock numbers isolate solver cost; the v1 job timing stays behind `--jobs`.
+- **v2 phase 9 shuffle projection (chosen during build)**: CPU hours = weeks x shuffles x (projected sources x strategies) x mean strategy solve time, with 51 projected sources (7 models x 7 prompt types + Q0) as PLAN2 states; the ARCTIC request of 15,000 CPU hours is flagged when exceeded.
+- **v2 phase 9 slow tests (chosen during build)**: pytest `addopts` deselects `-m slow` by default, so the 300-stock benchmark test runs only on request (`pytest -m slow`).
 - **DECISION(G1), portfolio guardrails** (`optimizer.max_weight`): all strategies and controls use a 5 percent cap with no short positions, matching the same investability limits.
 - **DECISION(S2), forecast-free controls**: HRP and equal weight do not use LLM views or Q0 weights, so they provide strategy-independent comparators.
 - **DECISION(S1), enabled strategy package**: run MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, with HRP and equal weight controls, to compare each planned allocation rule under shared guardrails.

@@ -89,3 +89,20 @@ Models and code never edit prompt files. If a human changes a prompt, bump its `
 Use `config/study_test.yaml` for a small offline run; the test suite's shared `study_config`
 fixture loads it too, so pytest exercises every strategy and control at test scale. Any change to a `decisions.*` value after
 the live start must be logged and versioned the same way (see `docs/open_questions.md`).
+
+## 7. Sizing the universe and the shuffle budget
+
+`universe.size` (DECISION(B4)) is set between 100 and 300 after the ARCTIC allocation. Before
+freezing it, run the optimizer benchmark at the candidate size:
+
+```
+python scripts/benchmark_pipeline.py --n-stocks 300 --sources 3 --weeks 52
+```
+
+It prints seconds per solve for every strategy and control, the weekly J7 time at the given and
+at the projected source count (`--project-sources`, default 51), peak memory, and the projected
+shuffle CPU hours, warning when the projection exceeds the 15,000 CPU hour request. The same table
+is written to `data/benchmarks/<date>.csv`. `--jobs` times J1 to J9 once on the synthetic world
+instead. When the universe is built, the log shows `universe_thin_sector` for every sector that
+could not fill its quota and `universe_leftover_slots` for the slots filled by the highest-volume
+leftovers.

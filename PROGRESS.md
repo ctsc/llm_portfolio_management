@@ -478,3 +478,24 @@ Choices made while unattended:
 - Compute one posterior and covariance-of-mean per rating source and reuse it across strategies, so allocation is the only strategy-dependent input.
 - Keep source-level failure and fallback reasons in J6; J7 copies outputs separately for each strategy.
 - If the deadline arrives during J7, preserve completed portfolios and use Q0 copies for unfinished portfolios.
+
+## v2 phase 9: 300-stock scale and compute projection
+
+Built:
+- `optimize/problem_cache.py`: compiled cvxpy problems keyed by constant data with `mu` as a `cp.Parameter` (LRU of 16; the ticker tuple is in every key). MVO (`mean_variance.py`) keys on (tickers, SHA-256 of Sigma, delta, cap); robust MVO adds the SHA-256 of M; mean-CVaR adds M, week, seed, and scenario settings because its shocks come from `Sigma + M`. Resampled MVO reuses the cached MVO problem for every draw. Solves pass `warm_start=False` so cached and fresh solves agree to 1e-9 (`use_cache=False` builds the same parametrized problem fresh).
+- `data/universe.py`: v1 rule unchanged; logs `universe_thin_sector` (sector, quota, available, short) for every sector below its quota, `universe_leftover_slots` (slots, filled), and `universe_short` when the size cannot be reached. `build_universe` takes an optional logger.
+- `scripts/benchmark_pipeline.py`: `--n-stocks`, `--sources`, `--strategies`, `--controls`, `--weeks`, `--project-sources` (default 51), `--seed`, `--out-dir`; times every strategy and control on a seeded 3-factor covariance, prints seconds per solve, J7 seconds per week now and at the projected source count, peak RSS, and projected shuffle CPU hours (weeks x shuffles x steered portfolios x mean strategy solve time); writes `data/benchmarks/<date>.csv` with fixed `BENCHMARK_COLUMNS`; warns above 15,000 CPU hours. `--jobs` keeps the v1 per-job timing.
+- `config/study.yaml`: `universe.size` comment `DECISION(B4): 100 to 300, set after the ARCTIC allocation`. `pyproject.toml` `addopts` deselects `slow` by default.
+
+Benchmark (VM, 8 cores, `config/study.yaml` settings, 300 stocks, 3 sources, mean seconds per solve): mvo 0.13, cvar 27.2 (10,000 scenarios, CLARABEL), robust 0.56, resampled 17.1 (200 draws), topk 0.002, HRP 0.014, EW 0.000. J7 seconds per week: 180 at 3 sources; 2,343 (39 min) at 51 sources (7 models x 7 prompt types + Q0). Peak memory 1,348 MB. Projected shuffle CPU hours at 52 weeks x 500 shuffles x 255 steered portfolios x 9.0 s mean solve: 16,595, which exceeds the 15,000 CPU hour ARCTIC request by about 1,600 hours (11 percent). Mean-CVaR is 75 percent of the solve time; the gap is reported here and no DECISION value was changed to close it (options for Carter: fewer CVaR scenarios, fewer shuffles, or a smaller universe). `--jobs` mode was not rerun.
+
+Tests (`tests/unit/test_v2_phase9_scale.py`): synthetic members with a 15-name sector at size 300 give 300 names with the thin-sector and leftover-slot logs; cached vs uncached MVO within 1e-9 on 20 random mu vectors with one miss and 19 hits; the cache key separates ticker and Sigma changes; projection arithmetic; the benchmark writes its table under the test config at 40 stocks; a `@pytest.mark.slow` 300-stock benchmark excluded from default runs.
+
+Changed v1 tests and reasons: none.
+
+UNVERIFIED: the 51-source projection assumes 7 models x 7 prompt types; ARCTIC core speed relative to this VM is unknown, so CPU hours are VM-relative.
+
+Choices made while unattended:
+- Benchmark on synthetic matrices rather than a pipeline week, so the numbers isolate optimizer cost (README Design choices).
+- `warm_start=False` on every solve, trading a little OSQP speed for cached and fresh solves being identical.
+- Shuffle projection counts one solve per week per shuffle per steered portfolio.

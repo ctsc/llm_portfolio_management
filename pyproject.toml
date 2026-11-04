@@ -78,6 +78,6 @@ follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not slow'"  # slow benchmarks run with: pytest -m slow
 filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]
 markers = ["e2e: end to end rehearsal tests", "slow: slow tests"]

@@ -8,6 +8,7 @@ import pandas as pd
 
 from portstudy.config import StudyConfig
 from portstudy.optimize.mean_variance import OptimizerError
+from portstudy.optimize.problem_cache import CachedProblem, cached_problem, matrix_sha256
 from portstudy.optimize.strategies.common import (
     StrategyInputs,
     StrategyResult,
@@ -45,20 +46,43 @@ def run(inputs: StrategyInputs, cfg: StudyConfig) -> StrategyResult:
     except OptimizerError as exc:
         return fallback_chain(inputs, cfg, {"solver_error": str(exc)})
 
-    z = standard_normals(inputs.week_id, "cvar", (config.n_scenarios, n), config.seed)
-    scenarios = mu[None, :] + z @ factor.T
-    weights = cp.Variable(n)
-    zeta = cp.Variable()
-    excess = cp.Variable(config.n_scenarios)
-    cvar = zeta + cp.sum(excess) / ((1.0 - config.beta) * config.n_scenarios)
-    constraints = [
-        cp.sum(weights) == 1,
-        weights >= 0,
-        weights <= cfg.optimizer.max_weight,
-        excess >= -scenarios @ weights - zeta,
-        excess >= 0,
-    ]
-    problem = cp.Problem(cp.Maximize(mu @ weights - config.lam * cvar), constraints)
+    cap = cfg.optimizer.max_weight
+
+    def build() -> CachedProblem:
+        z = standard_normals(inputs.week_id, "cvar", (config.n_scenarios, n), config.seed)
+        shocks = z @ factor.T  # scenario = mu + shock; mu enters as the parameter
+        mu_param = cp.Parameter(n, name="mu")
+        w = cp.Variable(n)
+        zeta = cp.Variable()
+        excess = cp.Variable(config.n_scenarios)
+        cvar = zeta + cp.sum(excess) / ((1.0 - config.beta) * config.n_scenarios)
+        constraints = [
+            cp.sum(w) == 1,
+            w >= 0,
+            w <= cap,
+            excess >= -(shocks @ w) - mu_param @ w - zeta,
+            excess >= 0,
+        ]
+        problem = cp.Problem(cp.Maximize(mu_param @ w - config.lam * cvar), constraints)
+        return CachedProblem(problem, w, mu_param, {"shocks": shocks})
+
+    # The scenario shocks depend on Sigma + M, the week, and the seed, so all are in the key.
+    key = (
+        "cvar",
+        tuple(tickers),
+        matrix_sha256(sigma),
+        matrix_sha256(cov_mu),
+        config.n_scenarios,
+        float(config.beta),
+        float(config.lam),
+        inputs.week_id,
+        config.seed,
+        float(cap),
+    )
+    compiled = cached_problem(key, build)
+    compiled.mu.value = mu
+    problem, weights = compiled.problem, compiled.weights
+    scenarios = mu[None, :] + compiled.aux["shocks"]
     try:
         solver = solve_with(problem, config.solvers)
         raw_weights = pd.Series(
