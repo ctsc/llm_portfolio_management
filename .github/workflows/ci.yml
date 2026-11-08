@@ -1,0 +1,118 @@
+---
+# GitHub Actions: lint and test every push, mirroring .gitlab-ci.yml (kept for a return to GitLab).
+# The weekly pipeline is never run here (DECISION(N2)). No secrets: nothing in CI calls a real service.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      slow:
+        description: "also run the slow benchmarks (pytest -m slow)"
+        type: boolean
+        default: false
+
+env:
+  PORTSTUDY_DATA_DIR: ${{ github.workspace }}/data
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python --version
+      - run: pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests scripts
+      - run: mypy src scripts
+
+  # Every push: unit tests with coverage. Default branch only: integration and e2e.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history: the checklist test reads one commit per phase
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/unit --cov=portstudy --cov-report=term --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage.xml
+          retention-days: 7
+
+  integration:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/integration
+
+  # End-to-end rehearsal only on the default branch, to save the free-tier minutes.
+  e2e:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/e2e -q
+
+  slow:
+    if: github.event_name == 'workflow_dispatch' && inputs.slow
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -m slow tests
+
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: python scripts/refresh_manifest.py --check
+      - run: python scripts/check_placebo_length.py
+      - run: python scripts/check_banned_words.py
+      - run: python scripts/check_secrets.py
+      - run: >-
+          yamllint -c .yamllint .github/workflows/ci.yml .gitlab-ci.yml config/study.yaml
+          config/study_test.yaml config/models.yaml config/prompts_manifest.yaml

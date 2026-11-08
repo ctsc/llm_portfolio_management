@@ -251,7 +251,7 @@ src/portstudy/
   backup.py             dated backups, verify and restore, master CSV exports
 scripts/                run_weekend.py and the utilities listed above
 tests/                  unit/  integration/  e2e/
-docs/                   runbook, config reference, open questions, design, GitLab setup,
+docs/                   runbook, config reference, open questions, design, GitHub and GitLab setup,
                         desktop checklist
 data/                   (gitignored) ledger/ snapshots/ outputs/ logs/ portfolios/ backups/ exports/
 PLAN2.md                 the current phased build plan and study decisions
@@ -292,7 +292,7 @@ Highlights of what the suite proves:
 - The planted effect in the synthetic world is recovered by H1 and H3, and the placebo-vs-bare false-positive rate stays at the nominal level over 200 seeds.
 - Two full runs with the same seed produce identical outputs; no file under `prompts/` is ever written by code.
 
-GitLab CI (`.gitlab-ci.yml`) runs lint, tests, and the repository checks on every push; the e2e job runs on the default branch.
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, unit tests, and the repository checks on every push and the integration and e2e jobs on the default branch; `.gitlab-ci.yml` mirrors it for the GitLab fallback host (see `docs/github_setup.md` and `docs/gitlab_setup.md`).
 
 ---
 
@@ -326,7 +326,8 @@ python scripts/run_weekend.py --from J4 --gateway-fallback       # D2, after sba
 | `docs/runbook.md` | Status, reruns, every failure and its fallback, restore from backup, the ARCTIC weekend |
 | `docs/arctic_setup.md` | First-person ARCTIC setup list: env file, venv, model weights, licenses, network, quotas |
 | `docs/arctic_gpu_request.md` | The ARCTIC allocation request (phase 15 D decides its final form) |
-| `docs/gitlab_setup.md` | Create the project, push, confirm CI |
+| `docs/github_setup.md` | Remotes, the Actions workflow, confirm CI (primary host) |
+| `docs/gitlab_setup.md` | The same for GitLab, kept as the fallback host |
 | `docs/desktop_checklist.md` | Before, during, and after each weekend run |
 
 License: MIT.
@@ -395,7 +396,7 @@ D3, the paid API budget, is the only provisional decision; see `docs/open_questi
 - **DECISION(D3), gateway pricing**: gateway calls have zero listed price, while API prices continue through the existing cost guard.
 - **DECISION(N1), open-weight timing**: use bounded workers with a default concurrency of four and stop starting provider requests at the lock margin.
 - **v2 phase 7 replay test scope (chosen during build)**: reserve HRP and EW weight-file and transaction-cost assertions for the v2 phase 8 J7 integration, because v2 phase 7 defines their registry while v2 phase 8 adds them to weekly replay.
-- **Full GitLab history for the phase checklist**: set `GIT_DEPTH: "0"` so the one-commit-per-phase check can see the entire committed phase history.
+- **Full git history in CI for the phase checklist**: set `GIT_DEPTH: "0"` on GitLab and `fetch-depth: 0` on GitHub so the one-commit-per-phase check can see the entire committed phase history.
 - **Common random number seed encoding (chosen during build)**: derive the NumPy generator seed from the first eight bytes of SHA-256 over the JSON tuple `(seed, week_id, strategy)`, yielding repeatable draws shared across portfolio sources.
 - **Resampled weight dispersion (chosen during build)**: report the mean per-ticker standard deviation across successful draw weights, providing one scale-consistent diagnostic.
 - **HRP cluster variance (chosen during build)**: use inverse-variance allocations inside each cluster when computing cluster variance, following standard HRP bisection without using expected returns.

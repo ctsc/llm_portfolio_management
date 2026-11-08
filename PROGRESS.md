@@ -703,3 +703,13 @@ job, the failure-handling policy, compute and services, reproducibility, project
 (phase 15 manual work and the `UNVERIFIED` items), and the design-choice register kept in full.
 Every number in it (24 sources, 127 portfolios, test timings, shuffle projection) was checked
 against `config/study.yaml`, `config/models.yaml` and the current test runs.
+
+## GitHub as the primary host
+
+The repository moved to `https://github.com/ctsc/llm_portfolio_management` (commit "transfer all
+code from gitlab to github"); GitLab stays as the remote `gitlab` and its CI file is kept current
+so the project can go back without code changes. `.github/workflows/ci.yml` mirrors
+`.gitlab-ci.yml` job for job (lint, unit with coverage, integration and e2e on the default branch,
+slow by hand, checks); `test_github_workflow_mirrors_gitlab_ci` asserts that every GitLab script
+line appears in the matching GitHub job and that the history-reading jobs use `fetch-depth: 0`.
+Docs: `docs/github_setup.md` (new), `docs/gitlab_setup.md` (marked fallback), README references.

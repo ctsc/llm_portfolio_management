@@ -1,5 +1,6 @@
 ---
-# GitLab CI: lint and test every push. The weekly pipeline is never run here (DECISION(N2)).
+# GitLab CI, the fallback host (GitHub Actions in .github/workflows/ci.yml is the primary): lint and test
+# every push. The weekly pipeline is never run here (DECISION(N2)).
 # No secrets are needed: nothing in CI calls a real service.
 
 image: python:3.11
@@ -80,4 +81,6 @@ checks:
     - python scripts/check_placebo_length.py
     - python scripts/check_banned_words.py
     - python scripts/check_secrets.py
-    - yamllint -c .yamllint .gitlab-ci.yml config/study.yaml config/study_test.yaml config/models.yaml config/prompts_manifest.yaml
+    - >-
+      yamllint -c .yamllint .github/workflows/ci.yml .gitlab-ci.yml config/study.yaml
+      config/study_test.yaml config/models.yaml config/prompts_manifest.yaml

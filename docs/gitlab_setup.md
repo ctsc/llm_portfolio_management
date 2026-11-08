@@ -1,6 +1,8 @@
-# GitLab setup
+# GitLab setup (fallback host)
 
-GitLab hosts the source and runs lint and tests in CI on every push. It never runs the weekly
+The project moved to GitHub (`docs/github_setup.md`) once that account was available again;
+GitLab stays configured as the remote `gitlab` and `.gitlab-ci.yml` is kept current, so a return
+to GitLab needs no code change. GitLab hosts a mirror of the source and runs lint and tests in CI on every push. It never runs the weekly
 pipeline (decision N2): that is the researcher's hand-run `scripts/run_weekend.py` on the desktop.
 
 ## 1. Create the project

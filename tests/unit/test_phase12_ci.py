@@ -24,8 +24,8 @@ def _ci() -> dict[str, object]:
 
 
 def test_ci_yaml_passes_yamllint() -> None:
-    cmd = [sys.executable, "-m", "yamllint", "-c", ".yamllint", ".gitlab-ci.yml", "config/study.yaml",
-           "config/models.yaml", "config/prompts_manifest.yaml"]
+    cmd = [sys.executable, "-m", "yamllint", "-c", ".yamllint", ".gitlab-ci.yml", ".github/workflows/ci.yml",
+           "config/study.yaml", "config/models.yaml", "config/prompts_manifest.yaml"]
     result = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -76,3 +76,38 @@ def test_checks_catch_planted_problems(tmp_path: Path) -> None:
     key.write_text('API_KEY = "' + "sk-ant-" + "a" * 24 + '"\n', encoding="utf-8")
     found = check_secrets.check([key])
     assert found and all("anthropic_key" in p or "assigned_key" in p or "openai_key" in p for p in found)
+
+
+def _github_ci() -> dict[str, object]:
+    with (REPO_ROOT / ".github" / "workflows" / "ci.yml").open("r", encoding="utf-8") as fh:
+        loaded: dict[str, object] = yaml.safe_load(fh)
+    return loaded
+
+
+def test_github_workflow_mirrors_gitlab_ci() -> None:
+    """GitHub is the primary host: its workflow runs the same jobs and commands as .gitlab-ci.yml."""
+    gh = _github_ci()
+    jobs = gh["jobs"]
+    assert isinstance(jobs, dict)
+    assert {"lint", "test", "integration", "e2e", "slow", "checks"} <= set(jobs)
+    for name in ("integration", "e2e"):
+        assert "default_branch" in str(jobs[name]["if"]), name
+    assert jobs["slow"]["if"].startswith("github.event_name == 'workflow_dispatch'")
+
+    def run_lines(job: dict[str, object]) -> list[str]:
+        out: list[str] = []
+        for step in job["steps"]:  # type: ignore[union-attr]
+            if isinstance(step, dict) and "run" in step:
+                out.append(" ".join(str(step["run"]).split()))
+            if isinstance(step, dict) and step.get("uses", "").startswith("actions/setup-python"):
+                assert step["with"]["python-version"] == "3.11"
+        return out
+
+    gl = _ci()
+    for name in ("lint", "test", "integration", "e2e", "slow", "checks"):
+        gl_lines = [" ".join(str(x).split()) for x in gl[name]["script"]]  # type: ignore[index]
+        gh_lines = run_lines(jobs[name])
+        assert all(line in gh_lines for line in gl_lines), (name, gl_lines, gh_lines)
+    for name in ("test", "integration", "e2e"):
+        checkout = next(s for s in jobs[name]["steps"] if str(s.get("uses", "")).startswith("actions/checkout"))
+        assert checkout["with"]["fetch-depth"] == 0, name  # full history for the phase checklist test
