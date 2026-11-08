@@ -156,15 +156,25 @@ def make_snapshot(
     rates = providers.rates.get_rates(start, cutoff)
 
     # Checks and rules.
-    price_issues = check_prices(prices, expected_days, cfg.data.checks, actions,
-                                min_history_days=cfg.universe.min_history_days)
+    price_issues = check_prices(
+        prices,
+        expected_days,
+        cfg.data.checks,
+        actions,
+        min_history_days=cfg.universe.min_history_days,
+    )
     issues: list[Issue] = price_issues + news_issues
     for issue in issues:
-        log.log(logging.WARNING if issue.severity != "info" else logging.INFO,
-                "check_issue", extra={"extra_fields": {"week_id": week_id, **issue.to_dict()}})
+        log.log(
+            logging.WARNING if issue.severity != "info" else logging.INFO,
+            "check_issue",
+            extra={"extra_fields": {"week_id": week_id, **issue.to_dict()}},
+        )
     if has_halt(issues):
-        raise SnapshotHalt(f"halt rule fired for {week_id}: "
-                           + "; ".join(f"{i.ticker}:{i.code}" for i in issues if i.rule == "halt"))
+        raise SnapshotHalt(
+            f"halt rule fired for {week_id}: "
+            + "; ".join(f"{i.ticker}:{i.code}" for i in issues if i.rule == "halt")
+        )
     skipped = tickers_to_skip(issues)
     # Tickers with no price rows at all are dropped without replacement and logged.
     present = set(prices["ticker"].astype(str))
@@ -172,25 +182,34 @@ def make_snapshot(
         if tk not in present and tk not in skipped:
             skipped.add(tk)
             issues.append(Issue("error", tk, "no_prices", "no price rows in window", "skip_stock"))
-            log.warning("stock_dropped", extra={"extra_fields": {"week_id": week_id, "ticker": tk,
-                                                                 "reason": "no_prices"}})
+            log.warning(
+                "stock_dropped",
+                extra={"extra_fields": {"week_id": week_id, "ticker": tk, "reason": "no_prices"}},
+            )
     for tk in sorted(skipped):
         log.warning("stock_skipped", extra={"extra_fields": {"week_id": week_id, "ticker": tk}})
     universe_out = universe.copy()
     universe_out["ticker"] = universe_out["ticker"].astype(str)
     universe_out["included"] = ~universe_out["ticker"].isin(skipped)
-    universe_out["article_count"] = universe_out["ticker"].map(
-        news_text.set_index("ticker")["article_count"]).fillna(0).astype(int)
+    universe_out["article_count"] = (
+        universe_out["ticker"]
+        .map(news_text.set_index("ticker")["article_count"])
+        .fillna(0)
+        .astype(int)
+    )
 
     # Forward fill missing days for included stocks (rule forward_fill), dropping duplicates.
     prices = prices.drop_duplicates(["ticker", "date"], keep="first")
+    # The ledger gets the provider's rows only; the forward fill below is for the models.
+    raw_prices = prices.copy()
     prices = _forward_fill(prices, expected_days)
     # Write the folder. Dates are ISO strings; published_at carries the ET offset.
     folder.mkdir(parents=True, exist_ok=False)
     news_out = news.copy()
     if len(news_out):
         news_out["published_at"] = news_out["published_at"].map(
-            lambda x: x.tz_convert(ET).isoformat())
+            lambda x: x.tz_convert(ET).isoformat()
+        )
     write_csv_atomic(_iso(prices, "date"), folder / "prices.csv")
     write_csv_atomic(_iso(etf_prices, "date"), folder / "etf_prices.csv")
     write_csv_atomic(_iso(actions, "date"), folder / "actions.csv")
@@ -218,7 +237,7 @@ def make_snapshot(
     write_json_atomic(manifest, folder / "manifest.json")
 
     # Append new trading days to the raw price ledger and the actions log.
-    all_raw = pd.concat([prices, etf_prices], ignore_index=True)
+    all_raw = pd.concat([raw_prices, etf_prices], ignore_index=True)
     ledger.append_prices(all_raw, logger=log)
     ledger.append_actions(actions)
     return _ref_for(week_id, folder, version)

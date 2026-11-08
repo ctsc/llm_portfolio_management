@@ -585,3 +585,30 @@ UNVERIFIED items still open for phase 15:
 - Kronos per-path sampling (`predict_paths`) on the real checkpoint; the 20-call fallback costs about 20x the GPU time.
 - The v2 phase 9 projection: about 16,600 shuffle CPU hours at 300 stocks against the 15,000 requested; universe size 100 in `config/study.yaml` until the allocation is known.
 - D3, the paid API budget, after the phase 15 G test prompts.
+
+## Review fixes (from results.md)
+
+Each item below was found in the read-only code review (`results.md`), fixed in its own commit,
+and confirmed by a regression test in `tests/unit/test_review_fixes.py` that fails on the old
+code and passes on the new one, plus the full suite before the push.
+
+- **H1, forward-filled rows reached the raw ledger** (`data/snapshot.py`): `make_snapshot` now
+  keeps `raw_prices` before `_forward_fill` and appends only the provider's rows (plus ETF rows)
+  to the ledger; the forward-filled frame still goes to the snapshot for the models. Confirmed:
+  `test_h1_ledger_holds_only_provider_rows_after_forward_fill` (planted halt `SYN009`: the
+  snapshot has the three filled rows with volume 0, the ledger has none).
+- **H4, J8 never ran on ARCTIC** (`scripts/run_weekend.py`): `step1_catch_up` (J8 and J9 for
+  earlier weeks) runs on every invocation regardless of `--from`; `--from J8`/`--until J8` runs J8
+  for the current week; the default weekend run still leaves this week's J8 to next weekend.
+  Confirmed: `test_h4_catch_up_runs_for_every_start_job_and_from_j8_runs_j8`.
+- **H2, a failed J1/J2 week vanished from the replay** (`scripts/run_weekend.py`,
+  `pipeline/jobs.py`): when J1 or J2 fails the script now runs J6 (which plans `no_rebalance`
+  when J2 is not done) and J7 (which writes the `no_rebalance` lock) before exiting 1; and
+  `jobs.replay_weeks` gives J8 every calendar week from the first locked week to the current one,
+  so a week with no lock is replayed as a hold (stops, dividends and daily values are no longer
+  skipped). Confirmed: `test_h2_replay_weeks_fill_the_gap_and_a_j1_failure_writes_the_hold`.
+- **H3, login mode aborted at J4** (`scripts/arctic/submit_weekend.sh`): login mode now runs
+  J3 alone, waits for the Kronos job to leave the Slurm queue (`wait_for_job`, `squeue` poll,
+  `WAIT_POLL_SECONDS`), then runs J4 to J5 and submits the weekend job. Confirmed:
+  `test_h3_login_mode_waits_for_kronos_before_j4` (stubbed `sbatch`/`squeue`/`portstudy`/`python`
+  record the call order; J4 starts only after the last poll).

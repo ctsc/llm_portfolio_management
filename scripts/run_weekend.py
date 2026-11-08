@@ -226,15 +226,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     jobs = jobs_between(args.from_job, args.until_job)
     say(f"jobs this run: {' '.join(jobs)}")
+    explicit_j8 = "J8" in (args.from_job, args.until_job)
     try:
-        if args.from_job == "J1":
-            step1_catch_up(ctx, week, args.synthetic)
+        # Review fix H4: the catch-up (J8 and J9 for earlier weeks) runs on every invocation, so
+        # the ARCTIC flows that start at J3 or J6 still replay and score the earlier weeks.
+        step1_catch_up(ctx, week, args.synthetic)
         for job in jobs:
             if job == "J4":
                 gateway_health(ctx, week)
             if job == "J5":
                 wait_for_batches(ctx, week, args.synthetic, poll)
-            elif job != "J8":
+            elif job == "J8" and not explicit_j8:
+                continue  # this week's replay runs in next weekend's catch-up
+            elif job in ("J1", "J2"):
+                try:
+                    run(ctx, job, week, args.synthetic)
+                except JobFailed:
+                    # Review fix H2: write the hold for the week now (J6 plans no_rebalance when
+                    # J2 is not done, J7 locks it) so the replay never skips the week.
+                    say(f"{job} failed: writing the no_rebalance plan and lock for {week}")
+                    for hold_job in ("J6", "J7"):
+                        run(ctx, hold_job, week, args.synthetic)
+                    return 1
+            else:
                 run(ctx, job, week, args.synthetic)
     except JobFailed:
         return 1

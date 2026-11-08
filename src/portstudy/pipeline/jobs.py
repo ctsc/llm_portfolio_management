@@ -628,15 +628,24 @@ def refresh_ledger(ctx: RunContext, through: dt.date) -> int:
     return n
 
 
+def replay_weeks(week_id: str) -> list[str]:
+    """Every calendar week from the first locked week through `week_id` (review fix H2): a week
+    without `locked.json` (J1 or J2 failed and the hold was never written) is still replayed as
+    `no_rebalance`, so its stops, dividends and daily values are not skipped."""
+    locked = [w for w in weeks_with_weights() if w <= week_id]
+    if week_id not in locked and (week_output_dir(week_id) / "fallback_plan.json").exists():
+        locked.append(week_id)
+    if not locked:
+        return []
+    return cal.weeks_between(min(locked), max(locked))
+
+
 def J8_replay_score(ctx: RunContext, week_id: str) -> JobStatus:
     def fn() -> dict[str, Any]:
         # Marks run through the latest close: bring the ledger up to today first.
         today = ctx.now().date()
         n_new = refresh_ledger(ctx, cal.prev_trading_day(today, inclusive=True))
-        weeks = [w for w in weeks_with_weights() if w <= week_id]
-        if week_id not in weeks and (week_output_dir(week_id) / "fallback_plan.json").exists():
-            weeks.append(week_id)
-        weeks = sorted(set(weeks))
+        weeks = replay_weeks(week_id)
         book = PriceBook(ledger.read_ledger(), ledger.read_actions())
         hashes = replay_all(ctx.cfg, build_plans(ctx, weeks), book)
         n_ic = update_ic_history(ctx, weeks, book)
