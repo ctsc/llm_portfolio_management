@@ -35,6 +35,25 @@ for MODEL in ${MODELS}; do
   PORT_I=$((PORT_I + 1))
 done
 
+# Review fix L12: write the endpoint file only once every server answers /v1/models, so a
+# --gateway-fallback run never reads an endpoint whose model is still loading.
+READY_TIMEOUT="${FALLBACK_READY_TIMEOUT_SECONDS:-1800}"
+PORT_I="${PORT}"
+for MODEL in ${MODELS}; do
+  waited=0
+  until curl -sf "http://127.0.0.1:${PORT_I}/v1/models" >/dev/null 2>&1; do
+    if (( waited >= READY_TIMEOUT )); then
+      echo "server for ${MODEL} on port ${PORT_I} not ready after ${READY_TIMEOUT}s" >&2
+      kill "${PIDS[@]}" 2>/dev/null || true
+      exit 3
+    fi
+    sleep 15
+    waited=$((waited + 15))
+  done
+  echo "server for ${MODEL} ready on port ${PORT_I} after ${waited}s"
+  PORT_I=$((PORT_I + 1))
+done
+
 mkdir -p "$(dirname "${ENDPOINT_FILE}")"
 python - "${ENDPOINT_FILE}" "${HOST}" "${PORT}" "${WEEK}" "${SLURM_JOB_ID:-local}" <<'PY'
 import datetime as dt, json, sys

@@ -278,12 +278,16 @@ def gateway_health(ctx: RunContext, week: str) -> health.HealthReport:
         return report
     for line in health.d2_steps(week, report.failed):
         say(line)
+    failed = sorted(report.failed)
     if ctx.gateway_fallback:
-        say(
-            "continuing with --gateway-fallback: fallback-eligible models use the fallback endpoint"
-        )
-        return report
-    keys = health.mark_sources_failed(ctx, week, sorted(report.failed), health.HEALTH_REASON)
+        # Review fix M3: only the fallback-eligible models move to the fallback endpoint; the
+        # other failed gateway models are marked failed (N1) like in the non-fallback run.
+        eligible = [m for m in failed if ctx.registry.get(m).fallback_eligible]
+        failed = [m for m in failed if m not in eligible]
+        say(f"continuing with --gateway-fallback: {', '.join(eligible) or 'no models'} use it")
+        if not failed:
+            return report
+    keys = health.mark_sources_failed(ctx, week, failed, health.HEALTH_REASON)
     say(f"marked failed (N1): {', '.join(keys)}; the rest of the week continues")
     return report
 

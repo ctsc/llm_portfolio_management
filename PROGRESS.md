@@ -612,3 +612,84 @@ code and passes on the new one, plus the full suite before the push.
   `WAIT_POLL_SECONDS`), then runs J4 to J5 and submits the weekend job. Confirmed:
   `test_h3_login_mode_waits_for_kronos_before_j4` (stubbed `sbatch`/`squeue`/`portstudy`/`python`
   record the call order; J4 starts only after the last poll).
+- **M4 + M10, `current_week` used a fixed UTC-5 and rolled at midnight** (`pipeline/jobs.py`):
+  the clock is read in `America/New_York` (DST-aware) and the week rolls forward only at the
+  cutoff day's close (16:00 ET, 13:00 on an early close), so a run started Friday afternoon no
+  longer freezes a snapshot without Friday's bar. Confirmed:
+  `test_m4_m10_current_week_is_dst_aware_and_rolls_at_the_close` (summer Friday 23:30 EDT,
+  15:59 vs 16:00, early close 2026-11-27, Good Friday cutoff Thursday, naive datetimes).
+- **M5, a done job was skipped even when its outputs were gone** (`pipeline/status.py`):
+  `run_job` skips a `done` job only while `hash_paths(outputs())` still equals the recorded
+  `outputs_hash`; a deleted or edited output runs the job again (with a warning). Confirmed:
+  `test_m5_done_job_reruns_when_its_outputs_are_gone`.
+- **M1 + M2, provider errors dropped tasks; authentication failures were per task**
+  (`llm/runner.py`, `pipeline/jobs.py`): a task whose call raises `LlmProviderError` is queued
+  again up to `MAX_PROVIDER_ERRORS = 2` times (`RunSummary.n_provider_retries`), then dropped
+  (`n_dropped`); a non-retryable `LlmAuthenticationError` stops the model's run at once
+  (`RunSummary.aborted = "authentication_failed"`) and J4 marks the model's sources failed with
+  that reason. The 429-storm test now expects 9 gateway calls (3 attempts x 3 provider retries).
+  Confirmed: `test_m1_m2_provider_errors_are_requeued_and_auth_failures_abort_the_model`.
+- **M3, non-eligible models ran against a failed gateway under `--gateway-fallback`**
+  (`scripts/run_weekend.py`, `pipeline/jobs.py`): the health check marks the failed models that
+  are not `fallback_eligible` as failed (N1) even in fallback mode, and J4 only lifts the
+  unhealthy mark for eligible models. Confirmed:
+  `test_m3_gateway_fallback_marks_non_eligible_failed_models`.
+- **M6, the view shift was forced to 0 on a solver fallback** (`optimize/__init__.py`):
+  `_shift_from_q0` measures the shift on the weights actually written, fallback or not; the
+  fallback itself stays in `fallback_flag`/`fallback`. Confirmed:
+  `test_m6_view_shift_is_measured_on_fallback_weights_too`.
+- **M7, the dropped-view branch solved Q0 again and rewrote its files**
+  (`optimize/__init__.py`): `build_weights` now uses `existing_q0_weights` (the Q0 csv and
+  meta J7 already wrote for the strategy) and only solves Q0 when it is missing. Confirmed:
+  `test_m7_dropped_view_branch_reuses_the_written_q0` (round trip of csv + meta into `Weights`).
+- **M8, J7's inputs hash ignored the IC history** (`pipeline/jobs.py`): `j7_inputs_hash` adds
+  `data/outputs/ic_history.csv`, so an IC update before the lock invalidates a `done` J7; the
+  lock file records `ic_history_sha256`, and a locked week hashes that pinned value, so J8's
+  later updates never re-solve locked weights (the idempotent-rerun integration test holds).
+  Confirmed: `test_m8_j7_inputs_hash_changes_with_the_ic_history`.
+- **M9, the promised log redaction did not exist** (`logging_setup.py`): `redact` runs on every
+  record the JSON-lines handler writes: keys named like `authorization`, `api_key`, `token`,
+  `secret`, `password` lose their value; strings lose `Bearer ...` tokens, `Authorization: ...`
+  values and `sk-...` keys. Confirmed: `test_m9_log_files_redact_gateway_credentials` (the key
+  appears nowhere in the written file, harmless fields survive).
+- **M11, the shuffle total return compared a fresh-start replay against the full history**
+  (`eval/shuffle.py`): `real_metrics` measures the real portfolio over the selected weeks only,
+  starting from the value carried into the first selected week (the shuffles start from
+  `initial_value` over the same weeks). Confirmed:
+  `test_m11_real_metrics_start_from_the_value_entering_the_selected_weeks`.
+- **L1** is covered by H4 (`--from J8` runs J8).
+- **L2, `3.0` passed as an integer** (`llm/validate.py`): `low`/`likely`/`high` must be JSON
+  integers; integral floats are `not_integer` like any other float. The schema test that listed
+  `3.0` among valid answers now asserts the rejection. Confirmed:
+  `test_integral_floats_are_not_integers`.
+- **L3, cached prompt tokens were never read from the gateway** (`llm/providers/litellm.py`):
+  `usage.prompt_tokens_details.cached_tokens` fills `RawResult.tokens_cached`, so the cost table's
+  cached price applies. Confirmed: `test_l3_litellm_reads_cached_prompt_tokens`.
+- **L12, the fallback endpoint file was written before vLLM was ready**
+  (`scripts/arctic/llm_fallback.sbatch`): each server is polled on `/v1/models` (every 15 s, up
+  to `FALLBACK_READY_TIMEOUT_SECONDS`, default 1800) before `fallback_endpoint.json` is written;
+  a server that never answers exits the job with code 3. Confirmed: `bash -n` and shellcheck;
+  the loop cannot run in CI without vLLM.
+- **L13, `estimate_cost.py` counted the whole registry** (`scripts/estimate_cost.py`): planned
+  calls use `llm.model_ids` and `llm.prompt_ids` when set. Confirmed by running the script on an
+  empty data dir (`4 models x 6 prompt types x 100 stocks` under the test config).
+- **L14, one `httpx.get` per request** (`data/providers/http.py`): `LiveHttp` keeps one
+  `httpx.Client`, so paginated Alpaca calls reuse connections. Confirmed by the provider tests
+  (unchanged behaviour through `MockTransport`-free fixtures).
+- **L9, config reference missed leaf keys** (`docs/config_reference.md`): the strategy section
+  names `strategies.cvar.n_scenarios`, `cvar.beta`, `cvar.lam`, `resampled.n_draws`,
+  `resampled.seed` and `resampled.max_failed_share` explicitly (the `data.rate_limits.*` and
+  `data.checks.*` rows already cover their keys).
+- **L10, scientific dependencies had no upper bounds** (`pyproject.toml`): `scipy<2`,
+  `scikit-learn<2`, `statsmodels<1`, `cvxpy<2`, `osqp<2`, `clarabel<1`, `pyyaml<7`, `typer<1`,
+  `httpx<1`, `tenacity<10`, `matplotlib<4`; the pinned environment satisfies all of them.
+- **Left as recorded design choices, not changed:** L4 (Sharpe with a zero risk-free rate; DTB3
+  is collected for the paper, and the shuffle and hypothesis tests compare portfolios on the same
+  weeks so the constant cancels), L7 (MVO post-solver renormalisation is documented in the
+  strategy module), L8 (yfinance market caps are current, not as-of; the Alpaca-first universe
+  does not use them, and the limitation is in the data documentation), L11 (shuffle CPU-hour
+  projection omits the Q0 re-solve share; the ~16,600 h conclusion is unchanged), L15 (cost
+  estimates assume the output-token cap and are upper bounds; stated in `estimate_cost.py`'s
+  output). L5 and L6 (per-call `run_status.json` rewrites, repeated fallback-plan reads) are
+  performance items measured at under 1% of the weekly run and are deferred. L16 (real
+  split/dividend smoke test against Alpaca) needs live keys and is part of phase 15.

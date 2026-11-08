@@ -51,7 +51,6 @@ def test_invalid_responses_have_specific_error_codes(raw: str, error: str) -> No
     "raw",
     [
         _raw(low=-5, likely=0, high=5),
-        _raw(low=3.0, likely=3.0, high=4.0),
         '{"low": -0, "likely": 0, "high": 0, "rationale": "outlook"}',
         "```json\n" + _raw() + "\n```",
         "Rating: " + _raw() + " thanks.",
@@ -127,3 +126,10 @@ def test_every_in_range_triple_is_valid_exactly_when_ordered() -> None:
             assert response.valid
         else:
             assert not response.valid and response.error == "bad_order"
+
+
+def test_integral_floats_are_not_integers() -> None:
+    """Review fix L2: the schema says int, so 3.0 is rejected like 3.5."""
+    for raw in (_raw(low=3.0, likely=3.0, high=4.0), _raw(low=3, likely=3.5, high=4)):
+        response = parse_response(raw)
+        assert not response.valid and response.error == "not_integer"

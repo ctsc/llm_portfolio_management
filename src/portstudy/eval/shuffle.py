@@ -200,13 +200,12 @@ def identity_weights(cfg: StudyConfig, portfolio: str, weeks: list[str]) -> dict
     return out
 
 
-def _metrics(daily: pd.DataFrame, cfg: StudyConfig) -> dict[str, float]:
-    weekly = weekly_portfolio_returns(daily, cfg.simulator.initial_value)
-    total = (
-        float(daily["value"].iloc[-1] / cfg.simulator.initial_value - 1.0)
-        if len(daily)
-        else float("nan")
-    )
+def _metrics(
+    daily: pd.DataFrame, cfg: StudyConfig, start_value: float | None = None
+) -> dict[str, float]:
+    start = cfg.simulator.initial_value if start_value is None else start_value
+    weekly = weekly_portfolio_returns(daily, start)
+    total = float(daily["value"].iloc[-1] / start - 1.0) if len(daily) else float("nan")
     return {"total_return": total, "sharpe": sharpe(weekly)}
 
 
@@ -445,9 +444,18 @@ def shuffle_portfolio(
 
 
 def real_metrics(cfg: StudyConfig, portfolio: str, weeks: list[str]) -> dict[str, float]:
+    """The real portfolio over the selected weeks only (review fix M11): the total return starts
+    from the value carried into the first selected week, like the shuffled replays start from
+    `initial_value`, so an excluded pilot week does not enter the comparison."""
     daily = read_daily(portfolio)
-    daily = daily[daily["week_id"].isin(weeks)] if len(daily) else daily
-    return _metrics(daily, cfg)
+    if not len(daily):
+        return _metrics(daily, cfg)
+    selected = daily[daily["week_id"].isin(weeks)]
+    if not len(selected):
+        return _metrics(selected, cfg)
+    earlier = daily[daily["date"] < selected["date"].min()]
+    start = float(earlier["value"].iloc[-1]) if len(earlier) else None
+    return _metrics(selected, cfg, start_value=start)
 
 
 def shuffle_table(

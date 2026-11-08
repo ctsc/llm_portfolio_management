@@ -6,6 +6,7 @@ import datetime as dt
 import shutil
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -184,17 +185,32 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
             raise RuntimeError(
                 "J2 (baseline, including the forecaster) is not done; J4 waits for it"
             )
-        from portstudy.llm.health import unhealthy_models
+        from portstudy.llm.health import mark_sources_failed, unhealthy_models
 
         runner = _week_runner(ctx, week_id)
         out: dict[str, Any] = {}
-        unhealthy = unhealthy_models(week_id) if not ctx.gateway_fallback else set()
+        # Review fix M3: under --gateway-fallback only the fallback-eligible models leave the
+        # unhealthy set (they run on the fallback endpoint); the others stay marked failed.
+        unhealthy = {
+            m
+            for m in unhealthy_models(week_id)
+            if not (ctx.gateway_fallback and ctx.registry.get(m).fallback_eligible)
+        }
         for model in ctx.open_weight_models():
             if model in unhealthy:  # marked failed by the gateway health check (N1)
                 out[model] = {"skipped": "gateway_health_check_failed"}
                 continue
             s = runner.run_open_weight(model)
-            out[model] = {"n_calls": s.n_calls, "n_cached": s.n_cached, "n_invalid": s.n_invalid}
+            out[model] = {
+                "n_calls": s.n_calls,
+                "n_cached": s.n_cached,
+                "n_invalid": s.n_invalid,
+                "n_provider_retries": s.n_provider_retries,
+                "n_dropped": s.n_dropped,
+            }
+            if s.aborted:  # review fix M2: authentication failure is model-wide
+                out[model]["aborted"] = s.aborted
+                mark_sources_failed(ctx, week_id, [model], s.aborted)
         return out
 
     return run_job(week_id, "J4", _llm_inputs(ctx, week_id), fn, force=ctx.force)
@@ -278,10 +294,23 @@ def _previous_week_with_weights(week_id: str, portfolio: str) -> str | None:
     return None
 
 
-def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
+def _ic_history_sha256() -> str | None:
+    path = ICStore().path
+    return sha256_file(path) if path.exists() else None
+
+
+def j7_inputs_hash(ctx: RunContext, week_id: str) -> str:
+    """Everything J7 reads: the plan, the week's model inputs, the config and (review fix M8)
+    the IC history, whose trailing ICs set the view weights."""
     folder = week_output_dir(week_id)
     plan_file = folder / "fallback_plan.json"
-    inputs = stable_hash(
+    lock = read_weights_lock(week_id)
+    if lock is not None and "ic_history_sha256" in lock:
+        ic_hash: str | None = lock["ic_history_sha256"]  # locked weights are final
+    else:
+        ic_file = ICStore().path
+        ic_hash = sha256_file(ic_file) if ic_file.exists() else None
+    return stable_hash(
         {
             "plan": sha256_file(plan_file) if plan_file.exists() else None,
             "baseline": hash_paths(
@@ -292,9 +321,14 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                     folder / "llm_scores.csv",
                 ]
             ),
+            "ic_history": ic_hash,
             "cfg": _config_hash(ctx),
         }
     )
+
+
+def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
+    inputs = j7_inputs_hash(ctx, week_id)
 
     def fn() -> dict[str, Any]:
         now = ctx.now()
@@ -319,6 +353,7 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                     "locked_at": now.isoformat(),
                     "no_rebalance": True,
                     "files": {},
+                    "ic_history_sha256": _ic_history_sha256(),
                 },
                 weights_dir(week_id) / "locked.json",
             )
@@ -480,6 +515,7 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                 "locked_at": ctx.now().isoformat(),
                 "deadline": deadline.isoformat(),
                 "files": files,
+                "ic_history_sha256": _ic_history_sha256(),
             },
             weights_dir(week_id) / "locked.json",
         )
@@ -706,11 +742,26 @@ def run_named(ctx: RunContext, job: str, week_id: str) -> JobStatus:
     return JOBS[job](ctx, week_id)
 
 
+_ET = ZoneInfo("America/New_York")
+
+
 def current_week(now: dt.datetime) -> str:
-    """The week whose cutoff Friday is the most recent one at or before `now` (ET)."""
-    day = now.astimezone(dt.timezone(dt.timedelta(hours=-5))).date() if now.tzinfo else now.date()
+    """The week whose cutoff close is the most recent one at or before `now`.
+
+    Review fixes M4 and M10: `now` is read in America/New_York (DST-aware), and the week rolls
+    forward only at the cutoff day's close (16:00 ET, 13:00 on an early close), so a run started
+    on Friday before the close does not freeze a snapshot without Friday's bar. A naive `now` is
+    taken as ET.
+    """
+    local = now.astimezone(_ET) if now.tzinfo else now
+    day = local.date()
     friday = day - dt.timedelta(days=(day.weekday() - 4) % 7)
-    return cal.week_id(friday)
+    week = cal.week_id(friday)
+    cutoff = cal.cutoff_day(week)
+    close = dt.time(13, 0) if cal.is_early_close(cutoff) else dt.time(16, 0)
+    if day == cutoff and local.time() < close:
+        return cal.prev_week_id(week)
+    return week
 
 
 def read_weights_lock(week_id: str) -> dict[str, Any] | None:

@@ -138,11 +138,10 @@ def parse_response(
     values: dict[str, int] = {}
     for key in ("low", "likely", "high"):
         value = obj[key]
-        if isinstance(value, bool) or not isinstance(value, int | float):
+        # Review fix L2: the schema says int; a float such as 3.0 is not accepted.
+        if isinstance(value, bool) or not isinstance(value, int):
             return invalid("not_integer")
-        if isinstance(value, float) and not value.is_integer():
-            return invalid("not_integer")
-        values[key] = int(value)
+        values[key] = value
         if not RANGE_MIN <= values[key] <= RANGE_MAX:
             return invalid("out_of_range")
     if values["low"] > values["likely"] or values["likely"] > values["high"]:

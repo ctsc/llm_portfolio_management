@@ -136,10 +136,10 @@ Keys go in a `.env` file outside the repository (on ARCTIC, in `$HOME`, mode 600
 ### strategies
 
 v2 phase 7 enables `mvo`, `cvar`, `robust`, `resampled`, and `topk`, plus the HRP and EW controls.
-`cvar` defaults to 10,000 scenarios, beta 0.95, lambda 1.0 (`DECISION(S3)` and `DECISION(S4)`),
+`cvar.n_scenarios` defaults to 10,000, `cvar.beta` 0.95, `cvar.lam` 1.0 (`DECISION(S3)` and `DECISION(S4)`),
 seed 7, and solvers CLARABEL and HIGHS. Install the `solvers` extra to enable HIGHS.
-`robust` uses kappa 1.0 (`DECISION(S5)`) and CLARABEL. `resampled` uses 200 draws, seed 7, and a
-0.10 maximum failed share. `topk.k` defaults to 20 and HRP linkage to `single`. The shared
+`robust` uses kappa 1.0 (`DECISION(S5)`) and CLARABEL. `resampled.n_draws` is 200, `resampled.seed` 7, and
+`resampled.max_failed_share` 0.10 (more failed draws than that fails the solve). `topk.k` defaults to 20 and HRP linkage to `single`. The shared
 optimizer guardrails are no short positions and a 5 percent cap (`DECISION(G1)`). Validation requires
 `1 / strategies.topk.k <= optimizer.max_weight` and
 `optimizer.min_stocks >= ceil(1 / optimizer.max_weight)`.

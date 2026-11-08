@@ -104,8 +104,16 @@ class RunSummary:
     n_cached: int = 0
     n_invalid: int = 0
     n_retries: int = 0
+    n_provider_retries: int = 0
+    n_dropped: int = 0
+    aborted: str | None = None
     cost_usd: float = 0.0
     per_config: dict[str, int] = field(default_factory=dict)
+
+
+# Review fix M1: a task whose provider call fails (transport error, 429 after the provider's own
+# retries, 5xx) is queued again up to this many times before it is dropped for the week.
+MAX_PROVIDER_ERRORS = 2
 
 
 class _CallCutoff(RuntimeError):
@@ -511,6 +519,7 @@ class WeekRunner:
         versions: set[str] = set()
         next_index = 0
         fatal: Exception | None = None
+        provider_errors: dict[str, int] = {}
 
         def call_provider(task: Task) -> RawResult:
             if self._now() >= cutoff:
@@ -547,6 +556,30 @@ class WeekRunner:
                             self._persist_provider_features(
                                 model, spec.serving, (features[0], features[1])
                             )
+                        n_errors = provider_errors.get(task.item.custom_id, 0) + 1
+                        provider_errors[task.item.custom_id] = n_errors
+                        retryable = getattr(exc, "retryable", True)
+                        if not retryable and summary.aborted is None:
+                            # Review fix M2: an authentication failure is model-wide; stop
+                            # submitting and let J4 mark the model's sources failed.
+                            summary.aborted = "authentication_failed"
+                            self.log.error(
+                                "provider_auth_failed",
+                                extra={
+                                    "extra_fields": {
+                                        "week_id": self.week_id,
+                                        "model": model,
+                                        "error": str(exc),
+                                    }
+                                },
+                            )
+                        requeue = (
+                            retryable
+                            and n_errors <= MAX_PROVIDER_ERRORS
+                            and fatal is None
+                            and summary.aborted is None
+                            and self._now() < cutoff
+                        )
                         self.log.warning(
                             "provider_error",
                             extra={
@@ -554,9 +587,16 @@ class WeekRunner:
                                     "week_id": self.week_id,
                                     "custom_id": task.item.custom_id,
                                     "error": str(exc),
+                                    "attempt": n_errors,
+                                    "requeued": requeue,
                                 }
                             },
                         )
+                        if requeue:
+                            submit(task, key, retries, first)
+                            summary.n_provider_retries += 1
+                        else:
+                            summary.n_dropped += 1
                         continue
                     except Exception as exc:
                         fatal = exc
@@ -605,7 +645,7 @@ class WeekRunner:
                         summary.per_config.get(task.config_id, 0) + 1
                     )
 
-                if fatal is None:
+                if fatal is None and summary.aborted is None:
                     while (
                         next_index < len(remaining)
                         and len(pending) < workers

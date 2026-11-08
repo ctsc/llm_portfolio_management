@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,31 @@ ET = ZoneInfo("America/New_York")
 
 def now_et() -> datetime:
     return datetime.now(tz=ET)
+
+
+_SECRET_KEYS = ("authorization", "api_key", "apikey", "api-key", "token", "secret", "password")
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(r"(?i)(authorization\s*[:=]\s*)\S+"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"),
+)
+REDACTED = "[REDACTED]"
+
+
+def redact(value: Any) -> Any:
+    """Review fix M9: drop credentials from anything that reaches the log files. Keys that name
+    a secret lose their value; strings lose bearer tokens, Authorization headers and sk- keys."""
+    if isinstance(value, dict):
+        return {
+            k: (REDACTED if str(k).lower() in _SECRET_KEYS else redact(v)) for k, v in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [redact(v) for v in value]
+    if isinstance(value, str):
+        for pattern in _SECRET_PATTERNS:
+            value = pattern.sub(lambda m: (m.group(1) if m.lastindex else "") + REDACTED, value)
+        return value
+    return value
 
 
 class JsonLinesHandler(logging.Handler):
@@ -34,8 +60,9 @@ class JsonLinesHandler(logging.Handler):
         extra = getattr(record, "extra_fields", None)
         if isinstance(extra, dict):
             payload.update(extra)
+        payload = redact(json.loads(json.dumps(payload, default=str)))
         with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, sort_keys=True, default=str) + "\n")
+            fh.write(json.dumps(payload, sort_keys=True) + "\n")
 
 
 def get_logger(job: str, date: str | None = None) -> logging.Logger:

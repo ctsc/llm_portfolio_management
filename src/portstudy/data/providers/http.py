@@ -61,6 +61,8 @@ class LiveHttp:
         self.attempts = attempts
         self.backoff = backoff_seconds
         self.timeout = timeout
+        # Review fix L14: one client, so connections are reused across the paginated calls.
+        self._client = httpx.Client(timeout=timeout)
 
     def _get(
         self, url: str, params: dict[str, Any] | None, headers: dict[str, str] | None
@@ -73,7 +75,7 @@ class LiveHttp:
         )
         def call() -> httpx.Response:
             self.limiter.wait()
-            resp = httpx.get(url, params=params, headers=headers, timeout=self.timeout)
+            resp = self._client.get(url, params=params, headers=headers)
             if resp.status_code == 429 or resp.status_code >= 500:
                 raise TransientHttpError(f"{resp.status_code} from {url}")
             resp.raise_for_status()

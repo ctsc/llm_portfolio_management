@@ -252,6 +252,7 @@ class LiteLLMProvider(LlmProvider):
             text=content if isinstance(content, str) else "",
             tokens_in=int(usage.get("prompt_tokens") or 0),
             tokens_out=int(usage.get("completion_tokens") or 0),
+            tokens_cached=int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0),
             latency_s=elapsed,
             model_version=returned_model,
             stop_reason="max_tokens" if finish_reason == "length" else finish_reason,

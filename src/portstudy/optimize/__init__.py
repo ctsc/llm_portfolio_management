@@ -7,6 +7,7 @@ view only. Both write `data/outputs/<week>/weights/<portfolio_key>.csv` plus a m
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import logging
@@ -174,6 +175,16 @@ def _previous_weights(week_id: str, portfolio: str, previous_week: str | None) -
     return df.set_index("ticker")["weight"].astype(float)
 
 
+def _shift_from_q0(
+    weights: pd.Series, q0_weights: pd.Series | None, *, q0_only: bool, is_control: bool
+) -> float:
+    """Review fix M6: the view shift is measured on the weights actually written, including a
+    solver-fallback allocation (the fallback is reported separately in `fallback_flag`)."""
+    if q0_only or is_control or q0_weights is None:
+        return 0.0
+    return view_shift(weights, q0_weights)
+
+
 def _optimize(
     portfolio: str,
     inputs: WeekInputs,
@@ -240,11 +251,7 @@ def _optimize(
                 }
             },
         )
-    shift = (
-        view_shift(result.weights, q0_weights)
-        if not q0_only and not is_control and q0_weights is not None and not result.fallback_flag
-        else 0.0
-    )
+    shift = _shift_from_q0(result.weights, q0_weights, q0_only=q0_only, is_control=is_control)
     out = Weights(
         portfolio=portfolio,
         week_id=inputs.week_id,
@@ -461,6 +468,26 @@ def build_q0_weights(
     )
 
 
+def existing_q0_weights(week_id: str, strategy: StrategyName) -> Weights | None:
+    """The strategy's Q0 for the week as written by J7 (`<q0>.csv` plus `<q0>.meta.json`),
+    or None when it has not been written yet."""
+    portfolio = PortfolioId.q0(strategy).key
+    folder = weights_dir(week_id)
+    csv_path, meta_path = folder / f"{portfolio}.csv", folder / f"{portfolio}.meta.json"
+    if not (csv_path.exists() and meta_path.exists()):
+        return None
+    df = read_csv(csv_path).set_index("ticker")
+    df.index.name = None  # the solver's series carry an unnamed ticker index
+    meta = read_weights_meta(week_id, portfolio)
+    fields = {f.name for f in dataclasses.fields(Weights)} - {"weights", "mu_bl", "tilt"}
+    return Weights(
+        weights=df["weight"].astype(float),
+        mu_bl=df["mu_bl"].astype(float),
+        tilt=df["tilt"].astype(float),
+        **{k: v for k, v in meta.items() if k in fields},
+    )
+
+
 def build_weights(
     week_id: str,
     model: str,
@@ -485,7 +512,9 @@ def build_weights(
     if post is None and views.use_llm_view:
         post = black_litterman(views, inp.risk.sigma_matrix, logger=log)
     if not views.use_llm_view:
-        q0 = build_q0_weights(
+        # Review fix M7: reuse the Q0 already written this week instead of solving it again
+        # (and rewriting its files) from the steered portfolio's previous-week path.
+        q0 = existing_q0_weights(week_id, strategy) or build_q0_weights(
             week_id,
             cfg,
             ic_b,

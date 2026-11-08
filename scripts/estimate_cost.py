@@ -30,6 +30,9 @@ def main() -> None:
     registry = load_model_registry()
     table = CostTable(registry)
     manifest = load_manifest()
+    # Review fix L13: count the models and prompt types the study selects, not the whole registry.
+    model_ids = cfg.llm.model_ids or [m.id for m in registry.enabled()]
+    prompt_ids = cfg.llm.prompt_ids or [c.id for c in manifest.enabled()]
 
     frames = []
     for path in sorted(outputs_dir().glob("*/llm_scores.csv")):
@@ -40,10 +43,10 @@ def main() -> None:
     if not frames:
         print("no llm_scores.csv found under", outputs_dir())
         n_stocks = args.stocks or 100
-        planned_calls = len(registry.enabled()) * len(manifest.enabled()) * n_stocks
+        planned_calls = len(model_ids) * len(prompt_ids) * n_stocks
         print(
-            f"planned calls per week: {len(registry.enabled())} models x "
-            f"{len(manifest.enabled())} prompt types x {n_stocks} stocks = {planned_calls}; "
+            f"planned calls per week: {len(model_ids)} models x "
+            f"{len(prompt_ids)} prompt types x {n_stocks} stocks = {planned_calls}; "
             f"{planned_calls * args.weeks} over {args.weeks} weeks"
         )
         return
@@ -82,18 +85,16 @@ def main() -> None:
     pd.set_option("display.width", 200)
     print(out.to_string(index=False, float_format=lambda x: f"{x:.2f}"))
     print()
-    print(f"configurations: {[c.id for c in manifest.enabled()]}")
-    n_stocks = args.stocks or int(
-        scores.groupby(["week_id", "model", "config_id"]).size().median()
-    )
-    planned_calls = len(registry.enabled()) * len(manifest.enabled()) * n_stocks
+    print(f"configurations: {prompt_ids}")
+    n_stocks = args.stocks or int(scores.groupby(["week_id", "model", "config_id"]).size().median())
+    planned_calls = len(model_ids) * len(prompt_ids) * n_stocks
     print(
         f"projected total over {args.weeks} weeks: "
         f"{out['usd_projected_cached'].sum():.2f} USD with caching, "
         f"{out['usd_projected_no_cache'].sum():.2f} USD without; "
         f"goal {cfg.llm.cost_goal_usd:.2f} USD; "
-        f"planned calls per week {len(registry.enabled())} models x "
-        f"{len(manifest.enabled())} prompt types x {n_stocks} stocks = {planned_calls}, "
+        f"planned calls per week {len(model_ids)} models x "
+        f"{len(prompt_ids)} prompt types x {n_stocks} stocks = {planned_calls}, "
         f"{planned_calls * args.weeks} over {args.weeks} weeks"
     )
 

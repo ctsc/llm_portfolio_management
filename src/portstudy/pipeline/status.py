@@ -5,6 +5,7 @@ A job whose status is `done` with an unchanged `inputs_hash` is skipped unless f
 
 from __future__ import annotations
 
+import logging
 import traceback
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -15,6 +16,8 @@ from portstudy.hashing import sha256_file, stable_hash
 from portstudy.io import read_json, write_json_atomic
 from portstudy.logging_setup import now_et
 from portstudy.paths import week_output_dir
+
+log = logging.getLogger(__name__)
 
 JobState = Literal["pending", "running", "done", "failed", "skipped"]
 JOB_NAMES = ["J1", "J2", "J3", "J4", "J5", "J6", "J7", "J8", "J9"]
@@ -89,8 +92,19 @@ def run_job(
     """
     current = read_status(week_id, job)
     if current.state == "done" and current.inputs_hash == inputs_hash and not force:
-        current.state = "skipped"
-        return current
+        # Review fix M5: a done job is skipped only while its recorded outputs are still there
+        # and unchanged; a deleted or edited output file makes the job run again.
+        outputs_intact = (
+            outputs is None
+            or current.outputs_hash is None
+            or hash_paths(outputs()) == current.outputs_hash
+        )
+        if outputs_intact:
+            current.state = "skipped"
+            return current
+        log.warning(
+            "%s %s: outputs changed or missing since it was done; running again", job, week_id
+        )
     status = JobStatus(
         job=job,
         week_id=week_id,
