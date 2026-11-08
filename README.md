@@ -1,47 +1,114 @@
-# LLM Enhanced Quantitative Portfolio Management 
+# LLM-Enhanced Quantitative Portfolio Management
 
-**Do LLM ratings improve portfolio strategies over a quant-only baseline?**
-A weekly, fully reproducible research pipeline tests whether language-model ratings given bare, specialized-skills, or placebo prompts improve five optimization strategies while holding views, covariance, and guardrails fixed.
+**Research question: do large-language-model stock ratings carry information that a quantitative baseline does not already have, and does that information survive contact with real portfolio-construction rules?**
 
-Everything in this repository runs offline on a seeded synthetic market with a stub LLM. The real data and model services sit behind the same interfaces and are switched on with keys when the live study starts.
+This repository is the complete, reproducible research system for a master's thesis in quantitative finance. It runs a weekly, pre-registered live study in which several language models rate every stock in a sector-balanced S&P 500 universe under controlled prompt conditions, the ratings are turned into Black-Litterman views alongside a momentum-plus-forecast baseline, and five allocation strategies trade those views under identical guardrails. Everything that touches the result (data snapshots, prompts, views, optimizers, the simulator, the statistics) is versioned, hashed, and testable offline on a seeded synthetic market with a stub model. The research paper written from this study reports and interprets the findings; this README describes the system, the protocol, and the choices behind them.
 
 ---
 
 ## Table of contents
 
-1. [How the study works](#how-the-study-works)
-2. [Pipeline at a glance](#pipeline-at-a-glance)
-3. [Quick start](#quick-start)
-4. [Commands](#commands)
-5. [Repository layout](#repository-layout)
-6. [Data conventions](#data-conventions)
-7. [Testing and quality gates](#testing-and-quality-gates)
-8. [Going live](#going-live)
-9. [Documentation](#documentation)
-10. [Design choices](#design-choices)
+1. [Research design](#research-design)
+2. [Hypotheses and statistical protocol](#hypotheses-and-statistical-protocol)
+3. [Methodology](#methodology)
+4. [Weekly pipeline](#weekly-pipeline)
+5. [Failure handling](#failure-handling)
+6. [Compute and services](#compute-and-services)
+7. [Reproducibility](#reproducibility)
+8. [Quick start](#quick-start)
+9. [Commands](#commands)
+10. [Repository layout](#repository-layout)
+11. [Data conventions](#data-conventions)
+12. [Testing and quality gates](#testing-and-quality-gates)
+13. [Project status](#project-status)
+14. [Documentation](#documentation)
+15. [Design choices](#design-choices)
 
 ---
 
-## How the study works
+## Research design
 
-Each week, for 100 sector-balanced S&P 500 stocks:
+**Unit of study.** A *rating source* is one (model, prompt type) pair. A *portfolio* is one (strategy, rating source) pair, one strategy's baseline-only portfolio (`<strategy>__Q0`), or one of the two forecast-free controls (`HRP`, `EW`). Rank IC belongs to the rating source; the same ratings give the same IC under every strategy, so the strategy axis isolates allocation effects from information effects.
 
-| Step | What happens |
+**Treatments.** Each model rates each stock under seven prompt configurations:
+
+| Prompt type | Purpose |
 |---|---|
-| **Quant baseline** | Momentum features (12-1, 3-month, 1-month reversal) plus a 5-day price forecast are rank-averaged into `z_b`; the path spread `k_sd` is retained for baseline-view uncertainty. |
-| **Risk model** | Ledoit-Wolf covariance on 252 daily returns, scaled to weekly; market-cap prior `pi = delta Sigma w_mkt`. |
-| **LLM views** | Every model rates every stock from its ticker, name, sector, and the week's news, under `bare`, `placebo`, and `skills_1` through `skills_5` prompt configurations. Skills and placebo files are length-matched to the enabled skills mean. One stock per call, temperature 0, JSON output only. |
-| **Residualize** | LLM likely ratings are regressed on `z_b`; the standardized residual `z_L` is the part of the view the baseline did not already know. |
-| **Black-Litterman** | Baseline and LLM views enter as stacked identity views, scaled by trailing rank IC, Kronos spread, and rating width. |
-| **Optimize** | Five strategies read the same posterior: MVO, Mean-CVaR, Robust MVO, Resampled MVO, and Top-K, each with a 5 percent cap and no shorts. Each strategy has a baseline-only portfolio `<strategy>__Q0` and one steered portfolio per rating source, `<strategy>__<model>__<prompt-id>`; HRP and equal weight are forecast-free controls. |
-| **Simulate** | Monday-open rebalance at raw ledger prices, 10 bps costs, daily stop-loss (-8%) and take-profit (+15%), dividends and splits handled. |
-| **Evaluate** | Weekly rank IC gaps (H1 to H3), pre-registered splits (H4), factor regressions and a shuffled-ratings test (H5), all with Holm correction. |
+| `bare` | The task instructions and the stock's data only. |
+| `placebo` | `bare` plus a neutral passage length-matched (within 2 percent) to the mean skills file, so any skills effect cannot be explained by prompt length alone. |
+| `skills_1` to `skills_5` | Five specialized analyst-skills documents of similar length (within 5 percent of their mean). `skills_5` is disabled by default. |
 
-Portfolio count: `(models x prompt kinds + 1) x 5 + 2`; with 2 models and 7 prompt kinds that is 77 portfolios from 14 rating sources. LLM calls per week are `models x prompt kinds x stocks`; strategies add portfolios, not calls. Portfolio identity separates the rating source (`<model>__<prompt-id>`) from the strategy that trades it, so every source is judged under every strategy against that strategy's own Q0.
+Every prompt is built from the same fields (ticker, name, sector, the week's news up to the cutoff) at temperature 0, one stock per call, JSON output only. Prompt files are content-hashed in `config/prompts_manifest.yaml`; editing one without bumping its version fails CI.
+
+**Models.** Open-weight models (Gemma 4 31B, MiniMax M2.7, with Gemma 4 E4B, Phi-4 Mini and Llama 3.2 3B as requested deployments) served through the ARCTIC LiteLLM gateway, plus one or two commercial API models (Claude Haiku 5.5, GPT-6 Luna) through their batch endpoints. The default configuration enables 4 models and 6 prompt types: 24 rating sources, and `(24 + 1) x 5 + 2 = 127` portfolios. LLM calls per week are `models x prompt types x stocks`; strategies add portfolios, not calls.
+
+**Output schema.** Each rating is a range, `{"low": int, "likely": int, "high": int, "rationale": str}` with integers in [-5, 5] and `low <= likely <= high`. The `likely` value is the point view; the width `high - low` is the model's own uncertainty and sets how much the optimizer trusts it. A response that fails the schema is retried once and then counted as invalid.
+
+**Controls built into the design.**
+
+- *Baseline-only twin for every strategy.* Each strategy's `Q0` portfolio runs the identical Black-Litterman and optimizer path with the baseline view only, so every steered portfolio has a same-week, same-strategy counterfactual.
+- *Residualization.* LLM ratings are regressed on the baseline signal; only the residual enters the model, so the LLM is credited only for what the baseline did not already know.
+- *Common random numbers.* Monte Carlo draws (CVaR scenarios, resampled means) are seeded by (seed, week, strategy) and shared by every source, its Q0 and every shuffle, so simulation noise cancels in every comparison.
+- *Pre-registration.* All study decisions (model set, universe size, prompt types, schema, uncertainty mappings, strategy parameters, guardrails, test families) are fixed in `config/study.yaml` and `config/models.yaml` before the live run, tagged `DECISION(<id>)` in code, and never changed by code.
+- *No backtest.* The study is live and forward-only: ratings are made at the Friday close and traded at the next Monday open, so no model ever sees the outcome it is rated on.
 
 ---
 
-## Pipeline at a glance
+## Hypotheses and statistical protocol
+
+Each hypothesis is a weekly paired comparison. Weekly outcomes are counted as win, loss or tie (a gap inside a +-0.01 tie band is a tie), tested with an exact sign-flip permutation test (10,000 permutations) and reported with a paired bootstrap interval (2,000 resamples), and corrected for multiple comparisons with the Holm step-down procedure inside the family shown.
+
+| Hypothesis | Comparison | Holm family |
+|---|---|---|
+| **H1** information | rank IC of the raw LLM `likely` rating minus rank IC of the baseline score, per source | all sources |
+| **H2** incremental value | (a) rank IC of the combined Black-Litterman tilt minus the baseline IC, per source; (b) each steered portfolio's weekly return minus its own strategy's Q0 return on the source's clean weeks | (a) all sources; (b) per strategy |
+| **H3** prompt skills | each `skills_k` source vs `bare` and vs `placebo` for the same model | per model |
+| **H3b** calibration | per source and week, rank IC of stocks whose range width is at or below the median width minus the IC of the wider half (each group at least 10 stocks) | all sources |
+| **H4** strategy ranking (exploratory, no Holm) | strategies ranked by mean weekly return gap vs their own Q0 with bootstrap intervals; splits by market direction, volatility regime and earnings weeks | none |
+| **H5** robustness | (a) daily factor regressions of every portfolio on the ETF proxies (SPY, IWM, IWD, IWF, QUAL); (b) a shuffled-ratings test: 500 replays per steered portfolio and per Q0 with the ratings permuted across stocks within each week and the view strength held fixed, giving an empirical null for total return and Sharpe | per strategy |
+
+Rank IC is Spearman's correlation between the rating at the Friday cutoff and the return from the next Monday open to the following Monday open. The report states the minimum detectable weekly gap (`2.8 sd / sqrt(T)`) so that the power of each family is explicit; more strategies add portfolios, not weeks. Controls (HRP, EW) appear in the metrics and factor tables and in no hypothesis family. A week in which a source fell back to Q0 is excluded from that source's clean-week statistics.
+
+---
+
+## Methodology
+
+The formula sheet in `PLAN2.md` is the single source of truth; `docs/design.md` walks through every stage. In brief, for the N stocks in the week's universe:
+
+**Quantitative baseline.** Momentum features (`M12_1 = P[t-21]/P[t-252] - 1`, `M3 = P[t]/P[t-63] - 1`, one-month reversal `R1 = -(P[t]/P[t-21] - 1)`) are rank-averaged into `m`. Kronos, a pretrained time-series foundation model, samples 20 five-day price paths per stock on a GPU; their mean gives the forecast `k` and their standard deviation `s` the forecast dispersion. The baseline score is `b = 0.5 u(m) + 0.5 u(k)` with `u(x) = rank(x)/N`, standardized to `z_b`.
+
+**Risk model and prior.** The Ledoit-Wolf shrinkage covariance of 252 daily returns, scaled by 5 to weekly (`Sigma`), and the market-cap equilibrium prior `pi = delta Sigma w_mkt` with `delta = 2.5`.
+
+**Views.** The LLM `likely` rating is regressed on `z_b`; the standardized residual `z_L` is the LLM view signal. Both views are absolute views on every stock (`P = I`):
+
+```
+q_b = pi + IC_b sigma z_b          Omega_b,ii = tau Sigma_ii clip(s_i / median(s), 0.25, 4)
+q_L = pi + IC_L sigma z_L          Omega_L,ii = tau Sigma_ii / c_i,   c_i = clip(1 - w_i/10, 0.1, 1)
+```
+
+with `tau = 0.05`. The view strengths `IC_b`, `IC_L` are the trailing eight-week mean rank ICs of each signal, floored at zero (a fixed 0.02 during the five-week cold start). A Kronos spread above the median widens the baseline's uncertainty on that stock; a wide rating range widens the LLM's. If `IC_L = 0`, or a source has no valid ratings, the LLM view rows are dropped and each portfolio trades exactly its strategy's Q0 weights.
+
+**Black-Litterman.** With the stacked views `P = [I; I]`, `A = inv(tau Sigma) + P' inv(Omega) P`, the posterior mean `mu_BL = solve(A, inv(tau Sigma) pi + P' inv(Omega) q)` and the posterior covariance of the mean `M = inv(A)`. Black-Litterman runs once per source per week; every strategy reads the same `mu_BL` and `M`.
+
+**Allocation strategies.** All are long-only with a 5 percent position cap and weights summing to one; cvxpy problems are compiled once per week and re-solved with `mu` as a parameter.
+
+| Strategy | Objective |
+|---|---|
+| MVO | `max w' mu_BL - (delta/2) w' Sigma w` |
+| Mean-CVaR | Rockafellar-Uryasev form on 10,000 scenarios `r_s = mu_BL + chol(Sigma + M) z_s`: `max w' mu_BL - lam [zeta + sum_s u_s / ((1-beta) S)]`, `u_s >= -r_s' w - zeta`, `u_s >= 0`, `beta = 0.95`, `lam = 1` |
+| Robust MVO | `max w' mu_BL - kappa ||chol(M)' w||_2 - (delta/2) w' Sigma w`, `kappa = 1` (worst case over a one-standard-deviation ellipsoid of the posterior mean) |
+| Resampled MVO | mean of 200 MVO solutions at `mu_d = mu_BL + chol(M) z_d` |
+| Top-K | the 20 largest `mu_BL` (ties by ticker) at equal weight |
+| HRP (control) | hierarchical risk parity on `Sigma` only: correlation distance, single linkage, recursive bisection, then the cap |
+| Equal weight (control) | `w_i = 1/N` |
+
+The `view_shift = 0.5 sum_i |w_i - w_Q0,i|` diagnostic records how far each steered portfolio moved from its Q0; the report warns when a strategy's mean shift is below 0.01, because a strategy that ignores its views cannot show an LLM effect.
+
+**Simulator.** Weights are locked by 09:00 ET Monday and executed at the Monday open at the price recorded in an append-only raw ledger. Transaction costs are 10 bps of traded value; a stop-loss at -8 percent or take-profit at +15 percent of average cost is checked at every daily close and executed at the next open; dividends and splits are applied from the provider's corporate-actions feed. Weekly returns, daily values and every trade are stored per portfolio.
+
+---
+
+## Weekly pipeline
 
 ```
                  Friday 16:00 ET cutoff                              Monday 09:00 ET lock
@@ -52,14 +119,63 @@ Portfolio count: `(models x prompt kinds + 1) x 5 + 2`; with 2 models and 7 prom
                                                                          |
                                                               J7 weights (BL, five strategies + Q0 each, controls)
                                                                          |
-            next weekend: J8 replay from the price ledger + likely-rating IC ──> J9 dated CSV backup
+            next weekend: J8 replay from the price ledger + rank IC ──> J9 dated CSV backup
 ```
 
-- **One hand-run script.** `scripts/run_weekend.py` runs the jobs in order, polls batches with a countdown, and resumes where it stopped. No scheduler.
-- **Every job is idempotent.** Status files record inputs hashes; a finished job with unchanged inputs is skipped.
-- **Labeled fallbacks.** A source that fails the week (invalid-output rate above 15 percent, or not finished by the lock) trades its strategy's Q0 weights, tagged `fallback_q0`, and that week is excluded from its clean-weeks statistics.
-- **History cannot drift.** The simulator reads only an append-only raw price ledger, so past fills and stops never change when a provider re-adjusts its data.
-- **No look-ahead.** Snapshots are frozen at the cutoff; news after 16:00 ET is dropped strictly; the IC that scales a view only uses weeks whose return window has already closed.
+| Job | What it does |
+|---|---|
+| J1 | Freezes the week's snapshot: universe, 300 days of prices, news up to the cutoff, reference data, rates and earnings dates. Data checks (missing days, stale or non-positive prices, extreme moves, short history, delisting) either forward-fill for the models or drop the stock, as configured. Only provider-originated price rows enter the ledger. |
+| J2 | Momentum, Kronos forecast and spread, Ledoit-Wolf covariance, market-cap prior. |
+| J3 / J5 | Submit and collect the commercial API models' batch jobs. |
+| J4 | Open-weight inference through the gateway with bounded concurrency, a response cache, provider retries and a cost guard. |
+| J6 | Validates every source: invalid-output rate above 15 percent, or not finished 30 minutes before the lock, marks the source failed for the week (`fallback_plan.json`). |
+| J7 | Residualization, Black-Litterman, every strategy for Q0 and for every source, both controls; writes weights, metadata and `locked.json`. |
+| J8 | Replays every portfolio from the ledger for the closed weeks, scores rank IC for each source and appends it to the IC history. |
+| J9 | Dated CSV backup, zip and optional rsync to a second location. |
+
+`scripts/run_weekend.py` runs the jobs in order, polls batches with a countdown, and resumes where it stopped. Every job records an inputs hash and an outputs hash in its status file; a finished job is skipped only while its inputs are unchanged and its outputs are intact. Weights are final once `locked.json` exists: later IC updates never re-solve a locked week.
+
+---
+
+## Failure handling
+
+The protocol is written so that no failure is silent and every fallback is labeled in the data.
+
+- **Source failure (N1).** A source that fails validation or misses the lock trades its strategy's Q0 weights, tagged `fallback_q0` with the reason; that week is excluded from the source's clean-week tests.
+- **Gateway outage (D2).** A health check before J4 marks the failing models' sources; with `--gateway-fallback`, the fallback-eligible small models are served from the researcher's own Slurm vLLM job instead, one endpoint per source-week, and the serving endpoint is recorded with the scores.
+- **Provider errors.** Transport errors, rate limits and server errors are retried by the provider and then requeued twice before the task is dropped; an authentication failure aborts the model for the week rather than burning the remaining calls.
+- **Solver failure.** Each strategy falls back in order to its previous weights, its own Q0, then equal weight, with `fallback_flag` set and `view_shift` measured on the weights actually traded.
+- **Missed week.** If J1 or J2 fails, the week is written as `no_rebalance` and locked, so the replay still applies stops, dividends and daily values; the replay also fills any calendar gap between locked weeks.
+- **History cannot drift.** The simulator reads only the append-only raw ledger, so past fills never change when a provider re-adjusts its data. Snapshots are frozen at the cutoff and news after 16:00 ET is dropped.
+- **Secrets never reach logs.** The JSON-lines log handler redacts credential-bearing keys, bearer tokens and API keys.
+
+`docs/runbook.md` lists every failure, its symptom in `portstudy status`, and the rerun or restore command.
+
+---
+
+## Compute and services
+
+| Component | Where it runs | Notes |
+|---|---|---|
+| Weekly pipeline (J1 to J9), simulator, evaluation | the researcher's machine or an ARCTIC CPU node | pure Python; the same code runs the synthetic rehearsal |
+| Open-weight LLM inference | ARCTIC LiteLLM gateway (OpenAI-compatible, bearer key) | `llm/providers/litellm.py`; JSON mode and seed support are confirmed at go-live |
+| Commercial API models | Anthropic and OpenAI batch endpoints | `anthropic_batch`, `openai_batch`; cost guard at the D3 budget |
+| Kronos forecast | ARCTIC GPU node (`scripts/arctic/kronos.sbatch`) | 20 sampled paths per stock, seeded |
+| Gateway fallback | ARCTIC GPU node running vLLM (`llm_fallback.sbatch`) | writes the endpoint file only once every server answers `/v1/models` |
+| Shuffled-ratings test (H5) | ARCTIC CPU array (`shuffle_array.sbatch`) | sharded 25 shuffles per task; projected at roughly 16,600 CPU hours at 300 stocks, 4,000 at 100 |
+| Market data | Alpaca (prices, news, corporate actions), yfinance (reference), FRED (rates), Finnhub (earnings) | rate-limited, retried, checked on ingest |
+
+`scripts/arctic/submit_weekend.sh` runs the weekend in two network modes: `compute` submits one Slurm job, `login` runs the network-bound jobs on the login node and waits for the Kronos job before J4. `docs/arctic_setup.md` and `docs/runbook.md` section 9 cover both.
+
+---
+
+## Reproducibility
+
+- **Offline twin of the whole study.** `scripts/make_synthetic_world.py` writes a seeded 120-stock market with a planted rating effect that decreases from `skills_1` to `skills_5`, planted halts and a planted delisting; the stub LLM reproduces the full response path (ranges, invalid outputs, rationale). The 30-week end-to-end rehearsal injects a source failure, a solver failure, a lock-deadline cutoff and a gateway outage recovered with `--gateway-fallback`; two runs with the same seed give byte-identical outputs.
+- **Deterministic numerics.** Floats are written as `%.12g`; every random stream is seeded from SHA-256 of a named tuple (`(seed, week_id, strategy)` for the strategy draws, `(seed, portfolio, index, week)` for shuffles), so a shard can run any subset and still match a serial run.
+- **Hashes everywhere.** Prompt files, snapshots, status inputs and outputs, weight files and the lock file all carry SHA-256 digests; the covariance-of-mean matrix is recorded by its digest in every weights file.
+- **Decisions are data.** `config/study.yaml` holds every pre-registered value with its decision id; the report header prints the values in force so a result can never be separated from the settings that produced it.
+- **Single script, resumable.** The weekend is one hand-run script with idempotent jobs; there is no scheduler state outside the repository's data directory.
 
 ---
 
@@ -86,7 +202,7 @@ portstudy eval --synthetic --skip-shuffle
 
 Each run ends with a per-portfolio summary (status, weights file, hash). The report lands in `data/outputs/report/report.md` with CSV tables and PNG figures beside it. Drop `--skip-shuffle` to run the shuffled-ratings test (500 shuffles per portfolio by default; lower `eval.shuffle.n_shuffles` to try it quickly). Select another study file with `--config config/study_test.yaml` or `PORTSTUDY_CONFIG=config/study_test.yaml`.
 
-Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_calendars), `.[api]` (anthropic, openai, tiktoken), `.[ml]` (torch, transformers for the Kronos forecaster). The core imports and tests without them.
+Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_calendars), `.[api]` (anthropic, openai, tiktoken), `.[ml]` (torch, transformers for the Kronos forecaster).
 
 ---
 
@@ -101,6 +217,7 @@ Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_c
 | `portstudy replay` | Rebuild every portfolio from the ledger and rescore closed weeks |
 | `portstudy backup --week W [--dry-run]` | Dated CSV backup folder plus zip |
 | `portstudy eval [--skip-shuffle]` | Full evaluation report |
+| `portstudy shuffle plan\|run\|collect` | H5 shuffled-ratings test sharded for a Slurm array: list shards, run one, or assemble the results |
 | `python scripts/make_synthetic_world.py` | Write the seeded synthetic market to `data/synthetic/` |
 | `python scripts/benchmark_pipeline.py [--n-stocks 300 --sources 3 --weeks 52]` | Seconds per solve per strategy, weekly J7 time, projected shuffle CPU hours; `--jobs` times J1 to J9 once |
 | `python scripts/estimate_cost.py` | Projected API cost from logged token counts |
@@ -159,8 +276,8 @@ PROGRESS.md             build log, one entry per phase
 ruff check src tests scripts
 ruff format --check src tests scripts
 mypy src scripts
-pytest tests/unit tests/integration      # about 10 minutes
-pytest tests/e2e                         # 25 synthetic weeks end to end, about 7 minutes
+pytest tests/unit tests/integration      # about 9 minutes
+pytest tests/e2e                         # 30-week synthetic rehearsal with injected failures, about 14 minutes
 python scripts/refresh_manifest.py --check
 python scripts/check_placebo_length.py
 python scripts/check_banned_words.py
@@ -179,14 +296,13 @@ GitLab CI (`.gitlab-ci.yml`) runs lint, tests, and the repository checks on ever
 
 ---
 
-## Going live
+## Project status
 
-The live study runs on ARCTIC: the LiteLLM gateway serves the open-weight models, Kronos runs on a GPU
-node, and the weekend pipeline and the shuffle array run on CPU nodes. The ordered checklist is v2 phase
-15 of `PLAN2.md`; `docs/arctic_setup.md` is the first-person setup list (env file, venv, model weights,
-licenses, VPN, quotas), `docs/runbook.md` section 9 is the weekend in both network modes with the D2
-steps, and `docs/arctic_gpu_request.md` is the allocation request. `docs/desktop_checklist.md` is the v1
-desktop checklist, kept until phase 15 D decides what replaces it.
+The system is built and rehearsed; the live study starts after the manual steps in v2 phase 15 of `PLAN2.md`.
+
+- **Built and verified.** v1 and v2 phases 1 to 14 are complete, one commit per phase, each recorded in `PROGRESS.md`. A read-only senior review (`results.md`) then checked every formula against the `PLAN2.md` sheet with independent reference implementations (closed-form Black-Litterman, scipy, statsmodels, scikit-learn, a from-scratch HRP) and found no mismatch; the 31 robustness findings it raised were each fixed with a regression test (`tests/unit/test_review_fixes.py`) and logged in the "Review fixes" section of `PROGRESS.md`.
+- **Remaining manual work (phase 15, researcher only).** Accounts, keys and spending limits; the ARCTIC allocation, environment file and model weights; the GitLab data and backup folders; smoke tests of every real service and the 300-stock benchmark on ARCTIC; the research content (the five skills files, the placebo passage, the final universe size, the paid-API budget D3); then the freeze, a pilot week, and go.
+- **Not yet verified against live services.** Gateway JSON mode, seed support and rate limits; the MiniMax reasoning format; Kronos per-path sampling; ARCTIC partitions and walltimes; the exact shuffle CPU hours. Each is marked `UNVERIFIED` in the config or code until phase 15 confirms it.
 
 ```
 cp scripts/arctic/arctic.env.example scripts/arctic/arctic.env   # fill every TBD (phase 15 C)
@@ -195,8 +311,6 @@ bash scripts/arctic/submit_weekend.sh                            # the weekend; 
 python scripts/run_weekend.py --from J4 --gateway-fallback       # D2, after sbatch scripts/arctic/llm_fallback.sbatch
 ```
 
-The only provisional study decision is D3, the paid API budget; see `docs/open_questions.md`.
-
 ---
 
 ## Documentation
@@ -204,7 +318,8 @@ The only provisional study decision is D3, the paid API budget; see `docs/open_q
 | File | Contents |
 |---|---|
 | `PLAN2.md` | Current phased build plan and study decisions |
-| `PROGRESS.md` | What was built in each phase, tests, open items |
+| `PROGRESS.md` | What was built in each phase, tests, open items, and every review fix |
+| `results.md` | The senior code review: mathematical proofs, pipeline and connection checks, findings by severity |
 | `docs/design.md` | One section per pipeline stage with the exact formulas |
 | `docs/config_reference.md` | Every config key with default, meaning, and decision id |
 | `docs/open_questions.md` | Decision table with config locations and code tags |
@@ -218,7 +333,7 @@ License: MIT.
 
 ## Design choices
 
-The five study design choices, with value, config key, and reason (they match `config/study.yaml`):
+Every non-obvious choice made while building the system is listed here so that the paper can point at each one. The five study design choices, with value, config key, and reason (they match `config/study.yaml`):
 
 - **K1, Kronos spread to baseline uncertainty** (`views.kronos_spread_clip`): Omega_b,ii = tau Sigma_ii clip(s_i / median(s), 0.25, 4). Scaling by the median keeps the average baseline uncertainty at the v1 level, so the spread only shifts trust between stocks. The clip stops one unusual forecast from making a view almost certain or almost ignored.
 - **S4, Mean-CVaR lambda = 1.0** (`strategies.cvar.lam`): expected return and tail loss are both weekly returns, so equal weight needs no tuning and is not fit to past returns.

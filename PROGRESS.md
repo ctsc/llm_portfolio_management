@@ -693,3 +693,13 @@ code and passes on the new one, plus the full suite before the push.
   output). L5 and L6 (per-call `run_status.json` rewrites, repeated fallback-plan reads) are
   performance items measured at under 1% of the weekly run and are deferred. L16 (real
   split/dividend smoke test against Alpaca) needs live keys and is part of phase 15.
+
+## README rewrite
+
+`README.md` was rewritten as the research-project overview after the review fixes: research
+design (unit of study, treatments, models, schema, built-in controls), the hypotheses H1 to H5
+with their Holm families, the methodology with the formulas in force, the weekly pipeline by
+job, the failure-handling policy, compute and services, reproducibility, project status
+(phase 15 manual work and the `UNVERIFIED` items), and the design-choice register kept in full.
+Every number in it (24 sources, 127 portfolios, test timings, shuffle projection) was checked
+against `config/study.yaml`, `config/models.yaml` and the current test runs.
