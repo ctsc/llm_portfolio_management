@@ -1,0 +1,95 @@
+\documentclass[conference]{IEEEtran}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=blue}
+\begin{document}
+
+\title{Specialized LLM Skills Across Fixed Quantitative Portfolio Optimization Strategies}
+\author{\IEEEauthorblockN{Carter Tierney}
+\IEEEauthorblockA{\textit{Department of Computer Science}\\
+\textit{Georgia State University}\\
+Atlanta, GA, USA}}
+\maketitle
+
+\noindent{\small\bfseries\textit{Proposal Abstract:} I propose a controlled study of how large language model (LLM) views change the results of different quantitative portfolio optimization strategies. The data, the quant baseline, the Ledoit-Wolf covariance, the way views are built, and the guardrails are held fixed, so only the LLM's ratings and the strategy change. Each LLM rates every stock as a range (low, most likely, high) using a bare prompt, one of four to five specialized skills files, or a placebo (filler text the same length as a skills file). These ratings become Black-Litterman views that steer five fixed strategies, and each strategy is compared with its own quant-baseline-only version, which ranks stocks on momentum plus a pretrained forecasting model. I will track a weekly evaluation through the rank information coefficient (IC) and portfolio returns over a live run to find which strategies the LLM helps or hurts the most, and why. To my knowledge, no prior study has tested LLM views across several fixed strategies on live data in the same period.\par}
+
+\section{Research Question and Hypotheses}
+\textit{How can LLM views built from specialized skills improve quantitative portfolio optimization strategies, and which strategies do LLMs help or hurt the most, and why?}
+
+\noindent\textbf{H1} How often do the LLM's ratings alone beat the quant baseline's ratings?
+
+\noindent\textbf{H2} How often does adding the LLM views improve each strategy's portfolio, compared with the same strategy run on the baseline alone (Q0)?
+
+\noindent\textbf{H3} Do specialized skills change the result compared with bare prompts and placebo?
+
+\noindent\textbf{H4} Which strategies do the LLM views help or hurt the most, and in which conditions (up or down markets, high or low volatility, earnings weeks)?
+
+\noindent\textbf{H5} How much of the result comes from luck or general market movement rather than the LLM?
+
+\section{Method: Weekly Pipeline from Input to Portfolio}
+\begin{enumerate}
+\item \textit{Data:} Prices, news and earnings dates for 100 to 300 S\&P 500 stocks balanced across sectors, frozen every Friday at market close. The number of stocks depends on the GSU ARCTIC GPU resources.
+\item \textit{Quant baseline score:} Built from price history alone, with no LLM. Each stock is ranked on its price momentum (12-1 month, 3-month and reversed 1-month returns) and on Kronos's next-week return forecast, then the two ranks are averaged. The spread of Kronos's 20 sampled forecast paths sets how much the baseline view is trusted.
+\item \textit{LLM rating:} The model rates each stock as a range on a -5 to 5 scale (low, most likely, high) with a short rationale, using one prompt type: a bare prompt, one of four to five specialized skills files of similar length, or a placebo (filler text of the same length, with no investing content).
+\item \textit{Residualize:} Remove the part of the LLM's most likely score that the baseline already explains, so the LLM view only adds new information.
+\item \textit{Build views:} The most likely score, recent rank IC and stock volatility set each view's expected return. The width of the range sets the uncertainty, so a narrow range like 3 to 5 counts more than a wide range like 1 to 5.
+\item \textit{Black-Litterman:} Blend the baseline and LLM views with market-implied returns, using a Ledoit-Wolf covariance, into expected returns. The same expected returns and covariance go to every strategy.
+\item \textit{Strategies:} Five fixed strategies turn the expected returns into a portfolio. Mean-variance maximizes return minus a risk penalty. Mean-CVaR maximizes return against the average loss in the worst 5\% of outcomes, using 10,000 Monte Carlo scenarios drawn from the Black-Litterman results. Robust mean-variance optimizes against the worst case within each view's uncertainty. Resampled mean-variance re-optimizes over 200 random draws of expected returns and averages the weights. Top-K holds the 20 stocks with the highest expected returns in equal weights.
+\item \textit{Controls:} Each strategy also runs a control portfolio (Q0) using only the quant baseline view and no LLM views. Two more controls ignore forecasts entirely: hierarchical risk parity and an equal-weight portfolio.
+\item \textit{Guardrails:} The same for every strategy: weekly rebalancing, daily checks with stop-loss -8\% and take-profit +15\%, a trading cost of 10 basis points (0.1\%) per trade, no shorts, and at most 5\% per stock.
+\end{enumerate}
+
+\section{Models}
+Every model sees the same data and runs through the same pipeline. Open-weight models run on GSU ARCTIC through its OpenAI-compatible LiteLLM gateway, and API models are called through their providers' batch APIs. All inputs are public market data and published news, and models banned by GSU's AI tool registry (such as Qwen and DeepSeek) are not used.
+\begin{itemize}
+\item \textit{Quant baseline model:} Kronos, a pretrained candlestick forecaster on ARCTIC
+\item \textit{Small open-weight models:} Gemma 4 E4B, Phi-4 Mini (3.8B) and Llama 3.2 3B, which I have asked ARCTIC (GSU's research computing group) to deploy on its gateway. If the gateway is down during a weekend run, they run in my own ARCTIC Slurm jobs.
+\item \textit{API, cheap/small models:} one or two paid models, such as Claude Haiku 5.5 or GPT-6 Luna, using batch requests and prompt caching, and no frontier reasoning models
+\item \textit{Larger models:} Gemma 4 31B and MiniMax M2.7, already on ARCTIC's gateway
+\end{itemize}
+
+\section{Evaluation}
+\textit{Scoring.} Each week, every LLM's most likely score is compared with the next week's returns using rank IC, the Spearman correlation between the ordering of scores and of returns. Rank IC measures the ratings themselves, so it is the same for every strategy, while daily portfolio returns show how each strategy uses those ratings.
+
+\textit{H1:} For each week we compare the rank IC of the LLM views with the quant baseline and record whether it did better, worse, or tied.
+
+\textit{H2:} Repeat this for the combined LLM and baseline score, and compare each LLM portfolio's weekly return with the Q0 of the same strategy, so the strategy itself cancels out.
+
+\textit{H3:} Compare each LLM's ratings from each skills file with its bare prompt and placebo ratings, using the weekly rank IC gap. Also test whether narrow ranges (for example 3 to 5) predict returns better than wide ones.
+
+\textit{H4:} Rank the strategies by how much the LLM views helped or hurt against their own Q0. Split weeks (market up or down, high or low volatility) and stocks (earnings week or not) into groups chosen in advance, and compare the gaps across groups. These results are exploratory.
+
+\textit{H5:} The Fama-French five-factor model splits each portfolio's return into market, size, value, profitability and investment exposure plus leftover alpha. For each mean-variance, robust and top-K portfolio, 500 shuffled-rating portfolios (the same scores given to random stocks) show what random ratings can earn under that strategy.
+
+\textit{Tests.} To make sure results reflect real differences and not luck, each week's comparison is checked with a sign test and a sign-flip permutation test, which check if the wins and average gain could be chance. Newey-West standard errors correct for neighboring weeks being related, and Holm correction adjusts p-values within each strategy for many comparisons.
+
+\section{Scope and Limitations}
+A one-week pilot runs first, and then the live run starts on real weekly data. There is no backtest, since LLMs may have already seen news and prices from any past period. The live run covers one market period, so results may not hold if the market crashes or becomes highly volatile. The number of stocks depends on the GSU ARCTIC resources granted, the three small models depend on ARCTIC deploying them, and adding strategies adds portfolios but not weeks, so small rank IC gaps stay hard to detect.
+
+\section{Related Work}
+The closest prior work puts LLM forecasts into Black-Litterman views, adds LLM signals to several portfolio methods, tests investor-style prompts and skills, and shows that backtests can leak future information into LLMs. This study holds the views, covariance and guardrails fixed and compares how the same LLM views change several optimization strategies, with placebo controls and a live run.
+
+\begin{thebibliography}{20}
+\bibitem{b1} Y. Lee, Y. Kim, J. Kim, S. Kim, and Y. Lee, ``\href{https://arxiv.org/abs/2504.14345}{LLM-Enhanced Black-Litterman Portfolio Optimization},'' arXiv:2504.14345, 2025.
+\bibitem{b2} L. A. Mantshimuli and J. W. Muteba Mwamba, ``\href{https://link.springer.com/article/10.1007/s41060-026-01066-0}{Toward a Unified Agentic Framework for Regime-Aware Portfolio Optimization with LLM Signals},'' \textit{Int. J. Data Sci. Anal.}, vol. 22, Art. no. 92, 2026.
+\bibitem{b3} Z. Li and L. Min, ``\href{https://www.iaeng.org/IJAM/issues_v55/issue_8/IJAM_55_8_21.pdf}{CVaR-based Portfolio with Investment Views Given by Large Language Models},'' \textit{IAENG Int. J. Appl. Math.}, vol. 55, no. 8, pp. 2512-2520, 2025.
+\bibitem{b4} L. A. Mantshimuli and J. W. Muteba Mwamba, ``\href{https://www.mdpi.com/1911-8074/19/5/320}{Few-Shot Portfolio Optimization: Can Large Language Models Outperform Quantitative Portfolio Optimization?},'' \textit{J. Risk Financial Manag.}, vol. 19, no. 5, Art. no. 320, 2026.
+\bibitem{b5} Y. Kim, Y. Lee, J. Kim, and Y. Lee, ``\href{https://arxiv.org/abs/2510.01664}{GuruAgents: Emulating Wise Investors with Prompt-Guided LLM Agents},'' arXiv:2510.01664, 2025.
+\bibitem{b6} X. Li \textit{et al.}, ``\href{https://arxiv.org/abs/2602.12670}{SkillsBench: Benchmarking How Well Agent Skills Work Across Diverse Tasks},'' arXiv:2602.12670, 2026.
+\bibitem{b7} A. Lopez-Lira and Y. Tang, ``\href{https://arxiv.org/abs/2304.07619}{Can ChatGPT Forecast Stock Price Movements? Return Predictability and Large Language Models},'' arXiv:2304.07619, 2023.
+\bibitem{b8} C. Li \textit{et al.}, ``\href{https://arxiv.org/abs/2505.11065}{Time Travel is Cheating: Going Live with DeepFund for Real-Time Fund Investment Benchmarking},'' in \textit{Proc. NeurIPS Datasets and Benchmarks Track}, 2025.
+\bibitem{b9} Z. Gao, W. Jiang, and Y. Yan, ``\href{https://arxiv.org/abs/2512.23847}{Detecting Lookahead Bias in LLM Forecasts},'' arXiv:2512.23847, 2025.
+\bibitem{b10} Y. Shi \textit{et al.}, ``\href{https://arxiv.org/abs/2508.02739}{Kronos: A Foundation Model for the Language of Financial Markets},'' arXiv:2508.02739, 2025.
+\bibitem{b11} F. Black and R. Litterman, ``\href{https://people.duke.edu/~charvey/Teaching/BA453_2006/Black_Litterman_Global_Portfolio_Optimization_1992.pdf}{Global Portfolio Optimization},'' \textit{Financial Analysts J.}, vol. 48, no. 5, pp. 28-43, 1992.
+\bibitem{b12} O. Ledoit and M. Wolf, ``\href{https://econpapers.repec.org/RePEc:eee:jmvana:v:88:y:2004:i:2:p:365-411}{A Well-Conditioned Estimator for Large-Dimensional Covariance Matrices},'' \textit{J. Multivariate Anal.}, vol. 88, no. 2, pp. 365-411, 2004.
+\bibitem{b13} R. T. Rockafellar and S. Uryasev, ``\href{https://www.risk.net/journal-risk/2161159/optimization-conditional-value-risk}{Optimization of Conditional Value-at-Risk},'' \textit{J. Risk}, vol. 2, no. 3, pp. 21-41, 2000.
+\bibitem{b14} D. Goldfarb and G. Iyengar, ``\href{https://zhaosong-lu.github.io/ResearchPapers/robport-OMS.pdf}{Robust Portfolio Selection Problems},'' \textit{Math. Oper. Res.}, vol. 28, no. 1, pp. 1-38, 2003.
+\bibitem{b15} R. Michaud and R. Michaud, ``\href{https://joim.com/articles-estimation-error-portfolio-optimization-resampling-solution}{Estimation Error and Portfolio Optimization: A Resampling Solution},'' \textit{J. Investment Manag.}, vol. 6, no. 1, 2008.
+\bibitem{b16} M. L\'opez de Prado, ``\href{https://papers.ssrn.com/abstract=2708678}{Building Diversified Portfolios that Outperform Out-of-Sample},'' \textit{J. Portfolio Manag.}, vol. 42, no. 4, pp. 59-69, 2016.
+\bibitem{b17} Y. Chen, B. T. Kelly, and D. Xiu, ``\href{https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4416687}{Expected Returns and Large Language Models},'' SSRN Working Paper 4416687, 2022.
+\bibitem{b18} S. He, L. Lv, A. Manela, and J. Wu, ``\href{https://arxiv.org/abs/2502.21206}{Chronologically Consistent Large Language Models},'' arXiv:2502.21206, 2025.
+\bibitem{b19} Y. Abe, S. Matsuo, R. Kondo, and R. Hisano, ``\href{https://arxiv.org/abs/2411.19515}{Leveraging Large Language Models for Institutional Portfolio Management: Persona-Based Ensembles},'' arXiv:2411.19515, 2024.
+\bibitem{b20} Y. Xiao, E. Sun, D. Luo, and W. Wang, ``\href{https://arxiv.org/abs/2412.20138}{TradingAgents: Multi-Agents LLM Financial Trading Framework},'' arXiv:2412.20138, 2024.
+\end{thebibliography}
+
+\end{document}

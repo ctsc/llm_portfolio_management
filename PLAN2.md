@@ -1,5 +1,7 @@
 # PLAN2.md: Build Plan v2 for the LLM Skills and Portfolio Strategies Study
 
+Decisions G6 (changed), W1 and M1 (new) are updated in PLAN3.md.
+
 This file is the second build plan. PLAN.md (v1) built the full pipeline in 17 phases, and every phase is done. PLAN2.md changes that codebase to match the updated proposal. Read PLAN.md and PROGRESS.md first: everything in v1 that this file does not change stays as it is.
 
 Study in one sentence: with the views, covariance and guardrails held fixed, test whether LLM ratings (given a bare prompt, specialized skills files, or a placebo) improve five portfolio optimization strategies compared with the same strategies run on the quant baseline alone, using a weekly pipeline on live data.

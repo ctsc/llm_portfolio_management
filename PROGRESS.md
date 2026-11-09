@@ -741,6 +741,11 @@ and 5 rewrite those files anyway) to keep the gate green within this phase.
 
 ## v3 phase 2: shuffle scope (DECISION(G6)) and corrected projections
 
+Note added 2026-11-08: the v2 phase 9 entry and the "remaining" list above say "about 16,600 shuffle
+CPU hours". That figure assumed 52 weeks and all five strategies (Mean-CVaR alone was about 75
+percent of it). Under DECISION(G6) and the 24-week study the corrected projection is 85.2 CPU hours
+at 300 stocks and 5.6 at 100 (solve time only, 51 sources), measured below. The older text is
+history and is left as written.
 
 - `eval/shuffle.py`: `shuffle_portfolios(portfolios, strategies)` keeps only the strategies in
   `eval.shuffle.strategies` (their Q0 first, then their steered portfolios; controls never);
@@ -822,3 +827,78 @@ request's estimate. Largest configuration: 5 open-weight models x 7 prompts.
 Every job is under 12 hours; `LLM_WALLTIME` 06:00:00 leaves headroom at 300 stocks only if the
 gateway sustains about 20 requests in flight (PLAN2 phase 15 E confirms the real per-request time).
 
+## v3 phase 4: README rewritten from the proposal
+
+- `README.md` (285 lines) now follows the proposal in `docs/proposals/Project_Proposal_IEEE.tex`:
+  project identity (Carter Tierney, MS Computer Science, Georgia State University, advisor
+  Dr. Parag Tamhankar), the abstract adapted, the research question and H1 to H5 word for word,
+  the hypothesis to test to Holm-family table, the study design (sources versus portfolios, the
+  prompt treatments, the default and requested model sets, the portfolio count formulas, the
+  output schema, the Q0/HRP/equal-weight controls, residualization and common random numbers,
+  the frozen config wording without "pre-registered", why a live run and no backtest), the
+  methodology (baseline, Ledoit-Wolf risk and prior, views and uncertainty, Black-Litterman,
+  the five strategies and controls, guardrails and simulator), the statistics (tie band, sign
+  test, exact sign-flip permutation, Newey-West, bootstrap, minimum detectable gap, Fama-French
+  primary with the ETF fallback, G6 shuffle scope), the J1 to J9 pipeline, the three-job ARCTIC
+  layout with failure handling, the compute table with the phase 3 runtime budget, quick start,
+  commands, testing, repository layout, project status and documentation.
+- The design-choice section keeps only K1, S4, S5, G3b, P1 and G6, W1, M1 in the plan's wording;
+  the old "chosen during build" list moved unchanged to `docs/build_decisions.md`.
+- Removed from the README: `config/universe.csv` (never existed in the repository), the 16,600
+  CPU hour figure, "pre-registered", "thesis", "quantitative finance", "the researcher" and
+  "the desktop". The root `Project_Proposal_IEEE.pdf` is a duplicate of
+  `docs/proposals/Project_Proposal_IEEE.pdf` and stays untracked.
+
+## v3 phase 5: documentation aligned with PLAN3
+
+- `docs/design.md`: PLAN3 intro, the G6 shuffle scope and exclusion line in the H5 paragraph,
+  Fama-French primary and ETF fallback, and a new "ARCTIC job layout" section.
+- `docs/runbook.md`: benchmark command at 24 weeks with the three-strategy projections and the
+  measured 5.6 / 85.2 CPU hours, G6 scope and shard-minute sizing in the shuffle section,
+  `run-local` as the no-cluster fallback, the three-job layout in both network modes,
+  `finish.sbatch` polling, the 15 hour rule with rerun guidance, `sacct` and `squeue` usage.
+- `docs/config_reference.md`: `eval.shuffle.strategies`, `llm.parallel_models`, the new
+  `arctic.env` variables (`GPU_MEM`, `LLM_WALLTIME`, `FINISH_WALLTIME`, `POLL_INTERVAL_MINUTES`,
+  `MAX_JOB_HOURS`, `PORTSTUDY_FINISH_FLAGS`), the gateway URL, no MiniMax `max_output_tokens`
+  override, "PLAN2 phase 15 B" instead of "v1 phase 17".
+- `docs/open_questions.md`: G6 (changed), W1 and M1 (new) in the decision table.
+- `docs/arctic_setup.md`: the known gateway URL with the GSU network or VPN requirement, W1 and
+  M1 as the two rules behind every job, the new env variables, `llm.sbatch` and `finish.sbatch`
+  in the script table, the new network layouts, and the PLAN2 phase 15 A check of the real
+  walltime limit.
+- `docs/github_setup.md` and `docs/gitlab_setup.md`: no "researcher" or "desktop" wording, the
+  public-repository runner note (no minute budget), GitLab kept as the fallback host,
+  `frozen-v2` and PLAN2 phase 15 H instead of `frozen-v1` and v1 phase 17.
+- `docs/weekend_checklist.md` replaces `docs/desktop_checklist.md` (ARCTIC three-job flow,
+  nothing stays open on a laptop); `docs/arctic_gpu_request.md` stays untracked for phase 15 D.
+- `docs/proposals/` now holds the IEEE proposal and the ARCTIC resource request (PDF and LaTeX),
+  committed unchanged. `PLAN2.md` gained the one line "Decisions G6 (changed), W1 and M1 (new)
+  are updated in PLAN3.md." and `PLAN3.md` is committed. The dated note under v3 phase 2 above
+  corrects the 16,600 CPU hour figure.
+
+## v3 phase 6: final verification and push
+
+- `pytest` (unit, integration and e2e; slow excluded): 361 passed (344 unit and integration, 17 e2e) in 27 min on this VM;
+  `pytest tests/e2e`: 17 passed in 18 min. `ruff check`, `ruff format --check`, `mypy src
+  scripts`, `refresh_manifest.py --check`, `check_placebo_length.py`, `check_banned_words.py`,
+  `check_secrets.py` and `yamllint` all clean.
+- Consistency greps (nothing found): "the researcher", "the student", "Phase 17", "the desktop" in
+  `README.md`, `docs/`, `src/`, `scripts/`, `config/`, `tests/` (the checker and its test excepted);
+  "thesis", "pre-registered", "quantitative finance" in `README.md` and `docs/`; "16,600" outside
+  `PROGRESS.md`, `results.md` and the plans; `max_output_tokens: 2048` anywhere. Found as expected:
+  the gateway URL in `config/study.yaml`, `docs/arctic_setup.md`, `docs/config_reference.md` and
+  `docs/weekend_checklist.md`; the README title, research question, H1 to H5 rows and the sign-flip,
+  Newey-West, Holm and bootstrap wording; `strategies: [mvo, robust, topk]` in both study configs;
+  `--mem-per-cpu=3G` on `llm.sbatch`, `finish.sbatch`, `shuffle_array.sbatch` and the two sbatch
+  lines in `submit_weekend.sh`; `--cpus-per-task=1` on `finish.sbatch` and `shuffle_array.sbatch`;
+  `MAX_JOB_HOURS` (15) in `common.sh` and `arctic.env.example`.
+- `bash scripts/arctic/submit_weekend.sh --week 2026-W05 --dry-run` with a filled test env file,
+  exit 0 in both modes. Compute mode: `sbatch ... --gres=gpu:1 --mem=32G --time=01:00:00
+  kronos.sbatch`, `sbatch ... --cpus-per-task=2 --mem-per-cpu=3G --time=06:00:00 llm.sbatch`,
+  `sbatch ... --cpus-per-task=1 --mem-per-cpu=3G --time=03:00:00 --dependency=afterany:<kronos>:<llm>
+  finish.sbatch`. Login mode: `portstudy run-job J1` and `run_weekend.py --from J3 --until J3` on the
+  login node first, then the same three sbatch lines with the LLM job starting at J4. The
+  `--check-walltime` warning about the 2026-W05 lock deadline is expected for a past week.
+- Pushed as ctsc (author and committer) to GitHub `origin master` first and GitLab `gitlab master`
+  second; the GitHub Actions run is checked after the push and reported in the session.
+- Not done, by design: PLAN3 phase 7 (Carter's manual work) and PLAN2 phase 15.

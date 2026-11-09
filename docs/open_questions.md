@@ -33,7 +33,9 @@ date and reason and flagged in the analysis. Code never changes a decision value
 | G3b | H3b width split | per source and week, narrow width at or below median vs the rest; narrow-minus-wide rank IC | confirmed (design choice) |
 | P1 | skills length tolerance | each skills file within 5% of mean skills length; placebo within 2% | confirmed (design choice) |
 | G4 | H4 | strategy ranking by mean weekly gap vs own Q0, plus v1 splits | confirmed |
-| G6 | shuffle test | 500 shuffles for each steered portfolio, including each strategy's Q0 | confirmed |
+| G6 | shuffle test | 500 shuffles for the MVO, Robust MVO and Top-K portfolios (steered and Q0) only; Mean-CVaR and Resampled MVO excluded for compute (changed in PLAN3) | confirmed |
+| W1 | Slurm walltime | every job requests at most 15 hours (target 12 or less) and never waits idle on anything outside the cluster (PLAN3) | confirmed |
+| M1 | Slurm memory | CPU jobs request `--mem-per-cpu=3G` and only the cores the work uses (PLAN3) | confirmed |
 | G7 | Holm families | IC tests as v1; portfolio return and shuffle tests one family per strategy | confirmed |
 | N2 | weekly trigger | one hand-run submit script on ARCTIC; no scheduler | confirmed |
 | A2, A3, A6, B2, C1, C2, C4, C7, E3, E4, E5, G5, N1, N3 | unchanged decisions | retain v1 values as listed in `PLAN2.md` | confirmed |
@@ -65,7 +67,9 @@ The table below records the values used before PLAN2 superseded them.
 | G3 | real H3 effect | paired weekly test passes after Holm, placebo as control | confirmed | `eval.holm_families`, `decisions[G3]` | `eval/hypotheses.py` |
 | G4 | H4 splits | market up/down, volatility, earnings week | confirmed | `eval.h4_splits`, `decisions[G4]` | `eval/hypotheses.py` |
 | G5 | factor regression | daily returns | confirmed | `eval.factor_frequency`, `decisions[G5]` | `eval/factors.py` |
-| G6 | shuffled-ratings test | every portfolio plus Q0, 500 shuffles each | confirmed | `eval.shuffle.n_shuffles`, `decisions[G6]` | `eval/shuffle.py` |
+| G6 | shuffled-ratings test | MVO, Robust MVO and Top-K portfolios plus their Q0s, 500 shuffles each; Mean-CVaR and Resampled MVO excluded (PLAN3) | confirmed | `eval.shuffle.n_shuffles`, `eval.shuffle.strategies`, `decisions[G6]` | `eval/shuffle.py` |
+| W1 | Slurm walltime | at most 15 hours per job, target 12 or less, no idle waiting on external work (PLAN3) | confirmed | `decisions[W1]`, `scripts/arctic/arctic.env` | `scripts/arctic/common.sh` |
+| M1 | Slurm memory | `--mem-per-cpu=3G` on CPU jobs, only the cores used (PLAN3) | confirmed | `decisions[M1]`, `scripts/arctic/arctic.env` | `scripts/arctic/*.sbatch` |
 | N1 | failure rule | invalid rate above 0.15, or local job or batch not finished by the lock | confirmed | `llm.invalid_rate_threshold`, `pipeline.lock_margin_minutes`, `decisions[N1]` | `llm/runner.py` (`assess_run`), `pipeline/jobs.py`, `pipeline/fallback.py` |
 | N2 | weekly trigger | one hand-run script, no scheduler | confirmed | `decisions[N2]` | `scripts/run_weekend.py` |
 | N3 | storage and backup | CSV files; dated folders downloaded weekly | confirmed | `backup.*`, `decisions[N3]` | `backup.py` |

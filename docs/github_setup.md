@@ -2,11 +2,11 @@
 
 GitHub (`https://github.com/ctsc/llm_portfolio_management`) hosts the source and runs lint and
 tests in GitHub Actions on every push. It never runs the weekly pipeline (decision N2): that is the
-researcher's hand-run `scripts/run_weekend.py`. GitLab is the fallback host (`docs/gitlab_setup.md`).
+Carter's hand-run `scripts/run_weekend.py`. GitLab is the fallback host (`docs/gitlab_setup.md`).
 
 ## 1. Remotes
 
-The desktop checkout has two remotes:
+Carter's local checkout has two remotes:
 
 ```
 origin   https://github.com/ctsc/llm_portfolio_management.git   (primary)
@@ -22,7 +22,7 @@ git push gitlab master
 
 To recreate the remotes on a fresh clone: `git remote add origin <github url>` and
 `git remote add gitlab <gitlab url>`. The `.gitattributes` file keeps every text file on LF line
-endings, so the Linux runner and the Windows desktop see the same bytes.
+endings, so the Linux runner and a Windows checkout see the same bytes.
 
 ## 2. The workflow
 
@@ -33,7 +33,7 @@ endings, so the Linux runner and the Windows desktop see the same bytes.
 | `lint` | every push and pull request | `ruff check`, `mypy` |
 | `test` | every push and pull request | `pytest tests/unit` with coverage (artifact `coverage.xml`) |
 | `integration` | default branch only | `pytest tests/integration` |
-| `e2e` | default branch only | `pytest tests/e2e -q` (the 30-week rehearsal, about 15 minutes) |
+| `e2e` | default branch only | `pytest tests/e2e -q` (the 30-week rehearsal, about 15 to 20 minutes) |
 | `slow` | by hand: Actions, "ci", Run workflow, tick "slow" | `pytest -m slow tests` (the 300-stock benchmark) |
 | `checks` | every push and pull request | prompt manifest hashes, placebo length, banned words, secret patterns, yamllint |
 
@@ -49,9 +49,9 @@ phase checklist test counts one commit per phase. Python 3.11 with a pip cache i
 
 ## 4. Notes
 
-- A private repository on the free plan has 2,000 Actions minutes a month; the default-branch
-  run (unit, integration, e2e) uses about 35 minutes, so pushing feature branches is cheap and
-  pushing `master` is the expensive step.
+- The repository is public, so standard GitHub-hosted runners are free and there is no monthly
+  minute budget to manage; the default-branch run (unit, integration, e2e) takes about 11 minutes
+  of wall time because the jobs run in parallel.
 - If a push fails the `checks` job after you edit a prompt file, bump the configuration
   `version` in `config/prompts_manifest.yaml`, rename the file to carry the new version, and run
   `python scripts/refresh_manifest.py --write` before committing.

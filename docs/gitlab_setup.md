@@ -3,7 +3,7 @@
 The project moved to GitHub (`docs/github_setup.md`) once that account was available again;
 GitLab stays configured as the remote `gitlab` and `.gitlab-ci.yml` is kept current, so a return
 to GitLab needs no code change. GitLab hosts a mirror of the source and runs lint and tests in CI on every push. It never runs the weekly
-pipeline (decision N2): that is the researcher's hand-run `scripts/run_weekend.py` on the desktop.
+pipeline (decision N2): that is Carter's hand-run `scripts/run_weekend.py`.
 
 ## 1. Create the project
 
@@ -12,7 +12,7 @@ pipeline (decision N2): that is the researcher's hand-run `scripts/run_weekend.p
 
 ## 2. Push the repository
 
-From the repository root on the desktop:
+From the repository root of any checkout:
 
 ```
 git remote add origin <project url>
@@ -21,7 +21,7 @@ git push origin --tags
 ```
 
 The `.gitattributes` file keeps every text file on LF line endings, so the Linux runner and the
-Windows desktop see the same bytes.
+Windows checkout see the same bytes.
 
 ## 3. Confirm the pipeline passes
 
@@ -29,7 +29,7 @@ Windows desktop see the same bytes.
 2. Stages: `lint` (ruff, mypy), `test` (pytest over `tests/unit` and `tests/integration` with
    coverage), `checks` (prompt manifest hashes, placebo length, banned words, secret patterns,
    yamllint). The `e2e` job runs only on the default branch.
-3. Every stage must be green before the repository is tagged `frozen-v1` (v1 phase 17 E2).
+3. Every stage must be green before the repository is tagged `frozen-v2` (PLAN2 phase 15 H).
 
 ## 4. Notes
 

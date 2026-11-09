@@ -96,12 +96,16 @@ the live start must be logged and versioned the same way (see `docs/open_questio
 freezing it, run the optimizer benchmark at the candidate size:
 
 ```
-python scripts/benchmark_pipeline.py --n-stocks 300 --sources 3 --weeks 52
+python scripts/benchmark_pipeline.py --n-stocks 300 --sources 3 --weeks 24
 ```
 
 It prints seconds per solve for every strategy and control, the weekly J7 time at the given and
 at the projected source count (`--project-sources`, default 51), peak memory, and the projected
-shuffle CPU hours, warning when the projection exceeds the 15,000 CPU hour request. The same table
+shuffle CPU hours for the G6 strategies only (`eval.shuffle.strategies`: MVO, Robust MVO, Top-K),
+per strategy and in total, warning only above 15,000 CPU hours. `--replay-seconds` adds a measured
+simulator replay time per shuffle-week to a second projection; without it the solve-only figure is
+printed and labeled as such. PLAN3 phase 2 measured 5.6 CPU hours at 100 stocks and 85.2 at 300
+(24 weeks, 51 sources, this VM); the full table is in `PROGRESS.md`. The same table
 is written to `data/benchmarks/<date>.csv`. `--jobs` times J1 to J9 once on the synthetic world
 instead. When the universe is built, the log shows `universe_thin_sector` for every sector that
 could not fill its quota and `universe_leftover_slots` for the slots filled by the highest-volume
@@ -116,9 +120,15 @@ portstudy shuffle run-local --processes 8                   # same work on one m
 portstudy shuffle collect                                   # fails listing missing shards
 ```
 
-Shards can run in any order and any number of times; a complete shard file is skipped and a
-half-written one (no `complete` marker) is rerun. `collect` writes `h5_shuffle.csv` and the
-distributions to the report folder with Holm applied within each strategy.
+Only the G6 strategies are sharded: each of MVO, Robust MVO and Top-K contributes its Q0 and its
+steered portfolios; Mean-CVaR, Resampled MVO and the controls never appear in the plan. `plan`
+prints the estimated minutes per shard from the newest `data/benchmarks/*.csv` (slowest shuffled
+strategy, one solve per week per shuffle) and lowers the shard size in the plan when a shard would
+exceed `--max-shard-minutes` (120) without touching `eval.shuffle.shard_size`. Shards can run in
+any order and any number of times; a complete shard file is skipped and a half-written one (no
+`complete` marker) is rerun. `collect` writes `h5_shuffle.csv` and the distributions to the report
+folder with Holm applied within each strategy. Without the cluster, `run-local --processes N`
+runs the same shards on one machine and `collect` reads them the same way.
 
 ## 9. The ARCTIC weekend
 
@@ -127,18 +137,26 @@ Setup is in `docs/arctic_setup.md`; everything below assumes `scripts/arctic/arc
 **Compute mode** (`ARCTIC_NETWORK_MODE=compute`, compute nodes reach the internet):
 
 ```
-bash scripts/arctic/submit_weekend.sh            # kronos.sbatch (J1, J2) then weekend.sbatch (J3 to J9) afterok
+bash scripts/arctic/submit_weekend.sh   # kronos.sbatch (J1, J2) and llm.sbatch (J3, J4) at once; finish.sbatch afterany both
 ```
 
 **Login mode** (`ARCTIC_NETWORK_MODE=login`, only the login node has network):
 
 ```
-bash scripts/arctic/submit_weekend.sh            # J1 here, kronos.sbatch (J2), J3 to J5 here, weekend.sbatch (J6 to J9) afterok
+bash scripts/arctic/submit_weekend.sh   # J1 and J3 here, then kronos.sbatch (J2), llm.sbatch (J4), finish.sbatch afterany both
 ```
 
 Both print the job ids, the log paths under `logs/arctic/`, and the exact rerun command for each job.
-The script warns when `WEEKEND_WALLTIME` ends after the Monday 09:00 ET lock; shorten the walltime or
-submit earlier. A job killed by walltime mid-J7 is resumed with `python scripts/run_weekend.py --from J7`.
+The finish job (1 core, `FINISH_WALLTIME` 03:00:00) runs J5 once with `--poll-once`; while API
+batches are pending it resubmits itself `POLL_INTERVAL_MINUTES` later (default 60) and exits, so
+no job sits idle; once collected it runs J6 to J9. Nothing polls a batch from the login shell.
+Every walltime must be at most 15 hours (`MAX_JOB_HOURS`, W1): `common.sh` refuses longer ones
+and `run_weekend.py --check-walltime` warns above 12 or when a walltime ends after the Monday
+09:00 ET lock. A job killed by its walltime is rerun from the job it was in, for example
+`python scripts/run_weekend.py --from J7` (every job resumes from its status files) or
+`sbatch ... scripts/arctic/finish.sbatch` again. Service-unit use per job:
+`sacct -j <jobid> --format=JobID,Elapsed,AllocCPUS,MaxRSS,State`; `squeue -u $USER` shows what is
+still queued, including a finish job waiting on `--begin`.
 
 **D2, gateway down.** Before J4 the pipeline sends one tiny prompt per gateway model. On a failure it
 prints these steps and continues with the affected sources marked failed (they trade their strategy's Q0):

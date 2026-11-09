@@ -20,6 +20,8 @@ gives the id from `PLAN2.md` section 0.3 where one applies; code tags each use w
 | `ARCTIC_FALLBACK_API_KEY` | Key for the D2 fallback server, if it requires one (optional). |
 | `ARCTIC_ENV` | Path of the filled-in `scripts/arctic/arctic.env` (default: next to the scripts). |
 | `ARCTIC_NETWORK_MODE` | `compute` or `login`, from `arctic.env`; selects which jobs run where. |
+| `GPU_MEM`, `LLM_WALLTIME`, `FINISH_WALLTIME`, `POLL_INTERVAL_MINUTES`, `MAX_JOB_HOURS` | From `arctic.env` (PLAN3 phase 3): host memory for GPU jobs (`sbatch --mem`), walltimes of `llm.sbatch` and `finish.sbatch`, the finish job's resubmission delay (default 60), and the walltime ceiling `common.sh` enforces (15, W1). |
+| `PORTSTUDY_FINISH_FLAGS` | Set by `submit_weekend.sh`: the sbatch flags `finish.sbatch` reuses when it resubmits itself. |
 | `PORTSTUDY_WEEK`, `PORTSTUDY_FROM`, `PORTSTUDY_GATEWAY_FALLBACK` | Set by `submit_weekend.sh` for the sbatch jobs: week, first job, D2 flag. |
 | `PORTSTUDY_SHARDS` | Shard plan CSV read by `shuffle_array.sbatch` (default `data/shuffle/shards.csv`). |
 | `PORTSTUDY_FALLBACK_PORT` | Port of the D2 fallback server (default 8000). |
@@ -51,7 +53,7 @@ Keys go in a `.env` file outside the repository (on ARCTIC, in `$HOME`, mode 600
 | `lock_deadline_time_et` | 09:00 | Monday weight lock, 30 minutes before the open | |
 | `pilot_week` | null | ISO week of the pilot, excluded from results | |
 | `live_start_week` | null | First live week (the week after the pilot passes) | A2 |
-| `live_end_date` | null | Last live date, set by the researcher, no later than the April deadline | A3 |
+| `live_end_date` | null | Last live date, set by Carter before the freeze | A3 |
 
 ### data
 
@@ -79,7 +81,7 @@ Keys go in a `.env` file outside the repository (on ARCTIC, in `$HOME`, mode 600
 |---|---|---|---|
 | `forecaster` | stub | `stub` or `kronos` | |
 | `momentum_lookbacks.long/skip/medium/short` | 252/21/63/21 | M12_1, M3, R1 windows | |
-| `kronos.repo_commit` | UNPINNED | Pinned `vendor/kronos` commit (v1 phase 17) | |
+| `kronos.repo_commit` | UNPINNED | Pinned `vendor/kronos` commit (PLAN2 phase 15 B) | |
 | `kronos.model_id`, `kronos.tokenizer_id` | NeoQuasar/Kronos-base, NeoQuasar/Kronos-Tokenizer-base | Hugging Face ids | |
 | `kronos.context_candles`, `horizon`, `n_samples`, `temperature`, `top_p`, `seed` | 252, 5, 20, 1.0, 0.9, 7 | Sampling settings | |
 | `kronos.input_prices` | adjusted | Adjusted OHLCV in | E4 |
@@ -111,7 +113,8 @@ Keys go in a `.env` file outside the repository (on ARCTIC, in `$HOME`, mode 600
 | `invalid_rate_threshold` | 0.15 | Failure rule | N1 |
 | `retry_invalid_once` | true | One retry on an invalid answer | |
 | `batch_retry_count` | 1 | Resubmissions of failed batch items | |
-| `api_poll_seconds` | 300 | J5 polling interval in `run_weekend.py` | |
+| `api_poll_seconds` | 300 | J5 polling interval in `run_weekend.py` (without `--poll-once`) | |
+| `parallel_models` | true | J4 runs every enabled open-weight model in its own worker with its own `concurrency` pool; `study_test.yaml` sets false for identical digests (PLAN3 phase 3) | W1 |
 | `settings_default`, `settings.<model>` | temperature 0, seed 1234, max_output_tokens 300, reasoning none | Per-model overrides of `models.yaml` settings | |
 | `model_ids`, `prompt_ids` | [] | Empty selects all enabled models and prompts; lists restrict the source set | |
 
@@ -169,6 +172,7 @@ failed this long before the lock so that J7 can still write; decision N1).
 | `min_group_size` | 10 | Minimum stocks per group for the earnings split IC | |
 | `h3b.split`, `h3b.min_group_size` | median, 10 | H3b width split per source-week; weeks with a smaller group or all-equal widths are skipped | G3b |
 | `shuffle.n_shuffles`, `seed`, `processes`, `shard_size` | 500, 99, 1, 25 | Shuffled-ratings test; `shard_size` shuffles per shard file (one Slurm array task) | G6 |
+| `shuffle.strategies` | [mvo, robust, topk] | Strategies whose steered and Q0 portfolios are shuffled; must be enabled strategies; Mean-CVaR and Resampled MVO excluded for compute (PLAN3) | G6 |
 
 ### backup
 
@@ -190,8 +194,10 @@ code. See `docs/open_questions.md`.
 zero prices; API prices follow D3.
 
 `llm.concurrency` sets per-model open-weight worker counts, defaulting to four when omitted.
-`llm.settings` supports `send_seed` and `json_mode`. The `llm.gateway` section contains the
-gateway `base_url` and `fallback_endpoint_file`. The fallback JSON file requires a `base_url` or
+`llm.settings` supports `send_seed` and `json_mode`; no model overrides `max_output_tokens` until
+PLAN2 phase 15 E shows a need. The `llm.gateway` section contains the gateway `base_url`
+(`https://litellm.rs.gsu.edu/v1`, the ARCTIC LiteLLM gateway; GSU network or VPN required) and
+`fallback_endpoint_file`. The fallback JSON file requires a `base_url` or
 `url`, may specify `week_id`, and must be newer than the source run.
 
 ## prompts_manifest.yaml

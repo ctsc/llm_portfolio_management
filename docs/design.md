@@ -1,8 +1,7 @@
 # Design: one page per pipeline stage
 
-The formulas below describe the v1 pipeline stages retained through v2 phase 1. `PLAN2.md` is
-the current specification and v2 phases 2 onward replace the formulas they change. Each stage
-names the module that implements it.
+One section per pipeline stage, current as of PLAN3. PLAN2.md section 0.3 and PLAN3.md section 0.1
+hold the decisions. Each stage names the module that implements it.
 
 ## Source and portfolio identities (`types.py`)
 
@@ -203,9 +202,13 @@ the data and are counted per portfolio in the metrics table, with the mean `view
 with the portfolio count, weeks, fallback and fallback-served weeks, and the K1, S4, S5, G3b, and
 P1 values read from config, then one section per strategy (metrics, H2 return table, H5 table,
 equity curve with its Q0, steered portfolios, HRP, and EW) and a warning for any strategy whose
-mean `view_shift` is below 0.01. H5: factor regression on daily returns for every portfolio (G5)
-and the shuffled-ratings test over every steered portfolio and each strategy's Q0, Holm within
-each strategy, with view strength held fixed (G6).
+mean `view_shift` is below 0.01. H5: factor regression on daily returns for every portfolio (G5),
+with the Fama-French five-factor file (`eval.fama_french_file`) as the primary regressors in the
+live study and the ETF proxies only as the offline fallback; and the shuffled-ratings test over
+the MVO, Robust MVO and Top-K steered portfolios and those three strategies' Q0s, 500 shuffles
+each, Holm within each strategy, with view strength held fixed (G6). Mean-CVaR and Resampled MVO
+have no shuffle test (about 99 percent of the shuffle compute); the report prints an exclusion
+line for each and their Q0 comparison and factor regression stand.
 
 ### Sharded shuffle (`eval/shuffle.py`, v2 phase 11)
 
@@ -220,6 +223,25 @@ atomically with `complete: true`, skips a complete file, and reruns a file witho
 in-process first. A portfolio with no clean weeks is written as skipped and reported. The primary paired p-value is the exact sign-flip
 permutation; Newey-West is reported beside it. Gaps below the minimum detectable gap are
 inconclusive, not evidence of no effect. A null result is acceptable.
+
+## ARCTIC job layout (`scripts/arctic/`, PLAN3 phase 3)
+
+Three Slurm jobs per weekend, submitted by `submit_weekend.sh`: `kronos.sbatch` (J1, J2 on a GPU
+node, `--mem=$GPU_MEM`) and `llm.sbatch` (J3 then J4, 2 CPU cores, `--mem-per-cpu=3G`) start at
+the same time with no dependency between them, because J4 never reads the Kronos output;
+`finish.sbatch` (1 core, `--mem-per-cpu=3G`, `FINISH_WALLTIME` 03:00:00) runs with
+`--dependency=afterany` on both. The finish job runs J5 once with `run_weekend.py --poll-once`:
+exit 3 (batches pending before the lock margin) makes it resubmit itself with
+`--begin=now+${POLL_INTERVAL_MINUTES}minutes` and exit; exit 0 lets it run J6 to J9 in the same
+job. At the lock margin J6 marks the pending sources failed (N1) and the run continues. In
+`login` network mode J1 and J3 run on the login node first and the LLM job runs J4 only; no
+batch is ever polled from the login shell. `J7` refuses to run until J6 is done and, unless J6
+planned a hold, J2 is done and J4 is done or every open-weight source carries its fallback mark.
+Inside J4 every enabled open-weight model has its own worker (`llm.parallel_models`), its own
+`llm.concurrency` pool and its own record files; a crashed worker marks that model's sources
+failed and the others finish. `common.sh` refuses any walltime above `MAX_JOB_HOURS` (15, W1)
+and warns above 12; `shuffle_array.sbatch` runs one shard per task on one core (M1), and
+`portstudy shuffle plan` lowers the shard size in the plan when a shard would run past two hours.
 
 ## v2 in one page
 
