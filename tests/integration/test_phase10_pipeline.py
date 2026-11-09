@@ -38,14 +38,29 @@ import run_weekend  # noqa: E402
 
 ALL_JOBS = ["J1", "J2", "J3", "J4", "J5", "J6", "J7", "J8", "J9"]
 
-def make_ctx(cfg: StudyConfig, registry: ModelRegistry, world: SyntheticWorld, week: str,
-             llm_providers: dict[str, LlmProvider] | None = None,
-             clock: Callable[[], dt.datetime] | None = None, allow_over_budget: bool = False,
-             data_providers: ProviderBundle | None = None, force: bool = False) -> RunContext:
-    return RunContext(cfg=cfg, registry=registry, manifest=load_manifest(), synthetic=True,
-                      allow_over_budget=allow_over_budget, force=force,
-                      data_providers=data_providers or synthetic_bundle(world),
-                      llm_providers=llm_providers or {}, clock=clock or synthetic_clock(week))
+
+def make_ctx(
+    cfg: StudyConfig,
+    registry: ModelRegistry,
+    world: SyntheticWorld,
+    week: str,
+    llm_providers: dict[str, LlmProvider] | None = None,
+    clock: Callable[[], dt.datetime] | None = None,
+    allow_over_budget: bool = False,
+    data_providers: ProviderBundle | None = None,
+    force: bool = False,
+) -> RunContext:
+    return RunContext(
+        cfg=cfg,
+        registry=registry,
+        manifest=load_manifest(),
+        synthetic=True,
+        allow_over_budget=allow_over_budget,
+        force=force,
+        data_providers=data_providers or synthetic_bundle(world),
+        llm_providers=llm_providers or {},
+        clock=clock or synthetic_clock(week),
+    )
 
 
 def run_week(ctx: RunContext, week: str, jobs: list[str] = ALL_JOBS) -> dict[str, str]:
@@ -61,16 +76,23 @@ def with_api_models(cfg: StudyConfig) -> StudyConfig:
     return cfg.model_copy(update={"llm": cfg.llm.model_copy(update={"model_ids": ids})})
 
 
-def test_every_job_runs_alone_and_rerun_is_idempotent(pipeline_dir: Path, study_config: StudyConfig,
-                                                     model_registry: ModelRegistry, world: SyntheticWorld,
-                                                     inject_week: str) -> None:
+def test_every_job_runs_alone_and_rerun_is_idempotent(
+    pipeline_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    inject_week: str,
+) -> None:
     cfg = _cfg(study_config)
     ctx = make_ctx(cfg, model_registry, world, inject_week)
     first = run_week(ctx, inject_week)
     assert all(s == "done" for s in first.values()), first
     scores = read_scores(inject_week)
     n_models, n_conf = len(ctx.models()), len(ctx.prompt_ids())
-    assert len(scores) == n_models * n_conf * 100 and not scores.duplicated(["model", "config_id", "ticker"]).any()
+    assert (
+        len(scores) == n_models * n_conf * 100
+        and not scores.duplicated(["model", "config_id", "ticker"]).any()
+    )
     trades_before = {k: len(read_trades(k)) for k in ctx.portfolio_keys()}
     daily_before = read_daily("mvo__Q0")
     # Second pass: deterministic jobs are skipped, forced ones re-run without duplicating anything.
@@ -89,8 +111,13 @@ def test_every_job_runs_alone_and_rerun_is_idempotent(pipeline_dir: Path, study_
     assert lock.exists()
 
 
-def test_j4_crash_then_resume(pipeline_dir: Path, study_config: StudyConfig, model_registry: ModelRegistry,
-                              world: SyntheticWorld, inject_week: str) -> None:
+def test_j4_crash_then_resume(
+    pipeline_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    inject_week: str,
+) -> None:
     cfg = _cfg(study_config)
     crashing = StubLlmProvider("stub-ow-a", failures=StubFailures(crash_after_calls=50))
     ctx = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-ow-a": crashing})
@@ -108,9 +135,13 @@ def test_j4_crash_then_resume(pipeline_dir: Path, study_config: StudyConfig, mod
     assert fb.week_status_for(inject_week, "mvo__stub-ow-a__bare") == "normal"
 
 
-def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_config: StudyConfig,
-                                                      model_registry: ModelRegistry, world: SyntheticWorld,
-                                                      inject_week: str) -> None:
+def test_j5_batch_never_returns_is_a_labeled_fallback(
+    pipeline_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    inject_week: str,
+) -> None:
     cfg = with_api_models(_cfg(study_config))
     stuck = StubLlmProvider("stub-api-a", failures=StubFailures(batch_never_returns=True))
     ctx = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-api-a": stuck})
@@ -120,8 +151,17 @@ def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_
     with pytest.raises(JobFailed):
         run_named(ctx, "J6", inject_week)
     # At the margin the batch counts as failed (N1) and J7 still writes before the lock.
-    margin = lock_deadline(inject_week, cfg) - dt.timedelta(minutes=cfg.pipeline.lock_margin_minutes - 1)
-    late = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-api-a": stuck}, clock=lambda: margin)
+    margin = lock_deadline(inject_week, cfg) - dt.timedelta(
+        minutes=cfg.pipeline.lock_margin_minutes - 1
+    )
+    late = make_ctx(
+        cfg,
+        model_registry,
+        world,
+        inject_week,
+        llm_providers={"stub-api-a": stuck},
+        clock=lambda: margin,
+    )
     assert run_named(late, "J6", inject_week).state == "done"
     plan = fb.read_plan(inject_week)
     assert plan is not None
@@ -142,11 +182,30 @@ def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_
     assert fb.clean_weeks("mvo__stub-api-a__bare", weeks) == weeks[:PIPELINE_WEEKS]
     assert fb.fallback_weeks("mvo__stub-api-a__bare") == {inject_week}
     store = ICStore()
-    store.upsert([{"week_id": w, "signal": "llm_resid", "model": "stub-api-a", "config_id": "bare",
-                   "rank_ic": 0.9 if w == inject_week else 0.1, "n_stocks": 100} for w in cal.week_range(weeks[0], 12)])
+    store.upsert(
+        [
+            {
+                "week_id": w,
+                "signal": "llm_resid",
+                "model": "stub-api-a",
+                "config_id": "bare",
+                "rank_ic": 0.9 if w == inject_week else 0.1,
+                "n_stocks": 100,
+            }
+            for w in cal.week_range(weeks[0], 12)
+        ]
+    )
     later = cal.week_range(weeks[0], 12)[9]
-    with_excl = trailing_ic(store, "llm_resid", later, cfg.views, weeks[0], "stub-api-a", "bare",
-                            fallback_weeks=fb.fallback_weeks("mvo__stub-api-a__bare"))
+    with_excl = trailing_ic(
+        store,
+        "llm_resid",
+        later,
+        cfg.views,
+        weeks[0],
+        "stub-api-a",
+        "bare",
+        fallback_weeks=fb.fallback_weeks("mvo__stub-api-a__bare"),
+    )
     assert with_excl == pytest.approx(0.1)
     assert run_named(late, "J8", inject_week).state == "done"
     trades = read_trades("mvo__stub-api-a__bare")
@@ -156,11 +215,22 @@ def test_j5_batch_never_returns_is_a_labeled_fallback(pipeline_dir: Path, study_
     assert (daily.loc[daily["week_id"] == inject_week, "week_status"] == "fallback").all()
 
 
-def test_j3_cost_cap_blocks_then_allow_over_budget(pipeline_dir: Path, study_config: StudyConfig,
-                                                   model_registry: ModelRegistry, world: SyntheticWorld,
-                                                   inject_week: str) -> None:
-    tight = with_api_models(study_config.model_copy(update={"llm": study_config.llm.model_copy(
-        update={"cost_goal_usd": 0.001, "cost_warn_usd": 0.001})}))
+def test_j3_cost_cap_blocks_then_allow_over_budget(
+    pipeline_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    inject_week: str,
+) -> None:
+    tight = with_api_models(
+        study_config.model_copy(
+            update={
+                "llm": study_config.llm.model_copy(
+                    update={"cost_goal_usd": 0.001, "cost_warn_usd": 0.001}
+                )
+            }
+        )
+    )
     ctx = make_ctx(tight, model_registry, world, inject_week)
     run_week(ctx, inject_week, ["J1", "J2"])
     with pytest.raises(JobFailed) as info:
@@ -172,9 +242,13 @@ def test_j3_cost_cap_blocks_then_allow_over_budget(pipeline_dir: Path, study_con
     assert list((pipeline_dir / "outputs" / inject_week / "llm").glob("batch_*.json"))
 
 
-def test_invalid_rate_above_threshold_falls_back(pipeline_dir: Path, study_config: StudyConfig,
-                                                 model_registry: ModelRegistry, world: SyntheticWorld,
-                                                 inject_week: str) -> None:
+def test_invalid_rate_above_threshold_falls_back(
+    pipeline_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    inject_week: str,
+) -> None:
     cfg = _cfg(study_config)
     noisy = StubLlmProvider("stub-ow-b", failures=StubFailures(invalid_rate=0.5))
     ctx = make_ctx(cfg, model_registry, world, inject_week, llm_providers={"stub-ow-b": noisy})
@@ -193,14 +267,18 @@ def test_invalid_rate_above_threshold_falls_back(pipeline_dir: Path, study_confi
         read_weights(inject_week, "mvo__stub-ow-b__skills_1"),
     )
     log = fb.read_log(inject_week)
-    assert sum(1 for e in log if e["status"] == "fallback") == len(
-        cfg.strategies.enabled
-    ) * len(cfg.llm.prompt_ids)
+    assert sum(1 for e in log if e["status"] == "fallback") == len(cfg.strategies.enabled) * len(
+        cfg.llm.prompt_ids
+    )
 
 
-def test_j1_data_failure_gives_no_rebalance(pipeline_dir: Path, study_config: StudyConfig,
-                                            model_registry: ModelRegistry, world: SyntheticWorld,
-                                            inject_week: str) -> None:
+def test_j1_data_failure_gives_no_rebalance(
+    pipeline_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    inject_week: str,
+) -> None:
     cfg = _cfg(study_config)
     bundle = synthetic_bundle(world)
 
@@ -208,8 +286,13 @@ def test_j1_data_failure_gives_no_rebalance(pipeline_dir: Path, study_config: St
         def get_prices(self, tickers: list[str], start: dt.date, end: dt.date) -> pd.DataFrame:
             raise ConnectionError("provider down")
 
-    broken = ProviderBundle(prices=Broken(world), news=bundle.news, reference=bundle.reference,
-                            rates=bundle.rates, members=bundle.members)
+    broken = ProviderBundle(
+        prices=Broken(world),
+        news=bundle.news,
+        reference=bundle.reference,
+        rates=bundle.rates,
+        members=bundle.members,
+    )
     ctx = make_ctx(cfg, model_registry, world, inject_week, data_providers=broken)
     with pytest.raises(JobFailed):
         run_named(ctx, "J1", inject_week)
@@ -217,12 +300,20 @@ def test_j1_data_failure_gives_no_rebalance(pipeline_dir: Path, study_config: St
         run_named(ctx, "J2", inject_week)
     assert run_named(ctx, "J6", inject_week).state == "done"
     plan = fb.read_plan(inject_week)
-    assert plan is not None and plan.no_rebalance and plan.no_rebalance_reason == "baseline_unavailable"
+    assert (
+        plan is not None
+        and plan.no_rebalance
+        and plan.no_rebalance_reason == "baseline_unavailable"
+    )
     assert run_named(ctx, "J7", inject_week).state == "done"
-    assert fb.read_log(inject_week) == [{"portfolio": "*", "status": "no_rebalance", "reason": "baseline_unavailable"}]
+    assert fb.read_log(inject_week) == [
+        {"portfolio": "*", "status": "no_rebalance", "reason": "baseline_unavailable"}
+    ]
     assert fb.week_status_for(inject_week, "mvo__Q0") == "no_rebalance"
     plans = build_plans(ctx, cal.week_range(study_config.synthetic.first_week, PIPELINE_WEEKS + 1))
-    assert plans["mvo__Q0"][-1].weights is None and plans["mvo__Q0"][-1].week_status == "no_rebalance"
+    assert (
+        plans["mvo__Q0"][-1].weights is None and plans["mvo__Q0"][-1].week_status == "no_rebalance"
+    )
     # The replay still runs: positions are held, stops still apply, records are labeled.
     healthy = make_ctx(cfg, model_registry, world, inject_week)
     assert run_named(healthy, "J8", inject_week).state == "done"
@@ -232,8 +323,13 @@ def test_j1_data_failure_gives_no_rebalance(pipeline_dir: Path, study_config: St
     assert not ((trades["week_id"] == inject_week) & (trades["reason"] == "rebalance")).any()
 
 
-def test_j7_lock_refuses_late_write(pipeline_dir: Path, study_config: StudyConfig, model_registry: ModelRegistry,
-                                    world: SyntheticWorld, inject_week: str) -> None:
+def test_j7_lock_refuses_late_write(
+    pipeline_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    inject_week: str,
+) -> None:
     cfg = _cfg(study_config)
     ctx = make_ctx(cfg, model_registry, world, inject_week)
     run_week(ctx, inject_week, ["J1", "J2", "J3", "J4", "J5", "J6"])
@@ -245,17 +341,31 @@ def test_j7_lock_refuses_late_write(pipeline_dir: Path, study_config: StudyConfi
     assert not (pipeline_dir / "outputs" / inject_week / "weights" / "locked.json").exists()
 
 
-def test_run_weekend_resumes_after_each_step(pipeline_dir: Path, study_config: StudyConfig,
-                                             model_registry: ModelRegistry, world: SyntheticWorld,
-                                             inject_week: str, monkeypatch: pytest.MonkeyPatch,
-                                             capsys: pytest.CaptureFixture[str]) -> None:
+def test_run_weekend_resumes_after_each_step(
+    pipeline_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+    inject_week: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import portstudy.pipeline.jobs as jobs_mod
 
     cfg = _cfg(study_config)
     # Point the script at the shared world and a generous budget without touching the files.
-    monkeypatch.setattr(run_weekend, "default_context",
-                        lambda **kw: make_ctx(cfg, model_registry, world, inject_week, clock=kw.get("clock"),
-                                              allow_over_budget=kw.get("allow_over_budget", False)))
+    monkeypatch.setattr(
+        run_weekend,
+        "default_context",
+        lambda **kw: make_ctx(
+            cfg,
+            model_registry,
+            world,
+            inject_week,
+            clock=kw.get("clock"),
+            allow_over_budget=kw.get("allow_over_budget", False),
+        ),
+    )
     assert run_weekend.main(["--synthetic", "--week", inject_week, "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "step 1" in out and "J1: pending" in out
@@ -272,6 +382,7 @@ def test_run_weekend_resumes_after_each_step(pipeline_dir: Path, study_config: S
                 state["next"] += 1
                 raise RuntimeError(f"injected hard stop in {name}")
             return real_jobs[name](ctx, week)
+
         return run_or_die
 
     for name in real_jobs:
@@ -289,6 +400,10 @@ def test_run_weekend_resumes_after_each_step(pipeline_dir: Path, study_config: S
     out = capsys.readouterr().out
     assert rc == 0, out
     assert f"Summary for {inject_week}" in out and "locked_at" in out
-    assert all(st.state in ("done", "skipped") for job, st in all_statuses(inject_week).items() if job != "J8")
+    assert all(
+        st.state in ("done", "skipped")
+        for job, st in all_statuses(inject_week).items()
+        if job != "J8"
+    )
     n_models, n_conf = len(study_config.llm.model_ids), len(study_config.llm.prompt_ids)
     assert len(read_scores(inject_week)) == n_models * n_conf * 100

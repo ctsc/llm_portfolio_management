@@ -1,7 +1,7 @@
 """Finnhub adapter for earnings calendar dates.
 
 Written against https://finnhub.io/docs/api/earnings-calendar
-# UNVERIFIED: needs real-key smoke test (Phase 17). Key: FINNHUB_API_KEY.
+# UNVERIFIED: needs real-key smoke test (PLAN2 phase 15 E). Key: FINNHUB_API_KEY.
 """
 
 from __future__ import annotations

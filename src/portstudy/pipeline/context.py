@@ -85,6 +85,7 @@ class RunContext:
 
     def run_registry(self) -> ModelRegistry:
         selected = set(self.models())
+
         def for_endpoint(model: ModelSpec) -> ModelSpec:
             if self.gateway_fallback and model.fallback_eligible:
                 return model.model_copy(update={"serving": "slurm_fallback"})

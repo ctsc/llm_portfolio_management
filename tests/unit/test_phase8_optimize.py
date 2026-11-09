@@ -93,8 +93,10 @@ def test_q0_equals_bl_without_llm_rows() -> None:
     width = pd.Series(5.0, index=pi.index)
     v = build_views(pi, sv, z_b, ic_b=0.03, cfg=cfg, z_l=z_l, width=width, ic_l=0.05)
     only_b = build_views(pi, sv, z_b, ic_b=0.03, cfg=cfg)
-    np.testing.assert_allclose(black_litterman_q0(v, sigma).mu_bl.to_numpy(),
-                               black_litterman(only_b, sigma).mu_bl.to_numpy())
+    np.testing.assert_allclose(
+        black_litterman_q0(v, sigma).mu_bl.to_numpy(),
+        black_litterman(only_b, sigma).mu_bl.to_numpy(),
+    )
 
 
 def test_weights_sum_to_one_capped_and_deterministic() -> None:
@@ -129,7 +131,9 @@ def test_min_stocks_guard_and_solver_failure_fallback() -> None:
         solve_mean_variance(pi, sigma, 2.5, OptimizerConfig())
     sigma, pi, sv, z_b = _case(n=30, seed=2)
     prev = pd.Series(1.0 / 30, index=pi.index)
-    r = solve_mean_variance(pi, sigma, 2.5, OptimizerConfig(), previous=prev, solvers=["NO_SUCH_SOLVER"])
+    r = solve_mean_variance(
+        pi, sigma, 2.5, OptimizerConfig(), previous=prev, solvers=["NO_SUCH_SOLVER"]
+    )
     assert r.fallback_flag == "solver_failed" and r.solver == "none"
     pd.testing.assert_series_equal(r.weights, prev.rename("weight"))
     with pytest.raises(OptimizerError):
@@ -137,8 +141,12 @@ def test_min_stocks_guard_and_solver_failure_fallback() -> None:
 
 
 @pytest.fixture()
-def week_inputs(work_data_dir: Path, study_config: StudyConfig, model_registry: ModelRegistry,
-                session_weeks: list[str]) -> tuple[str, WeekInputs, StudyConfig]:
+def week_inputs(
+    work_data_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    session_weeks: list[str],
+) -> tuple[str, WeekInputs, StudyConfig]:
     from portstudy.baseline.combine import build_baseline
     from portstudy.data.snapshot import read_snapshot
     from portstudy.llm.cache import LlmCache
@@ -147,24 +155,39 @@ def week_inputs(work_data_dir: Path, study_config: StudyConfig, model_registry: 
     from portstudy.risk.covariance import build_risk_model
     from portstudy.risk.prior import build_prior
 
-    cfg = study_config.model_copy(update={"llm": study_config.llm.model_copy(update={"cost_goal_usd": 1e9,
-                                                                                  "cost_warn_usd": 1e9})})
+    cfg = study_config.model_copy(
+        update={
+            "llm": study_config.llm.model_copy(update={"cost_goal_usd": 1e9, "cost_warn_usd": 1e9})
+        }
+    )
     w = session_weeks[1]
     snap = read_snapshot(w)
     base = build_baseline(w, cfg, snap)
     risk = build_risk_model(w, cfg.risk, snap, tickers=list(base["ticker"]))
     build_prior(w, cfg.risk, risk, snap.reference)
     # stub-ow-b answers nothing valid, to exercise the all-invalid rule.
-    providers = {"stub-ow-b": StubLlmProvider("stub-ow-b", failures=StubFailures(
-        always_invalid_tickers=set(snap.included_tickers)))}
-    runner = WeekRunner(w, cfg, model_registry, snap, synthetic=True, providers=providers,
-                        cache=LlmCache(work_data_dir / "cache"))
+    providers = {
+        "stub-ow-b": StubLlmProvider(
+            "stub-ow-b", failures=StubFailures(always_invalid_tickers=set(snap.included_tickers))
+        )
+    }
+    runner = WeekRunner(
+        w,
+        cfg,
+        model_registry,
+        snap,
+        synthetic=True,
+        providers=providers,
+        cache=LlmCache(work_data_dir / "cache"),
+    )
     runner.run_local("stub-ow-a")
     runner.run_local("stub-ow-b")
     return w, WeekInputs.load(w), cfg
 
 
-def test_build_weights_every_portfolio_and_q0_rules(week_inputs: tuple[str, WeekInputs, StudyConfig]) -> None:
+def test_build_weights_every_portfolio_and_q0_rules(
+    week_inputs: tuple[str, WeekInputs, StudyConfig],
+) -> None:
     w, inputs, cfg = week_inputs
     q0 = build_q0_weights(w, cfg, ic_b=0.02, inputs=inputs)
     assert q0.weights.sum() == pytest.approx(1.0, abs=1e-8)

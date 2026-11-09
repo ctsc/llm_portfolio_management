@@ -1,7 +1,7 @@
 """portstudy: quant baseline plus LLM views in a weekly Black-Litterman pipeline.
 
 Every linear-algebra problem in the study is small (about 100 stocks), and multithreaded
-OpenBLAS makes those solves hundreds of times slower on the desktop than a single thread. The
+OpenBLAS makes those solves hundreds of times slower than a single thread. The
 BLAS thread pool is therefore limited to one thread for the whole process.
 """
 

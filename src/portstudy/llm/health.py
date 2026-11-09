@@ -12,7 +12,13 @@ from typing import Any
 from portstudy.io import read_json, write_json_atomic
 from portstudy.llm.prompts import assemble_prompt
 from portstudy.llm.providers.base import BatchItem, make_custom_id
-from portstudy.llm.runner import RunStatus, WeekRunner, _settings_for, read_run_status
+from portstudy.llm.runner import (
+    RUN_STATUS_LOCK,
+    RunStatus,
+    WeekRunner,
+    _settings_for,
+    read_run_status,
+)
 from portstudy.paths import week_output_dir
 from portstudy.pipeline.context import RunContext
 
@@ -104,6 +110,13 @@ def gateway_health_check(ctx: RunContext, week_id: str, runner: WeekRunner) -> H
 
 def mark_sources_failed(ctx: RunContext, week_id: str, models: list[str], reason: str) -> list[str]:
     """Write a failed `RunStatus` for every (model, prompt) source of the given models (N1)."""
+    with RUN_STATUS_LOCK:
+        return _mark_sources_failed(ctx, week_id, models, reason)
+
+
+def _mark_sources_failed(
+    ctx: RunContext, week_id: str, models: list[str], reason: str
+) -> list[str]:
     path = week_output_dir(week_id) / "run_status.json"
     data: dict[str, Any] = read_json(path) if path.exists() else {}
     now = ctx.now().isoformat()

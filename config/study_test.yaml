@@ -1,4 +1,5 @@
 llm:
+  parallel_models: false          # sequential in tests so two runs give identical digests
   model_ids: [stub-ow-a, stub-ow-b]
   prompt_ids: [bare, placebo, skills_1, skills_2]
 
@@ -16,3 +17,4 @@ strategies:
 eval:
   shuffle:
     n_shuffles: 20
+    strategies: [mvo, robust, topk]

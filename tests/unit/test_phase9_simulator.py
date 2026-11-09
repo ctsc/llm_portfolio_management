@@ -30,8 +30,17 @@ def _ledger(rows: dict[str, list[tuple[float, float]]], days: list[dt.date] = DA
         for d, (o, c) in zip(days, ocs):
             if o is None:
                 continue
-            out.append({"date": d, "ticker": tk, "open": o, "high": max(o, c), "low": min(o, c),
-                        "close": c, "volume": 1000.0})
+            out.append(
+                {
+                    "date": d,
+                    "ticker": tk,
+                    "open": o,
+                    "high": max(o, c),
+                    "low": min(o, c),
+                    "close": c,
+                    "volume": 1000.0,
+                }
+            )
     return pd.DataFrame(out)
 
 
@@ -50,7 +59,10 @@ def test_hand_calculated_three_stock_five_day_example() -> None:
     # Monday buys: 500 A at 100, 600 B at 50, 950 C at 20; cost 0.001 * 99000 = 99.
     buys = [t for t in trades if t.date == DAYS[0]]
     assert [(t.ticker, t.side, round(t.shares, 6), t.fill_price) for t in buys] == [
-        ("A", "buy", 500.0, 100), ("B", "buy", 600.0, 50), ("C", "buy", 950.0, 20)]
+        ("A", "buy", 500.0, 100),
+        ("B", "buy", 600.0, 50),
+        ("C", "buy", 950.0, 20),
+    ]
     assert sum(t.cost_usd for t in buys) == pytest.approx(99.0)
     assert all(t.reason == "rebalance" and t.decision_source == "llm" for t in buys)
     assert [round(t.weight_after, 6) for t in buys] == [0.5, 0.3, 0.19]
@@ -63,8 +75,10 @@ def test_hand_calculated_three_stock_five_day_example() -> None:
     assert values == [101251.00, 100646.00, 101202.15, 95702.15, 96155.65]
     sells = [t for t in trades if t.side == "sell"]
     assert [(t.date, t.ticker, t.reason, t.fill_price, round(t.cost_usd, 2)) for t in sells] == [
-        (DAYS[2], "B", "stop_loss", 45, 27.0), (DAYS[2], "C", "take_profit", 23, 21.85),
-        (DAYS[4], "A", "stop_loss", 93, 46.5)]
+        (DAYS[2], "B", "stop_loss", 45, 27.0),
+        (DAYS[2], "C", "take_profit", 23, 21.85),
+        (DAYS[4], "A", "stop_loss", 93, 46.5),
+    ]
     assert round(sim.cumulative_cost, 2) == 194.35
     assert round(sim.cash, 2) == 96155.65 and not sim.positions
     assert daily[-1].n_positions == 0 and daily[1].n_positions == 3
@@ -81,7 +95,9 @@ def test_fractional_shares_and_weights_match_targets() -> None:
     opens = book.open[DAYS[0]]
     # Weights sum to 1 so the cash rule scales every buy by the same factor (1 / 1.001).
     for t, target in w.items():
-        assert sim.positions[t].shares * opens[t] / CFG.initial_value == pytest.approx(target / 1.001)
+        assert sim.positions[t].shares * opens[t] / CFG.initial_value == pytest.approx(
+            target / 1.001
+        )
     assert sim.positions["A"].shares != round(sim.positions["A"].shares)
     assert sim.cash == pytest.approx(0.0, abs=1e-6)
 
@@ -118,6 +134,7 @@ def test_no_rebalance_week_holds_but_stops_still_run() -> None:
     sim2 = PortfolioSim("P", CFG)
     sim2.cash = 1000.0
     from portstudy.sim.simulator import Position
+
     sim2.positions["A"] = Position(100.0, 100.0, 95.0)
     trades, daily = simulate_week(sim2, WeekPlan(w11, None, "hold", "no_rebalance"), book2)
     assert len(trades) == 1 and trades[0].reason == "stop_loss" and trades[0].date == days[1]
@@ -126,8 +143,14 @@ def test_no_rebalance_week_holds_but_stops_still_run() -> None:
 
 def test_dividend_credits_cash_and_split_keeps_value() -> None:
     rows = {"A": [(100, 100), (100, 100), (50, 50), (50, 50), (50, 50)]}
-    actions = pd.DataFrame({"date": [DAYS[1], DAYS[2]], "ticker": ["A", "A"],
-                            "action": ["dividend", "split"], "value": [0.5, 2.0]})
+    actions = pd.DataFrame(
+        {
+            "date": [DAYS[1], DAYS[2]],
+            "ticker": ["A", "A"],
+            "action": ["dividend", "split"],
+            "value": [0.5, 2.0],
+        }
+    )
     book = PriceBook(_ledger(rows), actions)
     sim = PortfolioSim("P", CFG)
     trades, daily = simulate_week(sim, WeekPlan(W10, pd.Series({"A": 0.5}), "llm", "normal"), book)
@@ -144,8 +167,7 @@ def test_dividend_credits_cash_and_split_keeps_value() -> None:
 
 
 def test_stop_on_friday_close_before_rebalance_yields_one_net_trade() -> None:
-    rows = {"A": [(100, 100), (100, 100), (100, 100), (100, 100), (100, 90)],
-            "B": [(50, 50)] * 5}
+    rows = {"A": [(100, 100), (100, 100), (100, 100), (100, 100), (100, 90)], "B": [(50, 50)] * 5}
     book = PriceBook(_ledger(rows))
     sim = PortfolioSim("P", CFG)
     simulate_week(sim, WeekPlan(W10, pd.Series({"A": 0.5, "B": 0.4}), "llm", "normal"), book)
@@ -153,7 +175,9 @@ def test_stop_on_friday_close_before_rebalance_yields_one_net_trade() -> None:
     days = [dt.date(2026, 3, d) for d in (16, 17, 18, 19, 20)]
     book2 = PriceBook(_ledger({"A": [(91, 91)] * 5, "B": [(50, 50)] * 5}, days))
     # Optimizer keeps A at a lower weight: exactly one trade for A at Monday's open.
-    trades, _ = simulate_week(sim, WeekPlan("2026-W11", pd.Series({"A": 0.2, "B": 0.4}), "llm", "normal"), book2)
+    trades, _ = simulate_week(
+        sim, WeekPlan("2026-W11", pd.Series({"A": 0.2, "B": 0.4}), "llm", "normal"), book2
+    )
     a_trades = [t for t in trades if t.ticker == "A" and t.date == days[0]]
     assert len(a_trades) == 1
     t = a_trades[0]
@@ -165,18 +189,24 @@ def test_stop_on_friday_close_before_rebalance_yields_one_net_trade() -> None:
     # If the optimizer drops A entirely, the single trade is a full sale.
     sim_b = PortfolioSim("P", CFG)
     simulate_week(sim_b, WeekPlan(W10, pd.Series({"A": 0.5, "B": 0.4}), "llm", "normal"), book)
-    trades_b, _ = simulate_week(sim_b, WeekPlan("2026-W11", pd.Series({"B": 0.4}), "llm", "normal"), book2)
+    trades_b, _ = simulate_week(
+        sim_b, WeekPlan("2026-W11", pd.Series({"B": 0.4}), "llm", "normal"), book2
+    )
     a_b = [t for t in trades_b if t.ticker == "A"]
     assert len(a_b) == 1 and a_b[0].stop_trigger == "stop_loss" and "A" not in sim_b.positions
     assert a_b[0].date == days[0] and a_b[0].reason == "rebalance"
 
 
 def test_missing_price_carries_last_close_and_forces_exit() -> None:
-    rows = {"A": [(100, 100), (None, None), (None, None), (120, 120), (120, 120)],
-            "B": [(10, 10)] * 5}
+    rows = {
+        "A": [(100, 100), (None, None), (None, None), (120, 120), (120, 120)],
+        "B": [(10, 10)] * 5,
+    }
     book = PriceBook(_ledger(rows))
     sim = PortfolioSim("P", CFG)
-    trades, daily = simulate_week(sim, WeekPlan(W10, pd.Series({"A": 0.5, "B": 0.1}), "llm", "normal"), book)
+    trades, daily = simulate_week(
+        sim, WeekPlan(W10, pd.Series({"A": 0.5, "B": 0.1}), "llm", "normal"), book
+    )
     assert "carried:A" in daily[1].flags and daily[1].value == pytest.approx(daily[0].value)
     forced = [t for t in trades if t.reason == "forced_exit"]
     assert len(forced) == 1 and forced[0].date == DAYS[3] and forced[0].fill_price == 120
@@ -224,16 +254,25 @@ def test_week_alignment_scores_pair_with_the_following_window() -> None:
     t0, t1 = cal.monday_open_day(w), cal.window_end_date(w)
     assert t0 == dt.date(2026, 3, 9) and t1 == dt.date(2026, 3, 16) and t0 > cutoff
     earlier_monday = dt.date(2026, 3, 2)
-    led = pd.DataFrame({
-        "date": [earlier_monday, cutoff, t0, t1], "ticker": "A",
-        "open": [50.0, 80.0, 100.0, 110.0], "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0.0})
+    led = pd.DataFrame(
+        {
+            "date": [earlier_monday, cutoff, t0, t1],
+            "ticker": "A",
+            "open": [50.0, 80.0, 100.0, 110.0],
+            "high": 0.0,
+            "low": 0.0,
+            "close": 0.0,
+            "volume": 0.0,
+        }
+    )
     out = weekly_returns(led, w)
     assert out.loc[0, "trade_date"] == t0 and out.loc[0, "window_end_date"] == t1
     assert out.loc[0, "ret"] == pytest.approx(0.10)  # never 80 -> 100 or 50 -> 80
 
 
-def test_thirty_weeks_thirteen_portfolios_under_a_minute(snapshot_data_dir: Path, study_config: StudyConfig,
-                                                         session_weeks: list[str]) -> None:
+def test_thirty_weeks_thirteen_portfolios_under_a_minute(
+    snapshot_data_dir: Path, study_config: StudyConfig, session_weeks: list[str]
+) -> None:
     book = ledger_book()
     led = ledger.read_ledger()
     tickers = sorted(t for t in led["ticker"].unique() if str(t).startswith("SYN"))[:100]
@@ -245,7 +284,9 @@ def test_thirty_weeks_thirteen_portfolios_under_a_minute(snapshot_data_dir: Path
             raw = rng.random(len(tickers))
             raw = np.minimum(raw / raw.sum(), 0.05)
             raw = raw / raw.sum()
-            weekly.append(WeekPlan(w, pd.Series(raw, index=tickers), "llm" if p else "q0", "normal"))
+            weekly.append(
+                WeekPlan(w, pd.Series(raw, index=tickers), "llm" if p else "q0", "normal")
+            )
         plans[f"P{p}"] = weekly
     start = time.perf_counter()
     sims = {k: replay(k, v, book, study_config.simulator) for k, v in plans.items()}

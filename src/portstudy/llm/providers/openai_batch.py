@@ -1,6 +1,6 @@
 """OpenAI chat models through the Batch API.
 
-# UNVERIFIED: needs real-key smoke test (Phase 17). Shapes follow the public docs:
+# UNVERIFIED: needs real-key smoke test (PLAN2 phase 15 E). Shapes follow the public docs:
 #   POST /v1/files (purpose=batch, JSONL body)           -> {"id": file_id}
 #   POST /v1/batches {input_file_id, endpoint, completion_window: "24h"} -> {"id", "status"}
 #   GET  /v1/batches/{id}   -> status validating | in_progress | finalizing | completed |

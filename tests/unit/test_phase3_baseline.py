@@ -22,9 +22,9 @@ def _toy_prices(n_days: int = 260) -> pd.DataFrame:
     # Three stocks with known straight-line price paths so each ratio is hand-checkable.
     dates = pd.bdate_range("2025-01-01", periods=n_days)
     idx = np.arange(n_days, dtype=float)
-    a = 100.0 + idx                      # rises 1 per day
-    b = np.full(n_days, 50.0)            # flat
-    c = 200.0 - 0.5 * idx                # falls 0.5 per day
+    a = 100.0 + idx  # rises 1 per day
+    b = np.full(n_days, 50.0)  # flat
+    c = 200.0 - 0.5 * idx  # falls 0.5 per day
     return pd.DataFrame({"A": a, "B": b, "C": c}, index=dates)
 
 
@@ -85,8 +85,12 @@ def test_combine_zb_is_standardized_and_deterministic() -> None:
 
 def test_stub_forecaster_is_seeded() -> None:
     wide = _toy_prices()
-    data = {c: pd.DataFrame({"open": wide[c], "high": wide[c], "low": wide[c], "close": wide[c],
-                             "volume": 1.0}) for c in wide.columns}
+    data = {
+        c: pd.DataFrame(
+            {"open": wide[c], "high": wide[c], "low": wide[c], "close": wide[c], "volume": 1.0}
+        )
+        for c in wide.columns
+    }
     fc = StubForecaster()
     k1 = fc.forecast(data, seed=3)
     k2 = fc.forecast(data, seed=3)
@@ -101,11 +105,16 @@ def test_make_forecaster_from_config(study_config: StudyConfig) -> None:
     assert make_forecaster(study_config.baseline).name == "stub"
 
 
-def test_baseline_builds_for_all_weeks_and_is_deterministic(snapshot_data_dir: Path, study_config: StudyConfig,
-                                                            session_weeks: list[str],
-                                                            world: SyntheticWorld) -> None:
+def test_baseline_builds_for_all_weeks_and_is_deterministic(
+    snapshot_data_dir: Path,
+    study_config: StudyConfig,
+    session_weeks: list[str],
+    world: SyntheticWorld,
+) -> None:
     adj = world.prices[world.prices["ticker"].isin(world.stock_tickers)]
-    wide = adj.drop_duplicates(["ticker", "date"]).pivot(index="date", columns="ticker", values="adj_close")
+    wide = adj.drop_duplicates(["ticker", "date"]).pivot(
+        index="date", columns="ticker", values="adj_close"
+    )
     ics = []
     for w in session_weeks:
         snap = read_snapshot(w)

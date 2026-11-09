@@ -206,11 +206,13 @@ def test_plan_covers_q0_and_steered_only_and_round_trips(
     cfg = generous_budget(study_config)
     ctx = _ctx(cfg, model_registry, world)
     keys = ctx.portfolio_keys()
-    ordered = shuffle_portfolios(keys)
-    assert ordered[: len(cfg.strategies.enabled)] == [f"{s}__Q0" for s in cfg.strategies.enabled]
+    shuffled = list(cfg.eval.shuffle.strategies)  # DECISION(G6): mvo, robust, topk only
+    ordered = shuffle_portfolios(keys, shuffled)
+    assert ordered[: len(shuffled)] == [f"{s}__Q0" for s in shuffled]
     assert not set(ordered) & set(cfg.strategies.controls)
-    assert len(ordered) == len(cfg.strategies.enabled) * (len(ctx.sources()) + 1)
-    shards = plan_shards(keys, 500, 25)
+    assert not [k for k in ordered if k.split("__")[0] in ("cvar", "resampled")]
+    assert len(ordered) == len(shuffled) * (len(ctx.sources()) + 1)
+    shards = plan_shards(keys, 500, 25, shuffled)
     assert len(shards) == len(ordered) * 20
     table = write_shard_plan(shards, tmp_path / "shards.csv")
     assert list(table.columns) == ["shard", "portfolio", "start", "stop"]

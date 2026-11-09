@@ -30,14 +30,25 @@ def test_rank_ic_matches_scipy_spearman() -> None:
 def test_weekly_returns_use_opens_dividends_and_splits() -> None:
     w = "2026-W10"
     t0, t1 = cal.monday_open_day(w), cal.window_end_date(w)
-    ledger = pd.DataFrame({
-        "date": [t0, t1, t0, t1, t0, t1],
-        "ticker": ["A", "A", "B", "B", "C", "C"],
-        "open": [100.0, 110.0, 50.0, 26.0, 20.0, 21.0],
-        "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0.0,
-    })
-    actions = pd.DataFrame({"date": [t0 + dt.timedelta(days=2), t0 + dt.timedelta(days=3)],
-                            "ticker": ["A", "B"], "action": ["dividend", "split"], "value": [1.0, 2.0]})
+    ledger = pd.DataFrame(
+        {
+            "date": [t0, t1, t0, t1, t0, t1],
+            "ticker": ["A", "A", "B", "B", "C", "C"],
+            "open": [100.0, 110.0, 50.0, 26.0, 20.0, 21.0],
+            "high": 0.0,
+            "low": 0.0,
+            "close": 0.0,
+            "volume": 0.0,
+        }
+    )
+    actions = pd.DataFrame(
+        {
+            "date": [t0 + dt.timedelta(days=2), t0 + dt.timedelta(days=3)],
+            "ticker": ["A", "B"],
+            "action": ["dividend", "split"],
+            "value": [1.0, 2.0],
+        }
+    )
     out = weekly_returns(ledger, w, actions).set_index("ticker")["ret"]
     assert out["A"] == pytest.approx((110 + 1.0) / 100 - 1)
     assert out["B"] == pytest.approx(26 * 2 / 50 - 1)
@@ -46,10 +57,30 @@ def test_weekly_returns_use_opens_dividends_and_splits() -> None:
 
 def test_ic_store_upsert_is_idempotent(tmp_path: Path) -> None:
     store = ICStore(tmp_path / "ic.csv")
-    store.upsert([{"week_id": "2026-W05", "signal": "baseline", "model": "", "config_id": "",
-                   "rank_ic": 0.1, "n_stocks": 100}])
-    store.upsert([{"week_id": "2026-W05", "signal": "baseline", "model": "", "config_id": "",
-                   "rank_ic": 0.2, "n_stocks": 100}])
+    store.upsert(
+        [
+            {
+                "week_id": "2026-W05",
+                "signal": "baseline",
+                "model": "",
+                "config_id": "",
+                "rank_ic": 0.1,
+                "n_stocks": 100,
+            }
+        ]
+    )
+    store.upsert(
+        [
+            {
+                "week_id": "2026-W05",
+                "signal": "baseline",
+                "model": "",
+                "config_id": "",
+                "rank_ic": 0.2,
+                "n_stocks": 100,
+            }
+        ]
+    )
     df = store.read()
     assert len(df) == 1 and df.loc[0, "rank_ic"] == 0.2
     assert df.loc[0, "trade_date"] == cal.monday_open_day("2026-W05").isoformat()
@@ -57,8 +88,19 @@ def test_ic_store_upsert_is_idempotent(tmp_path: Path) -> None:
 
 def _store_with(tmp_path: Path, weeks: list[str], ics: list[float]) -> ICStore:
     store = ICStore(tmp_path / "ic.csv")
-    store.upsert([{"week_id": w, "signal": "llm_resid", "model": "m", "config_id": "skills",
-                   "rank_ic": ic, "n_stocks": 100} for w, ic in zip(weeks, ics)])
+    store.upsert(
+        [
+            {
+                "week_id": w,
+                "signal": "llm_resid",
+                "model": "m",
+                "config_id": "skills",
+                "rank_ic": ic,
+                "n_stocks": 100,
+            }
+            for w, ic in zip(weeks, ics)
+        ]
+    )
     return store
 
 
@@ -81,7 +123,9 @@ def test_cold_start_rule(tmp_path: Path) -> None:
     # Window of 8: weeks 1..18 are closed for week 20, the mean uses the last 8 only.
     ics = [0.5] * 10 + [0.0] * 10
     store4 = _store_with(tmp_path / "d", weeks, ics)
-    assert trailing_ic(store4, "llm_resid", weeks[19], cfg, live, "m", "skills") == pytest.approx(0.0)
+    assert trailing_ic(store4, "llm_resid", weeks[19], cfg, live, "m", "skills") == pytest.approx(
+        0.0
+    )
 
 
 def test_fallback_weeks_excluded_from_trailing_ic(tmp_path: Path) -> None:
@@ -90,7 +134,9 @@ def test_fallback_weeks_excluded_from_trailing_ic(tmp_path: Path) -> None:
     weeks = cal.week_range(live, 12)
     ics = [0.1, 0.1, 0.1, 0.9, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
     store = _store_with(tmp_path, weeks, ics)
-    with_fb = trailing_ic(store, "llm_resid", weeks[9], cfg, live, "m", "skills", fallback_weeks={weeks[3]})
+    with_fb = trailing_ic(
+        store, "llm_resid", weeks[9], cfg, live, "m", "skills", fallback_weeks={weeks[3]}
+    )
     without = trailing_ic(store, "llm_resid", weeks[9], cfg, live, "m", "skills")
     assert with_fb == pytest.approx(0.1)
     assert without > with_fb
@@ -115,15 +161,17 @@ def test_residual_is_uncorrelated_with_zb_and_skips_invalid() -> None:
     likely = np.rint(2 * z_b.to_numpy() + rng.normal(size=80)).clip(-5, 5).astype(int)
     low = np.maximum(-5, likely - 1)
     high = np.minimum(5, likely + 1)
-    scores = pd.DataFrame({
-        "ticker": tickers,
-        "low": low,
-        "likely": likely,
-        "high": high,
-        "width": high - low,
-        "valid": True,
-        "fallback_flag": [None] * 80,
-    })
+    scores = pd.DataFrame(
+        {
+            "ticker": tickers,
+            "low": low,
+            "likely": likely,
+            "high": high,
+            "width": high - low,
+            "valid": True,
+            "fallback_flag": [None] * 80,
+        }
+    )
     scores.loc[:9, "valid"] = False
     scores.loc[:9, "fallback_flag"] = "invalid_output"
     scores.loc[:9, ["low", "likely", "high", "width"]] = 0
@@ -199,9 +247,12 @@ def test_views_formulas_and_per_stock_rule() -> None:
     assert v2.use_llm_view is False and "llm_view_dropped:no_valid_outputs" in v2.notes
 
 
-def test_views_build_for_every_portfolio_over_synthetic_weeks(work_data_dir: Path, study_config: StudyConfig,
-                                                              model_registry: ModelRegistry,
-                                                              session_weeks: list[str]) -> None:
+def test_views_build_for_every_portfolio_over_synthetic_weeks(
+    work_data_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    session_weeks: list[str],
+) -> None:
     from portstudy.baseline.combine import build_baseline
     from portstudy.data.snapshot import read_snapshot
     from portstudy.llm.cache import LlmCache
@@ -210,14 +261,19 @@ def test_views_build_for_every_portfolio_over_synthetic_weeks(work_data_dir: Pat
     from portstudy.risk.covariance import build_risk_model
     from portstudy.risk.prior import build_prior
 
-    cfg = study_config.model_copy(update={"llm": study_config.llm.model_copy(update={"cost_goal_usd": 1e9,
-                                                                                  "cost_warn_usd": 1e9})})
+    cfg = study_config.model_copy(
+        update={
+            "llm": study_config.llm.model_copy(update={"cost_goal_usd": 1e9, "cost_warn_usd": 1e9})
+        }
+    )
     for w in session_weeks[:2]:
         snap = read_snapshot(w)
         base = build_baseline(w, cfg, snap).set_index("ticker")
         risk = build_risk_model(w, cfg.risk, snap, tickers=list(base.index))
         prior = build_prior(w, cfg.risk, risk, snap.reference).set_index("ticker")
-        runner = WeekRunner(w, cfg, model_registry, snap, synthetic=True, cache=LlmCache(work_data_dir / "cache"))
+        runner = WeekRunner(
+            w, cfg, model_registry, snap, synthetic=True, cache=LlmCache(work_data_dir / "cache")
+        )
         for spec in model_registry.enabled(synthetic=True):
             if spec.kind == "open_weight":
                 runner.run_local(spec.id)
@@ -246,4 +302,6 @@ def test_views_build_for_every_portfolio_over_synthetic_weeks(work_data_dir: Pat
                 assert views.use_llm_view and views.use_baseline_view
                 assert len(views.q_l) == len(z_l) and views.q_b.notna().all()
                 n_built += 1
-        assert n_built == len(model_registry.enabled(synthetic=True)) * len(load_manifest().enabled())
+        assert n_built == len(model_registry.enabled(synthetic=True)) * len(
+            load_manifest().enabled()
+        )

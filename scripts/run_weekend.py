@@ -1,4 +1,4 @@
-"""The one script the researcher runs by hand each weekend (DECISION(N2)). No scheduler.
+"""The one script Carter runs by hand each weekend (DECISION(N2)). No scheduler.
 
 Step 1: J8 and J9 for any earlier week whose replay or backup is not done.
 Step 2: J1 to J6 for the current week in order, waiting on API batches (J5) with a visible
@@ -89,11 +89,19 @@ def _summarize(job: str, result: dict[str, Any]) -> str:
             f"stocks={result.get('n_stocks')} alpha={result.get('alpha', 0):.3f}" if result else ""
         )
     if job == "J4":
-        parts = [
-            f"{m}: calls={v.get('n_calls')} cached={v.get('n_cached')} invalid={v.get('n_invalid')}"
-            for m, v in result.items()
-            if isinstance(v, dict)
-        ]
+        parts = []
+        for m, v in result.items():
+            if not isinstance(v, dict):
+                continue
+            if v.get("crashed"):
+                parts.append(f"{m}: CRASHED {v['crashed']} (sources go to fallback)")
+            elif v.get("skipped"):
+                parts.append(f"{m}: skipped {v['skipped']}")
+            else:
+                parts.append(
+                    f"{m}: calls={v.get('n_calls')} cached={v.get('n_cached')} "
+                    f"invalid={v.get('n_invalid')}"
+                )
         return "; ".join(parts)
     if job == "J6":
         return f"fallbacks={result.get('n_fallback')} {result.get('reasons') or ''}"
@@ -125,6 +133,22 @@ def wait_for_batches(ctx: RunContext, week: str, synthetic: bool, poll_seconds: 
             return
         say(f"batches pending; next poll in {poll_seconds}s, {remaining} until the lock margin")
         time.sleep(poll_seconds)
+
+
+def poll_once(ctx: RunContext, week: str, synthetic: bool) -> str:
+    """One J5 pass (PLAN3 phase 3, finish.sbatch): "pending" means come back later; at the lock
+    margin the pending batches are left for J6 to label as fallbacks (N1) and the run goes on."""
+    state = run(ctx, "J5", week, synthetic)
+    if state != "pending":
+        return state
+    deadline = lock_deadline(week, ctx.cfg) - dt.timedelta(
+        minutes=ctx.cfg.pipeline.lock_margin_minutes
+    )
+    if deadline - ctx.now() <= dt.timedelta(0):
+        say("lock margin reached with batches still pending; J6 will label them as fallbacks")
+        return "margin_reached"
+    say(f"batches pending; exiting {POLL_AGAIN} so the finish job can resubmit itself")
+    return "pending"
 
 
 def step1_catch_up(ctx: RunContext, week: str, synthetic: bool) -> None:
@@ -171,6 +195,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check-walltime", default=None, help="Slurm walltime; warn if it ends after the lock"
     )
+    parser.add_argument(
+        "--poll-once",
+        action="store_true",
+        help="run J5 once: exit 3 while batches are pending before the lock margin (finish.sbatch)",
+    )
     args = parser.parse_args(argv)
     if args.from_job not in STEP_ORDER or args.until_job not in STEP_ORDER:
         parser.error(f"--from/--until must be one of {STEP_ORDER}")
@@ -197,6 +226,14 @@ def main(argv: list[str] | None = None) -> int:
 
     now = ctx.now()
     if args.check_walltime:
+        hours = health.parse_walltime(args.check_walltime).total_seconds() / 3600.0
+        if hours > MAX_JOB_HOURS:  # DECISION(W1), the same limits as scripts/arctic/common.sh
+            say(f"error: walltime {args.check_walltime} exceeds the {MAX_JOB_HOURS} hour limit")
+            return 2
+        if hours > WARN_JOB_HOURS:
+            say(
+                f"warning: walltime {args.check_walltime} is above the {WARN_JOB_HOURS} hour target"
+            )
         ends = now + health.parse_walltime(args.check_walltime)
         deadline = lock_deadline(week, ctx.cfg)
         if ends > deadline:
@@ -234,7 +271,10 @@ def main(argv: list[str] | None = None) -> int:
         for job in jobs:
             if job == "J4":
                 gateway_health(ctx, week)
-            if job == "J5":
+            if job == "J5" and args.poll_once:
+                if poll_once(ctx, week, args.synthetic) == "pending":
+                    return POLL_AGAIN
+            elif job == "J5":
                 wait_for_batches(ctx, week, args.synthetic, poll)
             elif job == "J8" and not explicit_j8:
                 continue  # this week's replay runs in next weekend's catch-up
@@ -258,6 +298,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 STEP_ORDER = ["J1", "J2", "J3", "J4", "J5", "J6", "J7", "J8", "J9"]
+POLL_AGAIN = 3  # --poll-once exit code while API batches are pending
+MAX_JOB_HOURS = 15  # DECISION(W1)
+WARN_JOB_HOURS = 12
 
 
 def jobs_between(from_job: str, until_job: str) -> list[str]:

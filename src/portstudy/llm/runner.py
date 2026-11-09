@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import threading
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
@@ -66,6 +67,12 @@ SCORE_COLUMNS = [
 ]
 
 RunState = Literal["ok", "failed", "incomplete"]
+# Reasons `assess_run` writes itself; any other failed reason is a model-wide mark from J4/health.
+_ASSESSED_FAILURE_PREFIXES = (
+    "batch_not_ready_by_lock",
+    "open_weight_not_finished_by_lock",
+    "invalid_rate",
+)
 
 
 @dataclass(frozen=True)
@@ -128,6 +135,9 @@ def lock_deadline(week_id: str, cfg: StudyConfig) -> dt.datetime:
 
 def _settings_for(cfg: StudyConfig, spec: ModelSpec) -> LlmSettings:
     return cfg.llm.settings.get(spec.id, spec.settings)
+
+
+RUN_STATUS_LOCK = threading.RLock()
 
 
 class WeekRunner:
@@ -411,17 +421,18 @@ class WeekRunner:
         return record
 
     def _update_open_weight_status(self, task: Task, record: dict[str, Any]) -> None:
-        statuses = read_run_status(self.week_id)
-        key = f"{task.model}__{task.config_id}"
-        status = statuses.get(key)
-        if status is None:
-            return
-        status.n_done = len(self._read_records(task.model, task.config_id))
-        status.reason = f"{status.n_done}/{status.n_tasks} done"
-        status.endpoint = str(record.get("endpoint") or status.endpoint)
-        status.send_seed = record.get("send_seed")
-        status.json_mode = record.get("json_mode")
-        self._write_status(status)
+        with RUN_STATUS_LOCK:
+            statuses = read_run_status(self.week_id)
+            key = f"{task.model}__{task.config_id}"
+            status = statuses.get(key)
+            if status is None:
+                return
+            status.n_done = len(self._read_records(task.model, task.config_id))
+            status.reason = f"{status.n_done}/{status.n_tasks} done"
+            status.endpoint = str(record.get("endpoint") or status.endpoint)
+            status.send_seed = record.get("send_seed")
+            status.json_mode = record.get("json_mode")
+            self._write_status(status)
 
     def _persist_provider_features(
         self, model: str, endpoint: str, features: tuple[bool, bool]
@@ -900,10 +911,12 @@ class WeekRunner:
         if (
             source_status is not None
             and source_status.state == "failed"
-            and source_status.reason == "gateway_health_check_failed"
-            and not done
+            and not source_status.reason.startswith(_ASSESSED_FAILURE_PREFIXES)
+            and len(done) < len(tasks)
         ):
-            return source_status  # marked by the pre-J4 health check (N1); nothing ran
+            # Marked model-wide by the pre-J4 health check, an authentication abort or a crashed
+            # model worker (N1): the run cannot complete, so the mark stands.
+            return source_status
         endpoints = {str(record.get("endpoint", "")) for record in done}
         endpoints.discard("")
         if len(endpoints) > 1:
@@ -966,9 +979,10 @@ class WeekRunner:
 
     def _write_status(self, status: RunStatus) -> None:
         path = week_output_dir(self.week_id) / "run_status.json"
-        data: dict[str, Any] = read_json(path) if path.exists() else {}
-        data[f"{status.model}__{status.config_id}"] = status.to_dict()
-        write_json_atomic(data, path)
+        with RUN_STATUS_LOCK:  # PLAN3 phase 3: parallel model workers share this file
+            data: dict[str, Any] = read_json(path) if path.exists() else {}
+            data[f"{status.model}__{status.config_id}"] = status.to_dict()
+            write_json_atomic(data, path)
 
 
 def read_run_status(week_id: str) -> dict[str, RunStatus]:

@@ -15,14 +15,23 @@ from portstudy.data.snapshot import make_snapshot, read_snapshot
 
 # Codes the planted world is expected to raise. Anything else is unexpected.
 EXPECTED_CODES = {
-    "missing_days", "nonpositive_price", "extreme_move", "duplicate_rows", "stale_price",
-    "no_news", "news_after_cutoff", "short_history", "stopped_trading", "no_prices",
+    "missing_days",
+    "nonpositive_price",
+    "extreme_move",
+    "duplicate_rows",
+    "stale_price",
+    "no_news",
+    "news_after_cutoff",
+    "short_history",
+    "stopped_trading",
+    "no_prices",
 }
 PLANTED_TICKERS = {v[0] for v in PLANTED.values()}
 
 
-def test_thirty_consecutive_snapshots(data_dir: Path, study_config: StudyConfig,
-                                      providers: ProviderBundle, universe: pd.DataFrame) -> None:
+def test_thirty_consecutive_snapshots(
+    data_dir: Path, study_config: StudyConfig, providers: ProviderBundle, universe: pd.DataFrame
+) -> None:
     weeks = cal.week_range(study_config.synthetic.first_week, 30)
     for w in weeks:
         ref = make_snapshot(w, study_config, providers, universe)

@@ -17,7 +17,7 @@ timing:
   lock_deadline_time_et: "09:00"  # Monday, 30 minutes before the open
   pilot_week: null                # ISO week id of the pilot, excluded from results
   live_start_week: null           # DECISION(A2): first live week is the week after the pilot passes
-  live_end_date: null             # DECISION(A3): set by the researcher, no later than the April deadline
+  live_end_date: null             # DECISION(A3): set by Carter before the freeze
 
 data:
   price_provider: alpaca          # alpaca | yfinance | synthetic
@@ -67,7 +67,7 @@ baseline:
     medium: 63
     short: 21
   kronos:
-    repo_commit: UNPINNED         # researcher pins the vendor/kronos commit in Phase 17
+    repo_commit: UNPINNED         # Carter pins the vendor/kronos commit in PLAN2 phase 15 C
     model_id: NeoQuasar/Kronos-base
     tokenizer_id: NeoQuasar/Kronos-Tokenizer-base
     context_candles: 252
@@ -99,6 +99,7 @@ llm:
   invalid_rate_threshold: 0.15    # DECISION(N1)
   retry_invalid_once: true
   batch_retry_count: 1
+  parallel_models: true           # PLAN3 phase 3: J4 runs the open-weight models side by side
   api_poll_seconds: 300
   model_ids: []
   prompt_ids: []
@@ -109,16 +110,14 @@ llm:
     reasoning: none
     send_seed: true                 # UNVERIFIED: confirm ARCTIC accepts seed
     json_mode: true                 # UNVERIFIED: confirm ARCTIC accepts response_format
-  settings:
-    minimax-m2.7:
-      max_output_tokens: 2048
+  settings: {}
   concurrency:
     gemma-4-31b: 4
     minimax-m2.7: 4
     stub-ow-a: 1
     stub-ow-b: 1
   gateway:
-    base_url: ""                    # UNVERIFIED: set the ARCTIC LiteLLM base URL when provisioned
+    base_url: https://litellm.rs.gsu.edu/v1  # ARCTIC LiteLLM gateway; GSU network or VPN required
     fallback_endpoint_file: data/runtime/fallback_endpoint.json
 
 views:
@@ -195,6 +194,7 @@ eval:
     seed: 99
     processes: 1
     shard_size: 25                # shuffles per Slurm array task (one file per shard)
+    strategies: [mvo, robust, topk]  # DECISION(G6): Mean-CVaR and Resampled MVO are excluded for compute
 
 backup:
   keep_zips: true
@@ -312,7 +312,18 @@ decisions:
     value: daily
     status: confirmed
   - id: G6
-    value: 500
+    value: >-
+      500 shuffles for the MVO, Robust MVO and Top-K steered portfolios and those three strategies'
+      Q0s only; Mean-CVaR and Resampled MVO are excluded (about 99 percent of the shuffle compute);
+      Slurm array on ARCTIC CPUs, `portstudy shuffle run-local` as the backup (PLAN3)
+    status: confirmed
+  - id: W1
+    value: >-
+      every Slurm job requests a walltime of at most 15 hours (target 12 or less) and never waits idle
+      on anything outside the cluster (PLAN3)
+    status: confirmed
+  - id: M1
+    value: "CPU jobs request --mem-per-cpu=3G and only the cores the work uses (PLAN3)"
     status: confirmed
   - id: G7
     value: "IC tests as v1; portfolio return and shuffle tests one family per strategy"

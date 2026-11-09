@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -180,14 +181,10 @@ def J3_api_submit(ctx: RunContext, week_id: str) -> JobStatus:
 
 def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
     def fn() -> dict[str, Any]:
-        # Kronos (inside J2) must be finished first: enforced with the status file, not time.
-        if read_status(week_id, "J2").state != "done":
-            raise RuntimeError(
-                "J2 (baseline, including the forecaster) is not done; J4 waits for it"
-            )
+        # PLAN3 phase 3: no J2 gate. The LLM calls never read the Kronos output, so J4 runs
+        # alongside the Kronos job; J7 is the step that waits for J2, J4 and J6.
         from portstudy.llm.health import mark_sources_failed, unhealthy_models
 
-        runner = _week_runner(ctx, week_id)
         out: dict[str, Any] = {}
         # Review fix M3: under --gateway-fallback only the fallback-eligible models leave the
         # unhealthy set (they run on the fallback endpoint); the others stay marked failed.
@@ -196,12 +193,18 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
             for m in unhealthy_models(week_id)
             if not (ctx.gateway_fallback and ctx.registry.get(m).fallback_eligible)
         }
+        models = []
         for model in ctx.open_weight_models():
             if model in unhealthy:  # marked failed by the gateway health check (N1)
                 out[model] = {"skipped": "gateway_health_check_failed"}
-                continue
-            s = runner.run_open_weight(model)
-            out[model] = {
+            else:
+                models.append(model)
+
+        def run_model(model: str) -> dict[str, Any]:
+            # Each worker owns a WeekRunner with the model's own `llm.concurrency` pool and
+            # writes only that model's record files; run_status.json writes take a shared lock.
+            s = _week_runner(ctx, week_id).run_open_weight(model)
+            result: dict[str, Any] = {
                 "n_calls": s.n_calls,
                 "n_cached": s.n_cached,
                 "n_invalid": s.n_invalid,
@@ -209,8 +212,47 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
                 "n_dropped": s.n_dropped,
             }
             if s.aborted:  # review fix M2: authentication failure is model-wide
-                out[model]["aborted"] = s.aborted
-                mark_sources_failed(ctx, week_id, [model], s.aborted)
+                result["aborted"] = s.aborted
+            return result
+
+        results: dict[str, dict[str, Any]] = {}
+        if ctx.cfg.llm.parallel_models and len(models) > 1:
+            with ThreadPoolExecutor(max_workers=len(models)) as pool:
+                futures = {model: pool.submit(run_model, model) for model in models}
+                for model, future in futures.items():
+                    try:
+                        results[model] = future.result()
+                    except Exception as exc:  # one model crashing must not stop the others
+                        results[model] = {"crashed": f"{type(exc).__name__}: {exc}"}
+        else:
+            for model in models:
+                try:
+                    results[model] = run_model(model)
+                except Exception as exc:
+                    results[model] = {"crashed": f"{type(exc).__name__}: {exc}"}
+        log = ctx.log("llm")
+        crashed: list[str] = []
+        for model in models:
+            result = results[model]
+            out[model] = result
+            if result.get(
+                "aborted"
+            ):  # the model's sources go to the N1 fallback; the week proceeds
+                log.error(
+                    "model_failed",
+                    extra={"extra_fields": {"model": model, "error": result["aborted"]}},
+                )
+                mark_sources_failed(ctx, week_id, [model], str(result["aborted"]))
+            elif result.get("crashed"):
+                log.error(
+                    "model_crashed",
+                    extra={"extra_fields": {"model": model, "error": result["crashed"]}},
+                )
+                crashed.append(f"{model}: {result['crashed']}")
+        if crashed:
+            # Every other model has finished and kept its records; J4 fails so a rerun resumes the
+            # crashed model from its cache (or J6 marks it by N1 at the lock margin).
+            raise RuntimeError("open-weight worker crashed for " + "; ".join(crashed))
         return out
 
     return run_job(week_id, "J4", _llm_inputs(ctx, week_id), fn, force=ctx.force)
@@ -327,6 +369,25 @@ def j7_inputs_hash(ctx: RunContext, week_id: str) -> str:
     )
 
 
+def _check_j7_prerequisites(ctx: RunContext, week_id: str, plan: fb.FallbackPlan) -> None:
+    """PLAN3 phase 3: J7 refuses to run until J6 is done and, unless J6 planned a hold, J2 is done
+    and J4 is done or every open-weight source already carries its fallback mark."""
+    if read_status(week_id, "J6").state != "done":
+        raise RuntimeError("J6 (validate) is not done; J7 waits for it")
+    if plan.no_rebalance:
+        return
+    if read_status(week_id, "J2").state != "done":
+        raise RuntimeError("J2 (baseline, including the forecaster) is not done; J7 waits for it")
+    if read_status(week_id, "J4").state != "done":
+        open_weight = [f"{m}__{p}" for m in ctx.open_weight_models() for p in ctx.prompt_ids()]
+        unmarked = [k for k in open_weight if plan.statuses.get(k) != "fallback"]
+        if unmarked:
+            raise RuntimeError(
+                "J4 (open-weight inference) is not done and these sources have no fallback mark; "
+                f"J7 waits for it: {unmarked[:5]}"
+            )
+
+
 def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
     inputs = j7_inputs_hash(ctx, week_id)
 
@@ -340,6 +401,7 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
         plan = fb.read_plan(week_id)
         if plan is None:
             raise FileNotFoundError("fallback_plan.json missing; run J6 first")
+        _check_j7_prerequisites(ctx, week_id, plan)
         log = ctx.log("weights")
         entries: list[dict[str, Any]] = []
         if plan.no_rebalance:

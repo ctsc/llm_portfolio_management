@@ -41,7 +41,12 @@ def test_shared_prefix_identical_across_stocks_and_order(study_config: StudyConf
         assert a.full_text.startswith(a.shared_prefix)
         assert a.full_text.endswith(a.stock_part)
         assert a.full_text.index("Ticker: AAA") > len(a.shared_prefix)
-        for field in ("Ticker: AAA", "Company: Alpha Co", "Sector: Energy", "Alpha beats estimates."):
+        for field in (
+            "Ticker: AAA",
+            "Company: Alpha Co",
+            "Sector: Energy",
+            "Alpha beats estimates.",
+        ):
             assert field in a.stock_part
     bare = assemble_prompt("bare", ROW_A, "x", study_config, man)
     skills = assemble_prompt("skills_1", ROW_A, "x", study_config, man)
@@ -57,24 +62,34 @@ def test_no_news_sentence_used(study_config: StudyConfig) -> None:
     assert study_config.llm.no_news_sentence in p2.stock_part
 
 
-def test_prefix_hash_changes_when_file_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                               study_config: StudyConfig) -> None:
+def test_prefix_hash_changes_when_file_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, study_config: StudyConfig
+) -> None:
     # Copy the repo prompts and manifest into a temp root and edit the skills file.
     root = tmp_path / "repo"
     shutil.copytree(REPO_ROOT / "prompts", root / "prompts")
     (root / "config").mkdir()
-    shutil.copy(REPO_ROOT / "config" / "prompts_manifest.yaml", root / "config" / "prompts_manifest.yaml")
+    shutil.copy(
+        REPO_ROOT / "config" / "prompts_manifest.yaml", root / "config" / "prompts_manifest.yaml"
+    )
     monkeypatch.setenv("PORTSTUDY_ROOT", str(root))
     before = assemble_prompt("skills_1", ROW_A, "x", study_config, load_manifest())
     skills_file = root / "prompts" / "skills" / "skills_1_PLACEHOLDER_v0.md"
-    skills_file.write_text(skills_file.read_text(encoding="utf-8") + "\nextra line\n", encoding="utf-8")
+    skills_file.write_text(
+        skills_file.read_text(encoding="utf-8") + "\nextra line\n", encoding="utf-8"
+    )
     after = assemble_prompt("skills_1", ROW_A, "x", study_config, load_manifest())
     assert before.prefix_hash != after.prefix_hash
     assert before.prompt_file_sha256 != after.prompt_file_sha256
     # The manifest check fails on the unversioned edit, and --write refuses it.
     problems = refresh_manifest.check_manifest(root / "config" / "prompts_manifest.yaml")
     assert any("changed but version is still v0" in p for p in problems)
-    assert refresh_manifest.main(["--write", "--manifest", str(root / "config" / "prompts_manifest.yaml")]) == 1
+    assert (
+        refresh_manifest.main(
+            ["--write", "--manifest", str(root / "config" / "prompts_manifest.yaml")]
+        )
+        == 1
+    )
     # After a version bump (file renamed and manifest updated) the write succeeds.
     new_file = skills_file.with_name("skills_1_PLACEHOLDER_v1.md")
     skills_file.rename(new_file)
@@ -84,7 +99,12 @@ def test_prefix_hash_changes_when_file_changes(tmp_path: Path, monkeypatch: pyte
             c["file"] = "prompts/skills/skills_1_PLACEHOLDER_v1.md"
             c["version"] = "v1"
     (root / "config" / "prompts_manifest.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
-    assert refresh_manifest.main(["--write", "--manifest", str(root / "config" / "prompts_manifest.yaml")]) == 0
+    assert (
+        refresh_manifest.main(
+            ["--write", "--manifest", str(root / "config" / "prompts_manifest.yaml")]
+        )
+        == 0
+    )
     assert refresh_manifest.check_manifest(root / "config" / "prompts_manifest.yaml") == []
 
 
@@ -99,7 +119,9 @@ def test_placebo_length_check_with_mock_tokenizers(study_config: StudyConfig) ->
         register_token_counter("mock-a", lambda t: len(t.split()))
         assert token_count("one two three", "mock-a") == 3
         assert token_count("abcdefgh", "unknown-model") == 2
-        problems = check_placebo_length.check_lengths(0.05, 0.02, 6000, ["mock-a", "fallback-model"], man)
+        problems = check_placebo_length.check_lengths(
+            0.05, 0.02, 6000, ["mock-a", "fallback-model"], man
+        )
         assert problems == [], problems
         # A tiny cap makes the skills file fail for every tokenizer.
         problems = check_placebo_length.check_lengths(0.05, 0.02, 10, ["mock-a"], man)
@@ -117,8 +139,9 @@ def test_placeholder_files_carry_banner() -> None:
         assert text.startswith("PLACEHOLDER")
 
 
-def test_prompts_assemble_for_every_stock_and_configuration(snapshot_data_dir: Path, study_config: StudyConfig,
-                                                            session_weeks: list[str]) -> None:
+def test_prompts_assemble_for_every_stock_and_configuration(
+    snapshot_data_dir: Path, study_config: StudyConfig, session_weeks: list[str]
+) -> None:
     snap = read_snapshot(session_weeks[0])
     man = load_manifest()
     ref = snap.reference.set_index("ticker")

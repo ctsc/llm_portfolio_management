@@ -39,7 +39,9 @@ def test_three_stock_toy_matches_sklearn_times_five() -> None:
 
 
 def test_daily_returns_window() -> None:
-    prices = pd.DataFrame({"A": np.linspace(100, 110, 11)}, index=pd.bdate_range("2026-01-01", periods=11))
+    prices = pd.DataFrame(
+        {"A": np.linspace(100, 110, 11)}, index=pd.bdate_range("2026-01-01", periods=11)
+    )
     r = daily_returns(prices, 5)
     assert len(r) == 5
     assert r["A"].iloc[-1] == pytest.approx(110 / 109 - 1)
@@ -74,14 +76,17 @@ def test_market_weights_sum_to_one_and_prior_scales_with_delta() -> None:
     np.testing.assert_allclose(pi1.to_numpy(), expected)
 
 
-def test_risk_and_prior_saved_per_week(snapshot_data_dir: Path, study_config: StudyConfig,
-                                       session_weeks: list[str]) -> None:
+def test_risk_and_prior_saved_per_week(
+    snapshot_data_dir: Path, study_config: StudyConfig, session_weeks: list[str]
+) -> None:
     for w in session_weeks[:3]:
         snap = read_snapshot(w)
         model = build_risk_model(w, study_config.risk, snap)
         prior = build_prior(w, study_config.risk, model, snap.reference)
         back = read_risk_model(w)
-        np.testing.assert_allclose(back.sigma_matrix.to_numpy(), model.sigma_matrix.to_numpy(), rtol=1e-10)
+        np.testing.assert_allclose(
+            back.sigma_matrix.to_numpy(), model.sigma_matrix.to_numpy(), rtol=1e-10
+        )
         assert back.tickers == model.tickers
         assert prior["w_mkt"].sum() == pytest.approx(1.0)
         assert list(prior["ticker"]) == model.tickers

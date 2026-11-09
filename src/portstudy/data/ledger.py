@@ -63,12 +63,17 @@ def append_prices(new_rows: pd.DataFrame, logger: logging.Logger | None = None) 
             old = key_existing.loc[overlap, ["open", "high", "low", "close"]].astype(float)
             new = key_incoming.loc[overlap, ["open", "high", "low", "close"]].astype(float)
             diff = (old - new).abs().max(axis=1) > 1e-9
-            for (d, tk) in old.index[diff.to_numpy()]:
+            for d, tk in old.index[diff.to_numpy()]:
                 logger.warning(
                     "ledger_mismatch",
-                    extra={"extra_fields": {"date": str(d), "ticker": tk,
-                                            "ledger_close": float(old.loc[(d, tk), "close"]),
-                                            "provider_close": float(new.loc[(d, tk), "close"])}},
+                    extra={
+                        "extra_fields": {
+                            "date": str(d),
+                            "ticker": tk,
+                            "ledger_close": float(old.loc[(d, tk), "close"]),
+                            "provider_close": float(new.loc[(d, tk), "close"]),
+                        }
+                    },
                 )
         fresh = key_incoming.drop(overlap).reset_index()
     else:

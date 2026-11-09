@@ -175,8 +175,14 @@ def test_projection_math() -> None:
     )
     assert proj["j7_s_per_week"] == pytest.approx(2 * 0.4 + 0.01)
     assert proj["j7_projected_s_per_week"] == pytest.approx(52 * 0.4 + 0.01)
-    assert proj["steered_portfolios"] == 102
-    assert proj["shuffle_cpu_hours"] == pytest.approx(52 * 500 * 102 * 0.2 / 3600)
+    # PLAN3 phase 2: each shuffled strategy's 51 steered portfolios plus its Q0, at its own time.
+    assert proj["steered_portfolios"] == 104
+    assert proj["shuffle_cpu_hours"] == pytest.approx(52 * 500 * 52 * (0.1 + 0.3) / 3600)
+    only_mvo = benchmark_pipeline.projection(
+        times, ["mvo", "cvar"], ["EW"], 1, 51, 52, 500, shuffle_strategies=["mvo"]
+    )
+    assert only_mvo["steered_portfolios"] == 52
+    assert only_mvo["shuffle_cpu_hours"] == pytest.approx(52 * 500 * 52 * 0.1 / 3600)
 
 
 def test_benchmark_writes_table_small(tmp_path: Path) -> None:

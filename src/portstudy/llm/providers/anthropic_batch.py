@@ -1,6 +1,6 @@
 """Claude through the Anthropic Message Batches API with prompt caching on the shared prefix.
 
-# UNVERIFIED: needs real-key smoke test (Phase 17). Request shapes follow the public docs:
+# UNVERIFIED: needs real-key smoke test (PLAN2 phase 15 E). Request shapes follow the public docs:
 #   POST /v1/messages/batches   {"requests": [{"custom_id", "params": {...}}]}
 #   GET  /v1/messages/batches/{id}   -> processing_status in_progress | ended, results_url
 #   GET  results_url                  -> JSONL {custom_id, result: {type, message}}

@@ -1,7 +1,7 @@
 """Alpaca Market Data adapters (daily bars, corporate actions, news) over plain HTTP.
 
 Written against the Alpaca Market Data API v2 docs (https://docs.alpaca.markets/reference).
-Every endpoint here is marked UNVERIFIED until the Phase 17 smoke test with a real key.
+Every endpoint here is marked UNVERIFIED until the PLAN2 phase 15 E smoke test with a real key.
 Keys: ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY.
 """
 
@@ -38,7 +38,7 @@ def _chunks(items: list[str], size: int) -> list[list[str]]:
 
 
 class AlpacaPriceProvider(PriceProvider):
-    """# UNVERIFIED: needs real-key smoke test (Phase 17)."""
+    """# UNVERIFIED: needs real-key smoke test (PLAN2 phase 15 E)."""
 
     name = "alpaca"
 
@@ -148,7 +148,7 @@ class AlpacaPriceProvider(PriceProvider):
 
 
 class AlpacaNewsProvider(NewsProvider):
-    """# UNVERIFIED: needs real-key smoke test (Phase 17)."""
+    """# UNVERIFIED: needs real-key smoke test (PLAN2 phase 15 E)."""
 
     name = "alpaca"
 

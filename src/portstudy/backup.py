@@ -1,4 +1,4 @@
-"""Dated CSV backups the researcher downloads each week (DECISION(N3)).
+"""Dated CSV backups Carter downloads each week (DECISION(N3)).
 
 `run_backup(week_id)` writes `data/backups/<week_id>_<timestamp>/` holding the full price
 ledger, the week's snapshot CSVs, the week's output CSVs, logs, prompt files and manifest,

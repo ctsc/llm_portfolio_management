@@ -1,7 +1,8 @@
 """Fail if the repository contains an em dash or the banned word for experimental conditions.
 
-Scans tracked text files (code, docs, config, prompts). `PLAN.md` and `PLAN2.md` state the rules
-themselves and are excluded; so is this script, whose patterns would otherwise match.
+Scans tracked text files (code, docs, config, prompts). The plan files, PROGRESS.md and results.md
+state or quote the rules themselves and are excluded; so is this script, whose patterns would
+otherwise match. Also fails on "the researcher" or "the student" (PLAN3 rule 0.5) outside prompts/.
 Usage: python scripts/check_banned_words.py [paths...]
 """
 
@@ -25,14 +26,14 @@ SKIP_DIRS = {
     "htmlcov",
     "portstudy.egg-info",
 }
-SKIP_FILES = {"PLAN.md", "PLAN2.md", Path(__file__).name}
+SKIP_FILES = {"PLAN.md", "PLAN2.md", "PLAN3.md", "PROGRESS.md", "results.md", Path(__file__).name}
 
 EM_DASH = "\u2014"
 # The banned condition word, built from parts so this file does not contain it literally.
 BANNED_WORD = re.compile(r"\b" + "a" + "rm" + r"s?\b", re.IGNORECASE)
-# docs/arctic_setup.md is written in the first person (v2 phase 14).
-FIRST_PERSON_FILE = "arctic_setup.md"
+# PLAN3 rule 0.5: no file names "the researcher" or "the student"; `prompts/` is never edited.
 THIRD_PERSON = re.compile(r"\bthe (researcher|student)\b", re.IGNORECASE)
+THIRD_PERSON_SKIP_DIRS = {"prompts"}
 
 
 def _rel(p: Path) -> str:
@@ -68,8 +69,10 @@ def check(paths: list[Path]) -> list[str]:
                 problems.append(f"{_rel(p)}:{i}: em dash")
             if BANNED_WORD.search(line):
                 problems.append(f"{_rel(p)}:{i}: banned condition word")
-            if p.name == FIRST_PERSON_FILE and THIRD_PERSON.search(line):
-                problems.append(f"{_rel(p)}:{i}: third person in a first-person document")
+            if THIRD_PERSON.search(line) and not (set(p.parts) & THIRD_PERSON_SKIP_DIRS):
+                problems.append(
+                    f"{_rel(p)}:{i}: names the researcher or the student (PLAN3 rule 0.5)"
+                )
     return problems
 
 

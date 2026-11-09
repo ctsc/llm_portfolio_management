@@ -55,7 +55,7 @@ def _shellcheck() -> str | None:
 
 
 def test_shellcheck_every_arctic_script() -> None:
-    assert len(SCRIPTS) == 6, [p.name for p in SCRIPTS]
+    assert len(SCRIPTS) == 7, [p.name for p in SCRIPTS]
     tool = _shellcheck()
     if tool is None:
         pytest.skip("shellcheck is not installed (PROGRESS note)")
@@ -67,12 +67,14 @@ def test_shellcheck_every_arctic_script() -> None:
 
 def test_env_example_is_all_tbd_and_common_refuses_it(tmp_path: Path) -> None:
     example = REPO_ROOT / "scripts" / "arctic" / "arctic.env.example"
-    values = [
-        line.split("=", 1)[1].split("#")[0].strip()
+    values = {
+        line.split("=", 1)[0]: line.split("=", 1)[1].split("#")[0].strip()
         for line in example.read_text().splitlines()
         if line and not line.startswith("#")
-    ]
-    assert values and all(v == "TBD" for v in values)
+    }
+    fixed = {"FINISH_WALLTIME": "03:00:00", "POLL_INTERVAL_MINUTES": "60", "MAX_JOB_HOURS": "15"}
+    assert {k: v for k, v in values.items() if k in fixed} == fixed  # PLAN3 phase 3 defaults
+    assert values and all(v == "TBD" for k, v in values.items() if k not in fixed)
     result = subprocess.run(
         ["bash", str(REPO_ROOT / "scripts" / "arctic" / "submit_weekend.sh"), "--dry-run"],
         capture_output=True,
@@ -232,8 +234,9 @@ def test_walltime_parsing_and_warning(
     ctx = _ctx(generous_budget(study_config), model_registry, world, inject_week)
     monkeypatch.setattr(run_weekend, "default_context", lambda **kw: ctx)
     args = ["--synthetic", "--week", inject_week, "--dry-run"]
-    assert run_weekend.main([*args, "--check-walltime", "7-00:00:00"]) == 0
-    assert "warning: walltime 7-00:00:00 ends" in capsys.readouterr().out
+    # PLAN3 W1: anything above 15 hours is refused outright (the lock warning is moot then).
+    assert run_weekend.main([*args, "--check-walltime", "7-00:00:00"]) == 2
+    assert "exceeds the 15 hour limit" in capsys.readouterr().out
     assert run_weekend.main([*args, "--check-walltime", "00:10:00"]) == 0
     assert "before the lock" in capsys.readouterr().out
 

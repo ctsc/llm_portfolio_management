@@ -67,8 +67,9 @@ def build_universe(
 
     table = members[members["ticker"].isin(dollar.index)].copy()
     table["avg_dollar_volume"] = table["ticker"].map(dollar)
-    table = table.sort_values(["sector", "avg_dollar_volume", "ticker"],
-                              ascending=[True, False, True], kind="stable")
+    table = table.sort_values(
+        ["sector", "avg_dollar_volume", "ticker"], ascending=[True, False, True], kind="stable"
+    )
     table["rank_in_sector"] = table.groupby("sector").cumcount() + 1
 
     per_sector = math.floor(ucfg.size / ucfg.sectors)
@@ -91,8 +92,9 @@ def build_universe(
     leftover = table[table["rank_in_sector"] > per_sector]
     n_extra = ucfg.size - len(picked)
     if n_extra > 0 and len(leftover):
-        top_left = leftover.sort_values(["avg_dollar_volume", "ticker"],
-                                        ascending=[False, True]).head(n_extra)
+        top_left = leftover.sort_values(
+            ["avg_dollar_volume", "ticker"], ascending=[False, True]
+        ).head(n_extra)
         picked = pd.concat([picked, top_left])
         log.info(
             "universe_leftover_slots",
@@ -112,10 +114,22 @@ def build_universe(
             if len(same):
                 drop_idx = same.sort_values("avg_dollar_volume").index[0]
                 picked = picked.drop(index=drop_idx)
-            picked = pd.concat([picked, pd.DataFrame([{
-                "ticker": row.ticker, "name": row.name, "sector": row.sector,
-                "avg_dollar_volume": float("nan"), "rank_in_sector": 0,
-            }])])
+            picked = pd.concat(
+                [
+                    picked,
+                    pd.DataFrame(
+                        [
+                            {
+                                "ticker": row.ticker,
+                                "name": row.name,
+                                "sector": row.sector,
+                                "avg_dollar_volume": float("nan"),
+                                "rank_in_sector": 0,
+                            }
+                        ]
+                    ),
+                ]
+            )
 
     picked = picked.sort_values(["sector", "rank_in_sector", "ticker"], kind="stable")
     picked["version"] = version

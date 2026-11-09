@@ -47,7 +47,9 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 @pytest.fixture(scope="session")
 def world(study_config: StudyConfig) -> SyntheticWorld:
     """One seeded synthetic world shared by the whole test session."""
-    return SyntheticWorld.generate(study_config.synthetic, first_week=study_config.synthetic.first_week)
+    return SyntheticWorld.generate(
+        study_config.synthetic, first_week=study_config.synthetic.first_week
+    )
 
 
 @pytest.fixture(scope="session")
@@ -61,7 +63,9 @@ def first_cutoff(study_config: StudyConfig) -> dt.date:
 
 
 @pytest.fixture(scope="session")
-def universe(study_config: StudyConfig, providers: ProviderBundle, first_cutoff: dt.date) -> pd.DataFrame:
+def universe(
+    study_config: StudyConfig, providers: ProviderBundle, first_cutoff: dt.date
+) -> pd.DataFrame:
     return build_universe(first_cutoff, study_config, providers, print_table=False)
 
 
@@ -75,9 +79,13 @@ def session_weeks(study_config: StudyConfig) -> list[str]:
 
 
 @pytest.fixture(scope="session")
-def session_data_root(tmp_path_factory: pytest.TempPathFactory, study_config: StudyConfig,
-                      providers: ProviderBundle, universe: pd.DataFrame,
-                      session_weeks: list[str]) -> Path:
+def session_data_root(
+    tmp_path_factory: pytest.TempPathFactory,
+    study_config: StudyConfig,
+    providers: ProviderBundle,
+    universe: pd.DataFrame,
+    session_weeks: list[str],
+) -> Path:
     """A data dir holding SESSION_WEEKS snapshots, built once and shared read-mostly."""
     from portstudy.data.snapshot import make_snapshot
 
@@ -114,8 +122,12 @@ def copy_snapshots(src_root: Path, dst_root: Path, weeks: list[str]) -> None:
 
 
 @pytest.fixture()
-def work_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_data_root: Path,
-                  session_weeks: list[str]) -> Path:
+def work_data_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session_data_root: Path,
+    session_weeks: list[str],
+) -> Path:
     """A private data dir seeded with the first few session snapshots (writable per test)."""
     target = tmp_path / "work"
     copy_snapshots(session_data_root, target, session_weeks[:4])
@@ -130,13 +142,18 @@ PIPELINE_WEEKS = 3
 
 def generous_budget(cfg: StudyConfig) -> StudyConfig:
     """The stub API models carry placeholder prices; lift the goal so tests are not blocked."""
-    return cfg.model_copy(update={"llm": cfg.llm.model_copy(
-        update={"cost_goal_usd": 1e9, "cost_warn_usd": 1e9})})
+    return cfg.model_copy(
+        update={"llm": cfg.llm.model_copy(update={"cost_goal_usd": 1e9, "cost_warn_usd": 1e9})}
+    )
 
 
 @pytest.fixture(scope="session")
-def pipeline_root(tmp_path_factory: pytest.TempPathFactory, study_config: StudyConfig,
-                  model_registry: ModelRegistry, world: SyntheticWorld) -> Path:
+def pipeline_root(
+    tmp_path_factory: pytest.TempPathFactory,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+) -> Path:
     """A data dir where the first PIPELINE_WEEKS synthetic weeks ran through J1 to J9."""
     from portstudy.data.providers.synthetic import synthetic_bundle
     from portstudy.llm.prompts import load_manifest
@@ -149,8 +166,14 @@ def pipeline_root(tmp_path_factory: pytest.TempPathFactory, study_config: StudyC
     try:
         cfg = generous_budget(study_config)
         for w in cal.week_range(study_config.synthetic.first_week, PIPELINE_WEEKS):
-            ctx = RunContext(cfg=cfg, registry=model_registry, manifest=load_manifest(), synthetic=True,
-                             data_providers=synthetic_bundle(world), clock=synthetic_clock(w))
+            ctx = RunContext(
+                cfg=cfg,
+                registry=model_registry,
+                manifest=load_manifest(),
+                synthetic=True,
+                data_providers=synthetic_bundle(world),
+                clock=synthetic_clock(w),
+            )
             for job in cfg.pipeline.jobs:
                 state = run_named(ctx, job, w).state
                 assert state == "done", (w, job, state)

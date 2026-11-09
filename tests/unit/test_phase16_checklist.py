@@ -42,7 +42,9 @@ def test_every_decision_tag_appears_in_open_questions() -> None:
 
 
 def test_git_history_has_one_commit_per_phase() -> None:
-    log = subprocess.run(["git", "log", "--format=%s"], cwd=REPO_ROOT, capture_output=True, text=True)
+    log = subprocess.run(
+        ["git", "log", "--format=%s"], cwd=REPO_ROOT, capture_output=True, text=True
+    )
     if log.returncode != 0:
         return  # not a git checkout (for example an extracted archive)
     subjects = [s for s in log.stdout.splitlines() if s.startswith("phase ")]

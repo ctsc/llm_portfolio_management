@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "portstudy"
 version = "0.1.0"
-description = "LLM skills and investor mindsets study: quant baseline plus LLM views in a weekly Black-Litterman pipeline"
+description = "Specialized LLM skills across fixed quantitative portfolio optimization strategies: LLM views in a weekly Black-Litterman pipeline"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 license = { text = "MIT" }

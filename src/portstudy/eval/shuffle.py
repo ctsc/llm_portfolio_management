@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,7 +28,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
-from portstudy.config import StudyConfig
+from portstudy.config import StudyConfig, _default_shuffle_strategies
 from portstudy.eval.data import sharpe, weekly_portfolio_returns
 from portstudy.eval.tests import holm
 from portstudy.io import read_json, write_json_atomic
@@ -261,30 +262,81 @@ def shard_dir(portfolio: str) -> Path:
     return path
 
 
-def shuffle_portfolios(portfolios: list[str]) -> list[str]:
-    """Each strategy's Q0 followed by every steered portfolio; controls never shuffle."""
-    strategies = dict.fromkeys(
-        PortfolioId.parse(key).strategy
-        for key in portfolios
-        if not PortfolioId.parse(key).is_control
-    )
-    q0_keys = [PortfolioId.q0(cast(StrategyName, strategy)).key for strategy in strategies]
-    steered = [
+def shuffle_portfolios(portfolios: list[str], strategies: Sequence[str] | None = None) -> list[str]:
+    """Each shuffled strategy's Q0 followed by its steered portfolios; controls never shuffle.
+
+    DECISION(G6), PLAN3 0.1: only the strategies in `eval.shuffle.strategies` (default MVO, Robust
+    MVO and Top-K) are shuffled; Mean-CVaR and Resampled MVO are excluded for compute.
+    """
+    allowed = set(_default_shuffle_strategies() if strategies is None else strategies)
+    kept = [
         key
         for key in portfolios
-        if not PortfolioId.parse(key).is_control and not PortfolioId.parse(key).is_q0
+        if not PortfolioId.parse(key).is_control and PortfolioId.parse(key).strategy in allowed
     ]
+    strategy_order = dict.fromkeys(PortfolioId.parse(key).strategy for key in kept)
+    q0_keys = [PortfolioId.q0(cast(StrategyName, strategy)).key for strategy in strategy_order]
+    steered = [key for key in kept if not PortfolioId.parse(key).is_q0]
     return list(dict.fromkeys(q0_keys + steered))
 
 
-def plan_shards(portfolios: list[str], n_shuffles: int, shard_size: int) -> list[Shard]:
+def plan_shards(
+    portfolios: list[str],
+    n_shuffles: int,
+    shard_size: int,
+    strategies: Sequence[str] | None = None,
+) -> list[Shard]:
     if shard_size <= 0:
         raise ValueError("shard_size must be positive")
     shards = []
-    for key in shuffle_portfolios(portfolios):
+    for key in shuffle_portfolios(portfolios, strategies):
         for start in range(0, n_shuffles, shard_size):
             shards.append(Shard(key, start, min(start + shard_size, n_shuffles)))
     return shards
+
+
+@dataclass(frozen=True)
+class ShardEstimate:
+    minutes: float
+    strategy: str
+    seconds_per_solve: float
+    n_weeks: int
+
+
+def benchmark_solve_seconds(cfg: StudyConfig, folder: Path | None = None) -> dict[str, float]:
+    """Mean solve seconds per strategy from the newest `data/benchmarks/*.csv` (phase 2 run)."""
+    root = folder if folder is not None else data_dir() / "benchmarks"
+    files = sorted(root.glob("*.csv")) if root.exists() else []
+    if not files:
+        return {}
+    table = pd.read_csv(files[-1])
+    if "strategy" not in table.columns or "mean_solve_s" not in table.columns:
+        return {}
+    return dict(
+        zip(table["strategy"].astype(str), table["mean_solve_s"].astype(float), strict=True)
+    )
+
+
+def estimate_shard_minutes(
+    cfg: StudyConfig,
+    shard_size: int,
+    n_weeks: int,
+    seconds_per_solve: float | None = None,
+    folder: Path | None = None,
+) -> ShardEstimate | None:
+    """Minutes one shard takes for the slowest shuffled strategy: one solve per week per shuffle.
+    `None` when no benchmark file exists and no override is given (PLAN3 phase 3, shard sizing)."""
+    strategy: str
+    if seconds_per_solve is None:
+        solves = benchmark_solve_seconds(cfg, folder)
+        candidates = {s: solves[s] for s in cfg.eval.shuffle.strategies if s in solves}
+        if not candidates:
+            return None
+        strategy, seconds = max(candidates.items(), key=lambda kv: kv[1])
+    else:
+        strategy, seconds = "given", float(seconds_per_solve)
+    minutes = shard_size * max(n_weeks, 1) * seconds / 60.0
+    return ShardEstimate(minutes, strategy, seconds, max(n_weeks, 1))
 
 
 def write_shard_plan(shards: list[Shard], path: Path) -> pd.DataFrame:
@@ -513,7 +565,11 @@ def shuffle_test(
     `require_complete` the call fails listing missing shards (the `collect` command); otherwise
     missing shards are run here first (the in-process report path)."""
     n = n_shuffles if n_shuffles is not None else cfg.eval.shuffle.n_shuffles
-    plan = shards if shards is not None else plan_shards(portfolios, n, cfg.eval.shuffle.shard_size)
+    plan = (
+        shards
+        if shards is not None
+        else plan_shards(portfolios, n, cfg.eval.shuffle.shard_size, cfg.eval.shuffle.strategies)
+    )
     if not require_complete:
         procs = processes if processes is not None else cfg.eval.shuffle.processes
         run_shards_local(cfg, [s for s in plan if not shard_is_complete(s)], weeks, seed, procs)

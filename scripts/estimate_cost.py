@@ -1,7 +1,7 @@
 """Project the study cost per model and configuration from logged runs (DECISION(D3)).
 
 Reads real token counts from every data/outputs/<week>/llm_scores.csv written so far (the
-Phase 17 prompt test runs), averages tokens per call, and prints the projected cost for the
+PLAN2 phase 15 G prompt test runs), averages tokens per call, and prints the projected cost for the
 remaining weeks with and without prompt caching.
 
 Usage: python scripts/estimate_cost.py [--weeks N] [--stocks 100]

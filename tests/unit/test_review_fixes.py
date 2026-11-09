@@ -129,81 +129,13 @@ def test_h2_replay_weeks_fill_the_gap_and_a_j1_failure_writes_the_hold(
     assert calls == ["J1", "J6", "J7"]
 
 
-def test_h3_login_mode_waits_for_kronos_before_j4(tmp_path: Path) -> None:
-    """H3: in login mode the script runs J3, waits for the Kronos job to leave the queue, then
-    J4 to J5, then submits the weekend job. Slurm and python are stubbed on PATH."""
-    import os
-    import stat
-    import subprocess
-
-    repo = Path(__file__).resolve().parents[2]
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    log = tmp_path / "calls.log"
-    stubs = {
-        "sbatch": 'echo "sbatch $*" >> "$CALLS"; echo 4242',
-        "squeue": 'echo "squeue $*" >> "$CALLS"; n=$(grep -c squeue "$CALLS"); if [ "$n" -lt 3 ]; then echo "4242 R"; fi',
-        "portstudy": 'echo "portstudy $*" >> "$CALLS"',
-        "python": 'echo "python $*" >> "$CALLS"',
-    }
-    for name, body in stubs.items():
-        path = bin_dir / name
-        path.write_text(f"#!/usr/bin/env bash\n{body}\n")
-        path.chmod(path.stat().st_mode | stat.S_IEXEC)
-    venv = tmp_path / "venv" / "bin"
-    venv.mkdir(parents=True)
-    (venv / "activate").write_text("# stub venv\n")
-    env_file = tmp_path / "arctic.env"
-    env_file.write_text(
-        "\n".join(
-            [
-                "SLURM_ACCOUNT=acct",
-                "GPU_PARTITION=gpu",
-                "CPU_PARTITION=cpu",
-                "GPU_GRES=gpu:1",
-                "KRONOS_WALLTIME=01:00:00",
-                "WEEKEND_WALLTIME=08:00:00",
-                "SHUFFLE_WALLTIME=04:00:00",
-                "LLM_FALLBACK_WALLTIME=12:00:00",
-                "PYTHON_MODULE=python/3.11",
-                f"VENV_PATH={tmp_path / 'venv'}",
-                f"DATA_ROOT={tmp_path / 'data'}",
-                f"HF_HOME={tmp_path / 'hf'}",
-                "ARCTIC_NETWORK_MODE=login",
-                "SHUFFLE_MAX_PARALLEL=10",
-                "",
-            ]
-        )
-    )
-    env = {
-        **os.environ,
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "ARCTIC_ENV": str(env_file),
-        "CALLS": str(log),
-        "WAIT_POLL_SECONDS": "0",
-    }
-    result = subprocess.run(
-        ["bash", str(repo / "scripts" / "arctic" / "submit_weekend.sh"), "--week", "2026-W05"],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=60,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    calls = [line for line in log.read_text().splitlines() if not line.startswith("squeue")]
-    n_polls = sum(1 for line in log.read_text().splitlines() if line.startswith("squeue"))
-    assert calls[0].startswith("python scripts/run_weekend.py --dry-run --check-walltime")
-    assert calls[1] == "portstudy run-job J1 --week 2026-W05"
-    assert calls[2].startswith("sbatch --parsable") and calls[2].endswith("kronos.sbatch")
-    assert calls[3] == "python scripts/run_weekend.py --from J3 --until J3 --week 2026-W05"
-    assert calls[4] == "python scripts/run_weekend.py --from J4 --until J5 --week 2026-W05"
-    assert "--dependency=afterok:4242" in calls[5] and calls[5].endswith("weekend.sbatch")
-    assert n_polls >= 3, "the script polled squeue until the Kronos job left the queue"
-    # The J4 run happens only after the last poll.
-    order = log.read_text().splitlines()
-    assert order.index(calls[4]) > max(
-        i for i, line in enumerate(order) if line.startswith("squeue")
-    )
+def test_h3_login_mode_layout_moved_to_v3_phase3() -> None:
+    """H3 (J4 gated on Kronos in login mode) is superseded by PLAN3 phase 3: J4 no longer needs
+    J2, and the three-job layout is covered in tests/unit/test_v3_phase3_arctic.py."""
+    text = (
+        Path(__file__).resolve().parents[2] / "scripts" / "arctic" / "submit_weekend.sh"
+    ).read_text()
+    assert "wait_for_job" not in text and "afterany" in text
 
 
 def test_m4_m10_current_week_is_dst_aware_and_rolls_at_the_close() -> None:

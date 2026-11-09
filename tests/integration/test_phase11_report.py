@@ -16,24 +16,51 @@ from portstudy.pipeline.context import RunContext
 from tests.conftest import PIPELINE_WEEKS, generous_budget
 
 
-def test_report_builds_on_synthetic_run(pipeline_dir: Path, study_config: StudyConfig,
-                                        model_registry: ModelRegistry, world: SyntheticWorld) -> None:
+def test_report_builds_on_synthetic_run(
+    pipeline_dir: Path,
+    study_config: StudyConfig,
+    model_registry: ModelRegistry,
+    world: SyntheticWorld,
+) -> None:
     cfg = generous_budget(study_config)
-    ctx = RunContext(cfg=cfg, registry=model_registry, manifest=load_manifest(), synthetic=True,
-                     data_providers=synthetic_bundle(world))
+    ctx = RunContext(
+        cfg=cfg,
+        registry=model_registry,
+        manifest=load_manifest(),
+        synthetic=True,
+        data_providers=synthetic_bundle(world),
+    )
     data = load_eval_data(cfg, ctx.portfolio_keys())
     assert len(data.weeks) == PIPELINE_WEEKS
     assert set(data.weekly_returns.columns) == set(ctx.portfolio_keys())
     assert data.statuses.eq("normal").all().all()
-    folder = run_eval(ctx, skip_shuffle=False, n_shuffles=3, folder=pipeline_dir / "outputs" / "report")
-    expected = ["report.md", "h1_ic_gap.csv", "h2_ic_gap.csv", "h2_portfolio_vs_q0_clean.csv",
-                "h2_portfolio_vs_q0_as_traded.csv", "h3_skills_vs_controls.csv", "h4_earnings_week.csv",
-                "h5_factors.csv", "h5_shuffle.csv", "fallback_counts.csv", "weekly_ic_long.csv",
-                "portfolio_metrics_as_traded.csv", "fig_weekly_ic.png", "fig_h1_gaps.png",
-                "fig_equity_curves.png", "fig_shuffle_histograms.png",
-                # v2 phase 10: H3b, H4 ranking, per-strategy equity curves
-                "h3b_width.csv", "h4_strategy_ranking.csv", "fig_h3b_width.png",
-                "fig_h4_ranking.png", *[f"fig_equity_{s}.png" for s in cfg.strategies.enabled]]
+    folder = run_eval(
+        ctx, skip_shuffle=False, n_shuffles=3, folder=pipeline_dir / "outputs" / "report"
+    )
+    expected = [
+        "report.md",
+        "h1_ic_gap.csv",
+        "h2_ic_gap.csv",
+        "h2_portfolio_vs_q0_clean.csv",
+        "h2_portfolio_vs_q0_as_traded.csv",
+        "h3_skills_vs_controls.csv",
+        "h4_earnings_week.csv",
+        "h5_factors.csv",
+        "h5_shuffle.csv",
+        "fallback_counts.csv",
+        "weekly_ic_long.csv",
+        "portfolio_metrics_as_traded.csv",
+        "fig_weekly_ic.png",
+        "fig_h1_gaps.png",
+        "fig_equity_curves.png",
+        "fig_shuffle_histograms.png",
+        # v2 phase 10: H3b, H4 ranking, per-strategy equity curves
+        "h3b_width.csv",
+        "h4_strategy_ranking.csv",
+        "fig_h3b_width.png",
+        "fig_h4_ranking.png",
+        *[f"fig_equity_{s}.png" for s in cfg.strategies.enabled],
+    ]
     for name in expected:
         assert (folder / name).exists(), name
     md = (folder / "report.md").read_text(encoding="utf-8")
@@ -51,10 +78,14 @@ def test_report_builds_on_synthetic_run(pipeline_dir: Path, study_config: StudyC
     assert {"mean_view_shift", "solver_failed_weeks", "fallback_weeks"} <= set(metrics_all.columns)
     assert set(cfg.strategies.controls) <= set(metrics_all["portfolio"])
     shuffle = pd.read_csv(folder / "h5_shuffle.csv")
-    shuffle_portfolios = set(ctx.portfolio_keys()) - set(ctx.control_keys())  # controls: no family
+    shuffle_portfolios = {  # DECISION(G6): only the configured strategies, never the controls
+        k
+        for k in set(ctx.portfolio_keys()) - set(ctx.control_keys())
+        if k.split("__")[0] in cfg.eval.shuffle.strategies
+    }
     assert set(shuffle["portfolio"]) == shuffle_portfolios
     assert len(shuffle) == len(shuffle_portfolios) and (shuffle["n_shuffles"] == 3).all()
-    assert set(shuffle["strategy"]) == set(cfg.strategies.enabled)  # Holm within each strategy
+    assert set(shuffle["strategy"]) == set(cfg.eval.shuffle.strategies)  # Holm within each
     assert shuffle["p_total_return"].between(0, 1).all()
     assert (shuffle["p_total_return_holm"] >= shuffle["p_total_return"] - 1e-12).all()
     metrics = pd.read_csv(folder / "portfolio_metrics_as_traded.csv")

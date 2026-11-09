@@ -1,7 +1,7 @@
 """S&P 500 member list from the Wikipedia constituents table (ticker, name, GICS sector).
 
 Parsed with the standard library HTML parser so no extra dependency is needed.
-# UNVERIFIED: needs real smoke test (Phase 17). No key required.
+# UNVERIFIED: needs real smoke test (PLAN2 phase 15 E). No key required.
 """
 
 from __future__ import annotations
@@ -75,8 +75,9 @@ def parse_constituents(html: str) -> pd.DataFrame:
             continue
         # Wikipedia uses dots for share classes (BRK.B); Alpaca and yfinance differ, so keep
         # the Wikipedia form and let the price provider map it if needed.
-        rows.append({"ticker": r[sym_i].strip(), "name": r[name_i].strip(),
-                     "sector": r[sector_i].strip()})
+        rows.append(
+            {"ticker": r[sym_i].strip(), "name": r[name_i].strip(), "sector": r[sector_i].strip()}
+        )
     return pd.DataFrame(rows, columns=MEMBER_COLUMNS)
 
 

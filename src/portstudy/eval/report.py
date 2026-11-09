@@ -30,6 +30,11 @@ from portstudy.eval.hypotheses import (  # noqa: E402
 )
 from portstudy.eval.rank_ic import long_table  # noqa: E402
 from portstudy.eval.shuffle import shuffle_test  # noqa: E402
+
+SHUFFLE_EXCLUDED_LINE = (
+    "No shuffled-ratings test for this strategy (excluded under DECISION(G6) for compute; "
+    "see the Q0 comparison and factor regression)."
+)
 from portstudy.io import write_csv_atomic, write_text_atomic  # noqa: E402
 from portstudy.paths import report_dir  # noqa: E402
 from portstudy.pipeline.context import RunContext  # noqa: E402
@@ -521,7 +526,9 @@ def _strategy_sections(
             h2 = h2[h2["strategy"] == strategy]
         out.append("H2 return vs Q0 (clean weeks, Holm within this strategy):")
         out.append(_md_table(h2, [c for c in h2_cols if c in h2.columns]))
-        if not skip_shuffle and "h5_shuffle" in tables:
+        if strategy not in data.cfg.eval.shuffle.strategies:
+            out.append(SHUFFLE_EXCLUDED_LINE)
+        elif not skip_shuffle and "h5_shuffle" in tables:
             h5 = tables["h5_shuffle"]
             if len(h5) and "strategy" in h5.columns:
                 h5 = h5[h5["strategy"] == strategy]

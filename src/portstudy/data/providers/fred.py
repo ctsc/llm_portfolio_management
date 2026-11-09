@@ -1,7 +1,7 @@
 """FRED adapter for the 3-month T-bill series DTB3.
 
 Written against https://fred.stlouisfed.org/docs/api/fred/series_observations.html
-# UNVERIFIED: needs real-key smoke test (Phase 17). Key: FRED_API_KEY.
+# UNVERIFIED: needs real-key smoke test (PLAN2 phase 15 E). Key: FRED_API_KEY.
 """
 
 from __future__ import annotations

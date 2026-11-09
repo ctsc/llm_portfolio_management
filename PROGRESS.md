@@ -713,3 +713,112 @@ so the project can go back without code changes. `.github/workflows/ci.yml` mirr
 slow by hand, checks); `test_github_workflow_mirrors_gitlab_ci` asserts that every GitLab script
 line appears in the matching GitHub job and that the history-reading jobs use `fetch-depth: 0`.
 Docs: `docs/github_setup.md` (new), `docs/gitlab_setup.md` (marked fallback), README references.
+
+## v3 phase 1: config, decisions, formatting, and stale comments
+
+PLAN3 (`PLAN3.md`) corrects the repository against the two proposals in `docs/proposals/`.
+
+- `ruff format src tests scripts` reformatted 23 files (formatting only; no test changed).
+- `config/study.yaml`: `llm.gateway.base_url` is `https://litellm.rs.gsu.edu/v1` (GSU network or
+  VPN); the unsourced `minimax-m2.7: max_output_tokens: 2048` override is removed (`settings: {}`);
+  `eval.shuffle.strategies: [mvo, robust, topk]` (DECISION(G6), PLAN3 0.1); the `repo_commit` and
+  `live_end_date` comments name Carter and PLAN2 phase 15; `decisions` has the PLAN3 G6 text and the
+  new W1 (walltime at most 15 hours) and M1 (`--mem-per-cpu=3G`) rows. `config/study_test.yaml`
+  adds the same `eval.shuffle.strategies` and keeps 20 shuffles.
+- `config.py`: `ShuffleConfig.strategies` (default mvo, robust, topk) and a `StudyConfig`
+  validator that rejects a shuffle strategy not in `strategies.enabled`.
+- `config/models.yaml` header and `pyproject.toml` description per PLAN3; "Phase 17",
+  "the researcher" and "the desktop" removed from every code comment and docstring listed in PLAN3
+  finding 10 (`grep -rn -i "phase 17\|the researcher\|the desktop" src scripts config` is empty).
+- `scripts/check_banned_words.py`: the "the researcher" / "the student" check now applies to every
+  scanned file outside `prompts/`; `PLAN3.md`, `PROGRESS.md` and `results.md` join the skip list
+  because they state or quote the rule.
+- Tests: `tests/unit/test_v3_phase1_config.py` (config values, validator, wording check).
+
+Choices made while unattended: the wording check already covers `README.md` and `docs/`, so the
+five existing "the researcher" phrases there were replaced mechanically with "Carter" now (phases 4
+and 5 rewrite those files anyway) to keep the gate green within this phase.
+
+## v3 phase 2: shuffle scope (DECISION(G6)) and corrected projections
+
+
+- `eval/shuffle.py`: `shuffle_portfolios(portfolios, strategies)` keeps only the strategies in
+  `eval.shuffle.strategies` (their Q0 first, then their steered portfolios; controls never);
+  `plan_shards`, `shuffle_test`, `portstudy shuffle plan/run/collect/run-local` all go through it,
+  so Mean-CVaR and Resampled MVO are no longer shuffled. `StudyConfig` narrows the default list to
+  the enabled strategies when `eval.shuffle.strategies` is not set (reduced test configs) and
+  rejects an explicit entry that names a disabled strategy.
+- `eval/report.py`: every excluded strategy section prints "No shuffled-ratings test for this
+  strategy (excluded under DECISION(G6) for compute; see the Q0 comparison and factor regression)."
+- `scripts/benchmark_pipeline.py`: `--weeks` defaults to 24 (pilot plus live), the projection
+  counts only the configured shuffle strategies (each strategy's steered portfolios plus its Q0 at
+  that strategy's own mean solve time, printed per strategy), `--replay-seconds` adds a second
+  projection with one simulator replay per shuffle (without it the output says replay time is
+  not included), and the warning fires only above the 15,000 CPU-hour request.
+- Tests: `tests/unit/test_v3_phase2_shuffle.py` (filtered portfolio list, shard count, projection
+  arithmetic), `test_v2_phase11_shuffle.py` updated to the G6 scope, and the e2e eval test asserts
+  the two exclusion lines (cvar, resampled) in `report.md`.
+
+Projection runs (this VM, `--sources 3 --weeks 24`, projection at 51 sources, 500 shuffles,
+156 portfolios = 3 strategies x (51 sources + Q0); solves only, replay time not included):
+
+| stocks | mvo mean solve | robust | topk | cvar (not shuffled) | resampled (not shuffled) | shuffle CPU hours | peak MB |
+|---|---|---|---|---|---|---|---|
+| 100 | 0.010 s | 0.022 s | 0.001 s | 7.3 s | 1.2 s | 5.6 (mvo 1.7, robust 3.7, topk 0.2) | 587 |
+| 300 | 0.077 s | 0.413 s | 0.003 s | 22.1 s | 18.1 s | 85.2 (mvo 13.3, robust 71.5, topk 0.4) | 1301 |
+
+Had Mean-CVaR and Resampled MVO stayed in scope the 300-stock total would be about 4,400 CPU hours
+(52 x (22.1 + 18.1) x 24 x 500 / 3600 on top of 85), which is the roughly 99 percent that G6
+removes. J7 at 300 stocks and 51 sources is about 2,117 s per week on this VM.
+
+## v3 phase 3: ARCTIC jobs under the time limit (W1) and SU efficiency (M1)
+
+- `J4_open_weight_infer` no longer waits for J2 (the LLM calls never read the Kronos output).
+  Healthy open-weight models run side by side when `llm.parallel_models` is true (one thread per
+  model, each with its own `WeekRunner` and `llm.concurrency` pool, writing only its own
+  `<model>__<config>.jsonl` files; `run_status.json` writes take a shared lock). When one model's
+  worker raises, the other models still finish and keep their records; J4 then fails naming the
+  crashed model, so `run_weekend.py --from J4` resumes it from the cache (an authentication abort
+  still marks that model's sources failed and lets the week proceed, review fix M2). `assess_run`
+  keeps any model-wide failed mark (health check, abort) while the run is short of its tasks.
+  `config/study_test.yaml` sets `parallel_models: false` so two test runs give identical digests.
+- `J7_weights` now refuses to run until J6 is done and, unless J6 planned a hold, J2 is done and
+  J4 is done or every open-weight source already carries its fallback mark
+  (`_check_j7_prerequisites`).
+- `scripts/run_weekend.py --poll-once`: one J5 pass; exit 3 while batches are pending before the
+  lock margin, exit 0 when collected, and at the margin the run continues so J6 labels the pending
+  sources (N1). `--check-walltime` rejects more than 15 hours (exit 2) and warns above 12.
+- New `scripts/arctic/llm.sbatch` (J3 then J4; J4 only in login mode; 2 cores x 3G) and
+  `scripts/arctic/finish.sbatch` (1 core x 3G, `FINISH_WALLTIME` 03:00:00: `--from J5 --poll-once`,
+  resubmits itself with `--begin=now+${POLL_INTERVAL_MINUTES}minutes` on exit 3, otherwise runs J6
+  to J9 in the same job). `submit_weekend.sh` submits kronos and llm at once with no dependency
+  and finish with `--dependency=afterany:<kronos>:<llm>`; login mode runs J1 and J3 on the login
+  node first and never polls batches there. `weekend.sbatch` is removed.
+- `common.sh` `check_walltime` refuses any walltime above `MAX_JOB_HOURS` (15) and warns above 12;
+  `arctic.env.example` adds `GPU_MEM`, `LLM_WALLTIME`, `FINISH_WALLTIME`, `POLL_INTERVAL_MINUTES`
+  (60), `MAX_JOB_HOURS` and drops `WEEKEND_WALLTIME`. `shuffle_array.sbatch` uses one core and
+  `--mem-per-cpu=3G`; GPU jobs take `--mem=${GPU_MEM}`.
+- `portstudy shuffle plan` prints the estimated minutes per shard from the newest benchmark file
+  (slowest shuffled strategy, one solve per week per shuffle) and lowers the shard size in the plan
+  output when a shard would exceed `--max-shard-minutes` (120); the config is unchanged.
+- Tests: `tests/unit/test_v3_phase3_arctic.py` (J4 with J2 pending, J7 refusals, parallel equals
+  sequential, one crashing model, `--poll-once` exit codes, walltime limits, `common.sh` guard,
+  three-job layout in both modes through stubbed `sbatch`, `finish.sbatch` resubmission). The
+  review-fix H3 test is replaced (its login-mode wait no longer exists). shellcheck runs in
+  `test_shellcheck_every_arctic_script` over the new files.
+
+Runtime budget (DECISION(W1): every job at most 15 hours, target 12). Solve and J7 times are the
+phase 2 benchmark on this VM; LLM times are the per-request figures in
+`docs/proposals/ARCTIC_Resource_Request.tex` (10 GPU-s small models, 40 GPU-s large); Kronos is the
+request's estimate. Largest configuration: 5 open-weight models x 7 prompts.
+
+| Job | 100 stocks | 300 stocks | Basis |
+|---|---|---|---|
+| kronos.sbatch (J1, J2, GPU) | under 1 h | about 1 h | ARCTIC request, 1 GPU-hour per week |
+| llm.sbatch (J3 then J4, 2 cores) | about 1.9 h | about 5.8 h | slowest model: 700 (2,100) requests x 40 s / concurrency 4, models in parallel |
+| finish.sbatch (J5 to J9, 1 core) | about 0.2 h | about 0.7 h | J7 446 s (2,117 s) at 51 sources plus J8 and J9 (minutes) |
+| one shuffle shard (25 shuffles x 24 weeks) | 0.2 min | 4.1 min | robust mean solve 0.022 s (0.413 s); replay time per shuffle not yet measured |
+
+Every job is under 12 hours; `LLM_WALLTIME` 06:00:00 leaves headroom at 300 stocks only if the
+gateway sustains about 20 requests in flight (PLAN2 phase 15 E confirms the real per-request time).
+

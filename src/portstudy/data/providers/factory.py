@@ -20,8 +20,12 @@ def synthetic_world(cfg: StudyConfig, folder: Path | None = None) -> SyntheticWo
     return load_or_generate_world(cfg.synthetic, target, first_week=cfg.synthetic.first_week)
 
 
-def build_providers(cfg: StudyConfig, synthetic: bool = False, world: SyntheticWorld | None = None,
-                    fixture_mode: bool = False) -> ProviderBundle:
+def build_providers(
+    cfg: StudyConfig,
+    synthetic: bool = False,
+    world: SyntheticWorld | None = None,
+    fixture_mode: bool = False,
+) -> ProviderBundle:
     """Return the configured providers. Live adapters need API keys in the environment."""
     if synthetic:
         return synthetic_bundle(world or synthetic_world(cfg))
@@ -67,7 +71,11 @@ def build_real_providers(cfg: StudyConfig, fixture_mode: bool = False) -> Provid
         raise ValueError(f"unknown news provider {d.news_provider}")
 
     fetch_info = FixtureFetch(repo_root() / d.fixture_dir) if fixture_mode else None
-    reference = (YFinanceReferenceProvider(fetch_info.info, earnings=earnings) if fetch_info
-                 else YFinanceReferenceProvider(earnings=earnings))
-    return ProviderBundle(prices=prices, news=news, reference=reference, rates=rates,
-                          members=members)
+    reference = (
+        YFinanceReferenceProvider(fetch_info.info, earnings=earnings)
+        if fetch_info
+        else YFinanceReferenceProvider(earnings=earnings)
+    )
+    return ProviderBundle(
+        prices=prices, news=news, reference=reference, rates=rates, members=members
+    )

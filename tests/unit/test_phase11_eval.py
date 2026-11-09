@@ -39,7 +39,12 @@ def test_newey_west_matches_hand_calculation_with_zero_lags() -> None:
     assert r.t == pytest.approx(mean / se)
     assert r.p == pytest.approx(2 * (1 - stats.norm.cdf(abs(mean / se))), rel=1e-6)
     assert r.n == n and r.maxlags == 0
-    assert default_maxlags(100) == 4 and default_maxlags(8) == 2 and default_maxlags(30) == 3 and default_maxlags(1) == 1
+    assert (
+        default_maxlags(100) == 4
+        and default_maxlags(8) == 2
+        and default_maxlags(30) == 3
+        and default_maxlags(1) == 1
+    )
 
 
 def test_sign_test_hand_value() -> None:
@@ -84,10 +89,28 @@ def test_paired_summary_counts() -> None:
 def test_ic_tables_exclude_fallback_weeks(tmp_path: object) -> None:
     store = ICStore(tmp_path / "ic.csv")  # type: ignore[operator]
     weeks = cal.week_range("2026-W05", 4)
-    rows = [{"week_id": w, "signal": "baseline", "model": "", "config_id": "", "rank_ic": 0.1, "n_stocks": 100}
-            for w in weeks]
-    rows += [{"week_id": w, "signal": "llm_raw", "model": "m", "config_id": "skills_1", "rank_ic": 0.2, "n_stocks": 100}
-             for w in weeks]
+    rows = [
+        {
+            "week_id": w,
+            "signal": "baseline",
+            "model": "",
+            "config_id": "",
+            "rank_ic": 0.1,
+            "n_stocks": 100,
+        }
+        for w in weeks
+    ]
+    rows += [
+        {
+            "week_id": w,
+            "signal": "llm_raw",
+            "model": "m",
+            "config_id": "skills_1",
+            "rank_ic": 0.2,
+            "n_stocks": 100,
+        }
+        for w in weeks
+    ]
     store.upsert(rows)
     tables = ic_tables(store, ["m__skills_1"], clean_weeks=lambda p: [weeks[0], weeks[2], weeks[3]])
     col = tables["llm_raw"]["m__skills_1"]
@@ -100,13 +123,21 @@ def test_ic_tables_exclude_fallback_weeks(tmp_path: object) -> None:
 # Planted effect ----------------------------------------------------------------------------------
 
 
-def _weekly_ics(study_config: StudyConfig, world: SyntheticWorld, weeks: list[str], seed: int,
-                configs: list[str], noise: dict[str, float] | None = None) -> pd.DataFrame:
+def _weekly_ics(
+    study_config: StudyConfig,
+    world: SyntheticWorld,
+    weeks: list[str],
+    seed: int,
+    configs: list[str],
+    noise: dict[str, float] | None = None,
+) -> pd.DataFrame:
     """Rank IC per week and configuration from the real stub, scored on the snapshot news text."""
     from portstudy.data.snapshot import read_snapshot
 
     adj = world.prices[world.prices["ticker"].isin(world.stock_tickers)]
-    wide = adj.drop_duplicates(["ticker", "date"]).pivot(index="date", columns="ticker", values="adj_close")
+    wide = adj.drop_duplicates(["ticker", "date"]).pivot(
+        index="date", columns="ticker", values="adj_close"
+    )
     man = load_manifest()
     stub = StubLlmProvider("m", seed=seed, noise_by_config=noise)
     out: dict[str, dict[str, float]] = {c: {} for c in configs}
@@ -129,12 +160,22 @@ def _weekly_ics(study_config: StudyConfig, world: SyntheticWorld, weeks: list[st
     return pd.DataFrame(out)
 
 
-def test_h1_and_h3_detect_the_planted_skills_edge(snapshot_data_dir: object, study_config: StudyConfig,
-                                                  world: SyntheticWorld, session_weeks: list[str]) -> None:
+def test_h1_and_h3_detect_the_planted_skills_edge(
+    snapshot_data_dir: object,
+    study_config: StudyConfig,
+    world: SyntheticWorld,
+    session_weeks: list[str],
+) -> None:
     # A known edge: skills reads the planted words almost cleanly, the controls barely do.
     noise = {"bare": 6.0, "skills_1": 0.5, "placebo": 6.0}
-    ics = _weekly_ics(study_config, world, session_weeks, seed=0, configs=["bare", "skills_1", "placebo"],
-                      noise=noise)
+    ics = _weekly_ics(
+        study_config,
+        world,
+        session_weeks,
+        seed=0,
+        configs=["bare", "skills_1", "placebo"],
+        noise=noise,
+    )
     assert len(ics) >= 25
     # H1: the skills configuration has a clearly positive IC against the realized returns.
     assert newey_west_mean(ics["skills_1"]).p < 0.01 and ics["skills_1"].mean() > 0.05
@@ -142,22 +183,33 @@ def test_h1_and_h3_detect_the_planted_skills_edge(snapshot_data_dir: object, stu
     # H3: skills beats bare and placebo after Holm across the family.
     gap_bare = ics["skills_1"] - ics["bare"]
     gap_placebo = ics["skills_1"] - ics["placebo"]
-    p = holm([sign_flip_permutation(gap_bare, n=5000, seed=0), sign_flip_permutation(gap_placebo, n=5000, seed=0)])
+    p = holm(
+        [
+            sign_flip_permutation(gap_bare, n=5000, seed=0),
+            sign_flip_permutation(gap_placebo, n=5000, seed=0),
+        ]
+    )
     assert gap_bare.mean() > 0 and gap_placebo.mean() > 0
     assert (p < study_config.eval.significance).all(), (gap_bare.mean(), gap_placebo.mean(), p)
     # The two controls do not differ in expectation.
-    assert sign_flip_permutation(ics["placebo"] - ics["bare"], n=5000, seed=0) > study_config.eval.significance
+    assert (
+        sign_flip_permutation(ics["placebo"] - ics["bare"], n=5000, seed=0)
+        > study_config.eval.significance
+    )
     sample = "News from the past week:" + chr(10) + "Alpha beats and surges. misses"
     assert sentiment_from_text(sample) == 1.0
 
 
-def test_placebo_vs_bare_false_positive_rate(study_config: StudyConfig, world: SyntheticWorld,
-                                             session_weeks: list[str]) -> None:
+def test_placebo_vs_bare_false_positive_rate(
+    study_config: StudyConfig, world: SyntheticWorld, session_weeks: list[str]
+) -> None:
     """With no planted edge (placebo equals bare), the paired test rejects at about the nominal rate."""
     # Vectorized copy of the stub's score formula on the planted sentiment, so 200 seeds are cheap.
     sent = world.sentiment[world.sentiment["week_id"].isin(session_weeks)]
     adj = world.prices[world.prices["ticker"].isin(world.stock_tickers)]
-    wide = adj.drop_duplicates(["ticker", "date"]).pivot(index="date", columns="ticker", values="adj_close")
+    wide = adj.drop_duplicates(["ticker", "date"]).pivot(
+        index="date", columns="ticker", values="adj_close"
+    )
     rets = {}
     for w in session_weeks:
         t0, t1 = cal.monday_open_day(w), cal.window_end_date(w)
@@ -170,14 +222,22 @@ def test_placebo_vs_bare_false_positive_rate(study_config: StudyConfig, world: S
         rng = np.random.default_rng(seed)
         gaps = []
         for w in weeks:
-            s = sent[sent["week_id"] == w].set_index("ticker")["sentiment"].reindex(rets[w].index).fillna(0)
+            s = (
+                sent[sent["week_id"] == w]
+                .set_index("ticker")["sentiment"]
+                .reindex(rets[w].index)
+                .fillna(0)
+            )
             # bare and placebo share the noise level (1.6); only the draws differ.
             a = np.clip(np.rint(1.5 * s.to_numpy() + rng.normal(0, 1.6, len(s))), -5, 5)
             b = np.clip(np.rint(1.5 * s.to_numpy() + rng.normal(0, 1.6, len(s))), -5, 5)
             ic_a = rank_ic(pd.Series(a, index=s.index), rets[w])
             ic_b = rank_ic(pd.Series(b, index=s.index), rets[w])
             gaps.append(ic_a - ic_b)
-        if sign_flip_permutation(pd.Series(gaps), n=2000, seed=seed) < study_config.eval.significance:
+        if (
+            sign_flip_permutation(pd.Series(gaps), n=2000, seed=seed)
+            < study_config.eval.significance
+        ):
             rejections += 1
     rate = rejections / n_seeds
     # The sign-flip test is exact under the null: nominal 5 percent, binomial sd about 1.5 percent.

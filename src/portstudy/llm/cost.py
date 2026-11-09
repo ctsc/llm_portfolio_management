@@ -1,7 +1,7 @@
 """Cost table, weekly estimates, the running cost log, and the budget guard (DECISION(D3)).
 
-Prices are per million tokens from config/models.yaml and are confirmed by the researcher in
-Phase 17. The guard raises `CostCapExceeded` before any batch is submitted when the projected
+Prices are per million tokens from config/models.yaml and are confirmed by Carter in PLAN2
+phase 15 G. The guard raises `CostCapExceeded` before any batch is submitted when the projected
 study total would pass `llm.cost_goal_usd`; `--allow-over-budget` lets the run continue and
 every such week is logged.
 """

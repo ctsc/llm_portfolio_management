@@ -1,6 +1,6 @@
 """Make one real call per service with a tiny request and print status, cost, and latency.
 
-Phase 17 B4: run this on the desktop after the keys are in `.env` to expose every UNVERIFIED
+PLAN2 phase 15 E: run this on ARCTIC after the keys are in `.env` to expose every UNVERIFIED
 item. Nothing here is called by tests or by the pipeline. Each check is independent; a
 missing key or package is reported and skipped, never fatal to the others.
 

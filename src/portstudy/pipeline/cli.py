@@ -217,14 +217,38 @@ def shuffle_plan_cmd(
     n_shuffles: int | None = typer.Option(None, "--n-shuffles"),
     synthetic: bool = typer.Option(False, "--synthetic"),
     config: str | None = typer.Option(None, "--config"),
+    seconds_per_solve: float | None = typer.Option(
+        None, "--seconds-per-solve", help="override the benchmark solve time"
+    ),
+    max_shard_minutes: float = typer.Option(120.0, "--max-shard-minutes"),
 ) -> None:
-    from portstudy.eval.shuffle import plan_shards, write_shard_plan
+    from portstudy.eval.shuffle import estimate_shard_minutes, plan_shards, write_shard_plan
+    from portstudy.pipeline.jobs import weeks_with_weights
 
     ctx = _context(synthetic, False, True, None, None, config)
     n = n_shuffles if n_shuffles is not None else ctx.cfg.eval.shuffle.n_shuffles
-    shards = plan_shards(ctx.portfolio_keys(), n, ctx.cfg.eval.shuffle.shard_size)
+    shard_size = ctx.cfg.eval.shuffle.shard_size
+    n_weeks = len(weeks_with_weights())
+    estimate = estimate_shard_minutes(ctx.cfg, shard_size, n_weeks, seconds_per_solve)
+    if estimate is not None and estimate.minutes > max_shard_minutes:
+        shard_size = max(1, int(shard_size * max_shard_minutes / estimate.minutes))
+        typer.echo(
+            f"a shard of {ctx.cfg.eval.shuffle.shard_size} shuffles would take about "
+            f"{estimate.minutes:.0f} min ({estimate.strategy}, {estimate.seconds_per_solve:.2f} s "
+            f"per solve); using shard_size {shard_size} for this plan (config unchanged)"
+        )
+        estimate = estimate_shard_minutes(ctx.cfg, shard_size, n_weeks, seconds_per_solve)
+    shards = plan_shards(ctx.portfolio_keys(), n, shard_size, ctx.cfg.eval.shuffle.strategies)
     write_shard_plan(shards, Path(out))
     typer.echo(f"{len(shards)} shards written to {out}")
+    if estimate is None:
+        typer.echo("no benchmark solve times found; pass --seconds-per-solve for a shard estimate")
+    else:
+        typer.echo(
+            f"estimated {estimate.minutes:.1f} min per shard (slowest shuffled strategy "
+            f"{estimate.strategy}, {estimate.seconds_per_solve:.2f} s per solve, "
+            f"{estimate.n_weeks} weeks x {shard_size} shuffles)"
+        )
 
 
 @shuffle_app.command("run")

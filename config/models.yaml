@@ -1,5 +1,5 @@
 # Model registry. DECISION(D1). Prices are per million tokens in USD and are placeholders
-# until the researcher confirms them in Phase 17 (scripts/estimate_cost.py reads them).
+# until Carter confirms them in PLAN2 phase 15 G (scripts/estimate_cost.py reads them).
 # `provider` selects the LlmProvider implementation; `stub` is used for every test.
 models:
   - id: gemma-4-31b

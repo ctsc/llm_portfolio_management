@@ -248,6 +248,9 @@ def test_eval_on_clean_weeks_shows_planted_width_and_view_effects(
     folder = tmp_path / "report"
     build_report(data, folder, skip_shuffle=True)
     assert (folder / "report.md").exists()
+    report_md = (folder / "report.md").read_text(encoding="utf-8")
+    # DECISION(G6), PLAN3: cvar and resampled get the exclusion line, the other three keep H5.
+    assert report_md.count("excluded under DECISION(G6)") == 2
     h3b = pd.concat([read_csv(p) for p in folder.glob("h3b*.csv")])
     assert not h3b.empty
     gap = (h3b["mean_ic_narrow"] - h3b["mean_ic_wide"]).astype(float)

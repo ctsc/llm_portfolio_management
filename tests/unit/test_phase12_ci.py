@@ -24,8 +24,18 @@ def _ci() -> dict[str, object]:
 
 
 def test_ci_yaml_passes_yamllint() -> None:
-    cmd = [sys.executable, "-m", "yamllint", "-c", ".yamllint", ".gitlab-ci.yml", ".github/workflows/ci.yml",
-           "config/study.yaml", "config/models.yaml", "config/prompts_manifest.yaml"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "yamllint",
+        "-c",
+        ".yamllint",
+        ".gitlab-ci.yml",
+        ".github/workflows/ci.yml",
+        "config/study.yaml",
+        "config/models.yaml",
+        "config/prompts_manifest.yaml",
+    ]
     result = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -57,9 +67,16 @@ def test_every_ci_command_exists() -> None:
             elif exe == "pip":
                 continue
             else:
-                assert shutil.which(exe) is not None or (REPO_ROOT / ".venv" / "Scripts" / f"{exe}.exe").exists(), exe
-    assert {"scripts/refresh_manifest.py", "scripts/check_placebo_length.py", "scripts/check_banned_words.py",
-            "scripts/check_secrets.py"} <= set(scripts_called)
+                assert (
+                    shutil.which(exe) is not None
+                    or (REPO_ROOT / ".venv" / "Scripts" / f"{exe}.exe").exists()
+                ), exe
+    assert {
+        "scripts/refresh_manifest.py",
+        "scripts/check_placebo_length.py",
+        "scripts/check_banned_words.py",
+        "scripts/check_secrets.py",
+    } <= set(scripts_called)
 
 
 def test_repo_passes_banned_word_and_secret_checks() -> None:
@@ -69,13 +86,19 @@ def test_repo_passes_banned_word_and_secret_checks() -> None:
 
 def test_checks_catch_planted_problems(tmp_path: Path) -> None:
     bad = tmp_path / "bad.md"
-    bad.write_text("an em dash \u2014 here, and the treatment " + "a" + "rm" + " name\n", encoding="utf-8")
+    bad.write_text(
+        "an em dash \u2014 here, and the treatment " + "a" + "rm" + " name\n", encoding="utf-8"
+    )
     problems = check_banned_words.check([bad])
-    assert any("em dash" in p for p in problems) and any("banned condition word" in p for p in problems)
+    assert any("em dash" in p for p in problems) and any(
+        "banned condition word" in p for p in problems
+    )
     key = tmp_path / "leak.py"
     key.write_text('API_KEY = "' + "sk-ant-" + "a" * 24 + '"\n', encoding="utf-8")
     found = check_secrets.check([key])
-    assert found and all("anthropic_key" in p or "assigned_key" in p or "openai_key" in p for p in found)
+    assert found and all(
+        "anthropic_key" in p or "assigned_key" in p or "openai_key" in p for p in found
+    )
 
 
 def _github_ci() -> dict[str, object]:
@@ -109,5 +132,9 @@ def test_github_workflow_mirrors_gitlab_ci() -> None:
         gh_lines = run_lines(jobs[name])
         assert all(line in gh_lines for line in gl_lines), (name, gl_lines, gh_lines)
     for name in ("test", "integration", "e2e"):
-        checkout = next(s for s in jobs[name]["steps"] if str(s.get("uses", "")).startswith("actions/checkout"))
-        assert checkout["with"]["fetch-depth"] == 0, name  # full history for the phase checklist test
+        checkout = next(
+            s for s in jobs[name]["steps"] if str(s.get("uses", "")).startswith("actions/checkout")
+        )
+        assert checkout["with"]["fetch-depth"] == 0, (
+            name
+        )  # full history for the phase checklist test

@@ -2,7 +2,7 @@
 
 yfinance has no HTTP layer to swap, so the provider takes injectable fetch callables. In
 fixture mode the callables read recorded JSON. The yfinance import is optional.
-# UNVERIFIED: needs real smoke test (Phase 17). No key required.
+# UNVERIFIED: needs real smoke test (PLAN2 phase 15 E). No key required.
 """
 
 from __future__ import annotations

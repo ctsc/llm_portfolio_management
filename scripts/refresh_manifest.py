@@ -7,7 +7,7 @@ Usage:
                                                (only allowed when the version was bumped)
 
 A file "changed without a version bump" when its hash differs from the manifest but the
-manifest's `version` for that configuration is unchanged. The researcher bumps `version`
+manifest's `version` for that configuration is unchanged. Carter bumps `version`
 in the manifest (and the file name) before running `--write`.
 """
 

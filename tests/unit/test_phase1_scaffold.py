@@ -96,7 +96,9 @@ def test_write_csv_atomic_round_trip_and_byte_identical(tmp_path: Path) -> None:
     assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_atomic_write_survives_simulated_crash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_atomic_write_survives_simulated_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     p = tmp_path / "x.json"
     pio.write_json_atomic({"a": 1}, p)
     original = os.replace
