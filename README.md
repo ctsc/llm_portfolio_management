@@ -243,7 +243,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs lint, unit tests and the reposi
 ## Project status
 
 - **Built and tested.** v1, v2 phases 1 to 14, the review fixes from `results.md`, and PLAN3 phases 1 to 6, each recorded in `PROGRESS.md`.
-- **Remaining manual work** (Carter): PLAN2 phase 15 (accounts, keys and limits; the ARCTIC allocation, `arctic.env` and model weights; smoke tests of every real service; the skills and placebo texts; the pilot week; the `frozen-v2` tag) and the PLAN2 project completion checklist.
+- **Remaining manual work** (Carter, every step listed in `manualwork.md`): PLAN2 phase 15 (accounts, keys and limits; the ARCTIC allocation, `arctic.env` and model weights; smoke tests of every real service; the skills and placebo texts; the pilot week; the `frozen-v2` tag) and the PLAN2 project completion checklist.
 - **Not yet verified against live services** (`UNVERIFIED` in config and code): gateway JSON mode, seed support and rate limits; the MiniMax output format and whether it needs an output-token override; Kronos per-path sampling and its real GPU time; ARCTIC partitions, memory policy and the real per-request LLM time; the shuffle replay time per shuffle.
 
 ## Documentation

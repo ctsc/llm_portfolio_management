@@ -625,40 +625,7 @@ Before declaring the code complete, verify and record in `PROGRESS.md`:
 
 ## Phase 17: Manual research work (needs real accounts, keys, and the desktop)
 
-Do these in order after Phases 1 to 16 are green. Each item says what the earlier phases should have already prepared.
-
-### A. Accounts, keys, and spending limits
-1. Create API accounts and keys for Anthropic (Claude Haiku 5.5) and OpenAI (GPT-6 Luna). Put the keys in a `.env` file on the desktop only (names are listed in `docs/config_reference.md`). Never commit it.
-2. Set a monthly spending cap in each provider dashboard, so a bug cannot run far past the $50 goal.
-3. Create free accounts and keys for Alpaca (prices and news), Finnhub (earnings dates), and FRED (T-bill rate). Confirm Alpaca's free plan includes the news endpoint and full daily bars. If not, switch `data.price_provider` to yfinance in config.
-4. Download the official Fama-French five-factor daily file from the Ken French Data Library when it is needed for the final H5 run, and set its path in config.
-
-### B. Desktop setup (RTX 3050, 6 GB)
-1. Install NVIDIA drivers and CUDA, Python 3.11, and Ollama.
-2. Pull the local models: Qwen 3.5 4B (thinking off) and Phi-4 Mini, plus Llama 3.2 3B as the fallback. Confirm exact tags in the Ollama library.
-3. Clone Kronos at the pinned commit into `vendor/kronos` and download `Kronos-base` and `Kronos-Tokenizer-base` from the `NeoQuasar` Hugging Face organization.
-4. Run `scripts/smoke_real_services.py` (it makes one real call per service with a tiny prompt and print status, cost, and latency). Fix every `UNVERIFIED` item it exposes (see `PROGRESS.md`).
-5. Benchmark: seconds per call and GPU memory per local model with a full-length prompt, and one Kronos-base run over 100 stocks. Confirm the total fits between your Friday night or Saturday morning start and Monday 9:30 am ET with margin. If a local model does not fit in 6 GB, swap it for Llama 3.2 3B in `config/models.yaml` and log why.
-6. Power settings: plugged in, no sleep while the weekend script runs, Windows updates paused for the weekend.
-
-### C. GitLab and backups
-1. Create the private GitLab project, push the repository, and confirm the CI pipeline passes.
-2. Run `run_weekend.py --synthetic` once on the desktop and download the backup zip it prints, then run one restore by hand to confirm it works.
-
-### D. Research content only the researcher can write
-1. **Write the skills file** (`prompts/skills/`) and the placebo text. Run `scripts/check_placebo_length.py`, then `scripts/refresh_manifest.py` to freeze versions and hashes.
-2. Check the real skills file token count against the 6000 cap (C4) and confirm or change C4 and the 150-token rationale cap (C7).
-3. **Build the stock list** (B2): run `build_universe`, review the printed sector table, add any `extra_tickers` by hand, then freeze `config/universe.csv` with a version tag.
-4. Enter current model prices in `config/models.yaml`. Test-run the real prompts on a few stocks for each model, then run `scripts/estimate_cost.py` and recompute the budget (D3).
-5. Set `timing.live_end_date` (A3), no later than the April deadline.
-
-### E. Freeze, pilot, and go
-1. Run a dry run on the last 3 to 4 real weeks with real providers, only as a bug check. Do not tune prompts or settings on the returns.
-2. Tag the repository `frozen-v1`. From now on any change is a new version, documented and flagged in the analysis.
-3. Run the one-week pilot with `run_weekend.py`. Review job success, valid-output rates, batch return times, cache hits, cost, run time, and fallback events. Hand-check trades, costs, and stops against the simulator output.
-4. Fix engineering problems only, record each fix, and drop or swap any model that failed reliability or cost limits (with a log entry saying why).
-5. Start the live run the week after the pilot passes (A2). The pilot week stays excluded from all results.
-6. Every weekend: run `run_weekend.py` Friday night if possible (Saturday morning as the backup), read its summary, and download the backup zip.
+Moved to `manualwork.md` (every item was carried into PLAN2 Phase 15; the crosswalk there shows where each went).
 
 ---
 

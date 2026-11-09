@@ -902,3 +902,11 @@ gateway sustains about 20 requests in flight (PLAN2 phase 15 E confirms the real
 - Pushed as ctsc (author and committer) to GitHub `origin master` first and GitLab `gitlab master`
   second; the GitHub Actions run is checked after the push and reported in the session.
 - Not done, by design: PLAN3 phase 7 (Carter's manual work) and PLAN2 phase 15.
+
+## Manual work consolidated
+
+- `manualwork.md` now holds every remaining manual step from `PLAN.md` Phase 17, `PLAN2.md` Phase 15
+  and `PLAN3.md` Phase 7 (each plan section is replaced by a pointer), keeping the Phase 15 labels
+  A to H that the README, this file and `docs/` cite; items already done (A1, A2 for the builds,
+  D1, the checklist half of D4, PLAN3 phase 7 item 4) are noted at the top and dropped from the
+  list, and the UNVERIFIED list carries the corrected G6 projection.

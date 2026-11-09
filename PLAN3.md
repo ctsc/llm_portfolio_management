@@ -313,8 +313,4 @@ Each must return nothing (or the expected value) across `README.md`, `docs/` (ex
 
 ## Phase 7: Manual work (Carter only, after Phases 1 to 6)
 
-1. Ask Andalib (ARCTIC) to confirm the real maximum job length and the memory-per-core policy; if the limit differs from 24 hours, set `MAX_JOB_HOURS` to stay well under it.
-2. Delete the untracked `docs/arctic_gpu_request.md`.
-3. Read the new README top to bottom against the proposal.
-4. The project proposal (`docs/proposals/Project_Proposal_IEEE.pdf`) already says H5 shuffles cover only the mean-variance, robust and top-K portfolios. The ARCTIC request still budgets 10,420 CPU hours for permutation tests. That is fine as headroom, so no change is needed unless ARCTIC asks.
-5. Continue with PLAN2 phase 15 (accounts, ARCTIC setup, smoke tests, skills files, freeze, pilot).
+Moved to `manualwork.md` (section 0), which holds every remaining manual step from all three plans.
