@@ -117,8 +117,9 @@ python scripts/run_weekend.py                      # resumes where it stopped
 python scripts/run_weekend.py --from J7            # rerun from one job
 ```
 
-`--gateway-fallback`, `--check-walltime` and `--poll-once` still exist in the code but belong to the
-retired ARCTIC Slurm layout; do not use them (PLAN4 Phase 2 removes them). A job that dies (sleep,
+If the health check before J4 reports a gateway model down, its sources are marked failed and trade
+Q0 (D2); check the GSU VPN and run `python scripts/run_weekend.py --from J4` before the lock to
+retry that model. A job that dies (sleep,
 restart, network) is rerun with the same command; every job resumes from its status files.
 
 **Backups.** J9 writes `data/backups/<week>_<timestamp>/` and a zip, and with `backup.rsync_target`

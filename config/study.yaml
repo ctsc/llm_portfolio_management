@@ -118,7 +118,6 @@ llm:
     stub-ow-b: 1
   gateway:
     base_url: https://litellm.rs.gsu.edu/v1  # ARCTIC LiteLLM gateway; GSU network or VPN required
-    fallback_endpoint_file: data/runtime/fallback_endpoint.json
 
 views:
   tau: 0.05
@@ -196,11 +195,11 @@ backup:
 decisions:
   - id: D1
     value: >-
-      ARCTIC LiteLLM gateway: Gemma 4 31B, MiniMax M2.7; requested deployments: Gemma 4 E4B,
-      Phi-4 Mini 3.8B, Llama 3.2 3B; API: one or two of Claude Haiku 5.5, GPT-6 Luna. No local GPU.
+      ARCTIC LiteLLM gateway: Gemma 4 31B and MiniMax M2.7 only (no deployment requests);
+      API: Claude Haiku 5.5 and GPT-6 Luna; Kronos and everything else on Carter's desktop
     status: confirmed
   - id: D2
-    value: "gateway outage uses Carter's Slurm GPU jobs; otherwise that model's week is missed and excluded from its tests"
+    value: "gateway outage: that model's week is marked failed and left out of its statistics; its portfolios trade Q0; no fallback server"
     status: confirmed
   - id: D3
     value: 50.0
@@ -304,19 +303,11 @@ decisions:
   - id: G5
     value: daily
     status: confirmed
-  - id: W1
-    value: >-
-      every Slurm job requests a walltime of at most 15 hours (target 12 or less) and never waits idle
-      on anything outside the cluster (PLAN3)
-    status: confirmed
-  - id: M1
-    value: "CPU jobs request --mem-per-cpu=3G and only the cores the work uses (PLAN3)"
-    status: confirmed
   - id: G7
     value: "IC tests as v1; portfolio return tests one family per strategy"
     status: confirmed
   - id: N2
-    value: "Carter runs one submit script by hand on ARCTIC; no scheduler"
+    value: "Carter runs python scripts/run_weekend.py by hand on the desktop, Friday night (Saturday morning as backup); no scheduler"
     status: confirmed
   - id: N1
     value: "invalid_rate>0.15 or local not done by lock or batch not ready by lock"

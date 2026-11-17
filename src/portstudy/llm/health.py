@@ -1,11 +1,10 @@
-"""Gateway health check before J4 (v2 phase 12). One tiny call per enabled model that is served
-by the ARCTIC gateway. A failing model's sources are marked failed in `run_status.json` (N1), so
-J4 skips them and J6 serves the strategy's Q0 for them, unless the run is rerun with
-`--gateway-fallback` (DECISION(D2)) after `llm_fallback.sbatch` is up."""
+"""Gateway health check before J4 (v2 phase 12). One tiny call per enabled open-weight model
+that is served by the LiteLLM gateway. A failing model's sources are marked failed in
+`run_status.json` (N1), so J4 skips them and J6 serves the strategy's Q0 for them (DECISION(D2));
+rerunning `python scripts/run_weekend.py --from J4` retries when the gateway is back."""
 
 from __future__ import annotations
 
-import datetime as dt
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -140,30 +139,12 @@ def _mark_sources_failed(
     return keys
 
 
-def d2_steps(week_id: str, failed: dict[str, str]) -> list[str]:
-    """The exact DECISION(D2) fallback steps to print when the gateway is down."""
+def outage_lines(failed: dict[str, str]) -> list[str]:
+    """The DECISION(D2) message printed when the gateway is down."""
     detail = ", ".join(f"{m} ({e})" for m, e in sorted(failed.items()))
     return [
         f"gateway health check failed for {detail}",
-        "D2 fallback: 1) sbatch scripts/arctic/llm_fallback.sbatch   (serves the "
-        "fallback-eligible models and writes the endpoint file)",
-        "             2) python scripts/run_weekend.py --from J4 --gateway-fallback "
-        f"--week {week_id}",
-        "without the flag these sources are marked failed and trade their strategy's Q0 (N1)",
+        "D2: these models' sources are marked failed for the week and trade their strategy's "
+        "Q0; check the GSU VPN and rerun `python scripts/run_weekend.py --from J4` to retry "
+        "before the lock",
     ]
-
-
-def parse_walltime(value: str) -> dt.timedelta:
-    """Slurm walltime: [days-]HH:MM[:SS] or MM."""
-    days = 0
-    if "-" in value:
-        day_part, value = value.split("-", 1)
-        days = int(day_part)
-    parts = [int(p) for p in value.split(":")]
-    if len(parts) == 1:
-        hours, minutes, seconds = 0, parts[0], 0
-    elif len(parts) == 2:
-        hours, minutes, seconds = parts[0], parts[1], 0
-    else:
-        hours, minutes, seconds = parts[0], parts[1], parts[2]
-    return dt.timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)

@@ -26,7 +26,7 @@ from portstudy.pipeline.jobs import run_named
 from portstudy.pipeline.status import read_status
 from portstudy.sim.records import read_daily, read_trades
 from tests.conftest import generous_budget
-from tests.e2e.conftest import INJECTIONS, REPO_ROOT, WeekendRunner, rehearsal_registry
+from tests.e2e.conftest import INJECTIONS, REPO_ROOT, WeekendRunner
 
 pytestmark = pytest.mark.e2e
 
@@ -62,7 +62,7 @@ def test_full_run_synthetic(
     e2e_weeks: list[str],
 ) -> None:
     cfg = generous_budget(study_config)
-    model_registry = rehearsal_registry(model_registry)
+    model_registry = model_registry
     injected = {
         e2e_weeks[i] for i in INJECTIONS
     }  # v2 phase 13: failure weeks are checked elsewhere
@@ -225,7 +225,7 @@ def test_resume_equals_uninterrupted_run(
     root.mkdir()
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(root))
     cfg = generous_budget(study_config)
-    runner = WeekendRunner(cfg, rehearsal_registry(model_registry), world)
+    runner = WeekendRunner(cfg, model_registry, world)
     week = e2e_weeks[0]
     runner.llm_providers = {
         "stub-ow-a": StubLlmProvider("stub-ow-a", failures=StubFailures(crash_after_calls=33))
@@ -255,7 +255,7 @@ def test_determinism_two_runs_identical(
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(root))
-    runner = WeekendRunner(generous_budget(study_config), rehearsal_registry(model_registry), world)
+    runner = WeekendRunner(generous_budget(study_config), model_registry, world)
     weeks = e2e_weeks[:3]  # the first injected week is index 3
     for w in weeks:
         assert runner.run(w, monkeypatch) == 0
@@ -337,7 +337,7 @@ def test_cost_log(
     table = CostTable(model_registry)
     total_log, total_scores = 0.0, 0.0
     for w in e2e_weeks:
-        if w == e2e_weeks[12]:  # gateway week: the first run logs the failed sources at zero
+        if w == e2e_weeks[12]:  # gateway week: the failed model's sources have no scores
             continue
         cost = read_csv(e2e_dir / "outputs" / w / "cost_log.csv")
         scores = read_scores(w)

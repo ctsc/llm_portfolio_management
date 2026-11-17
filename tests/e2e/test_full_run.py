@@ -28,7 +28,7 @@ from portstudy.pipeline.context import RunContext
 from portstudy.pipeline.status import read_status
 from portstudy.sim.records import read_trades
 from tests.conftest import generous_budget
-from tests.e2e.conftest import INJECTIONS, WeekendRunner, rehearsal_registry
+from tests.e2e.conftest import INJECTIONS, WeekendRunner
 from tests.e2e.test_full_run_synthetic import _csv_hashes
 
 pytestmark = pytest.mark.e2e
@@ -46,7 +46,7 @@ def rehearsal(
     e2e_weeks: list[str],
 ) -> tuple[Path, StudyConfig, RunContext, dict[str, str]]:
     cfg = generous_budget(study_config)
-    ctx = WeekendRunner(cfg, rehearsal_registry(model_registry), world).context(e2e_weeks[-1])
+    ctx = WeekendRunner(cfg, model_registry, world).context(e2e_weeks[-1])
     injected = {kind: e2e_weeks[i] for i, kind in INJECTIONS.items()}
     return e2e_dir, cfg, ctx, injected
 
@@ -193,29 +193,34 @@ def test_injected_lock_cutoff_week(
         assert fb.week_status_for(w, f"{strategy}__Q0") == "normal"
 
 
-def test_injected_gateway_health_failure_recovered_with_fallback_flag(
+def test_injected_gateway_health_failure_trades_q0_and_the_run_continues(
     rehearsal: tuple[Path, StudyConfig, RunContext, dict[str, str]],
 ) -> None:
+    """DECISION(D2): the down model's sources are marked failed and trade Q0; the rest of the
+    week runs normally (no fallback server, no rerun)."""
     root, cfg, ctx, injected = rehearsal
     w = injected["gateway_health"]
     report = health.read_health(w)
-    assert (
-        report is not None and not report.failed
-    )  # the rerun's check: stub-ow-a is off the gateway
-    assert "stub-ow-a" in report.skipped
-    assert [set(p["failed"]) for p in report.previous] == [{"stub-ow-a"}]
+    assert report is not None and set(report.failed) == {"stub-ow-a"}
+    assert "stub-ow-b" in report.skipped
     statuses = read_run_status(w)
     for prompt in ctx.prompt_ids():
-        assert statuses[f"stub-ow-a__{prompt}"].state == "ok", prompt
-        assert statuses[f"stub-ow-a__{prompt}"].reason != health.HEALTH_REASON
+        assert statuses[f"stub-ow-a__{prompt}"].state == "failed", prompt
+        assert statuses[f"stub-ow-a__{prompt}"].reason == health.HEALTH_REASON
+        assert statuses[f"stub-ow-b__{prompt}"].state == "ok", prompt
     j4 = read_status(w, "J4")
     assert j4.state == "done" and j4.result is not None
-    assert j4.result["stub-ow-a"].get("n_calls")
+    assert j4.result["stub-ow-a"] == {"skipped": health.HEALTH_REASON}
+    assert j4.result["stub-ow-b"].get("n_calls")
     for strategy in cfg.strategies.enabled:
+        q0 = read_csv(_weights_path(ctx, w, f"{strategy}__Q0")).set_index("ticker")["weight"]
         for prompt in ctx.prompt_ids():
             key = f"{strategy}__stub-ow-a__{prompt}"
-            assert fb.week_status_for(w, key) == "normal", key
-            assert read_weights_meta(w, key)["decision_source"] == "llm"
+            assert fb.week_status_for(w, key) == "fallback", key
+            assert read_weights_meta(w, key)["decision_source"] == "fallback_q0"
+            mine = read_csv(_weights_path(ctx, w, key)).set_index("ticker")["weight"]
+            pd.testing.assert_series_equal(mine, q0, check_names=False)
+            assert fb.week_status_for(w, f"{strategy}__stub-ow-b__{prompt}") == "normal"
     lock = read_json(root / "outputs" / w / "weights" / "locked.json")
     assert dt.datetime.fromisoformat(lock["locked_at"]) <= dt.datetime.fromisoformat(
         lock["deadline"]

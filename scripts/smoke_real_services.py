@@ -1,13 +1,13 @@
 """Make one real call per service with a tiny request and print status, cost, and latency.
 
-PLAN2 phase 15 E: run this on ARCTIC after the keys are in `.env` to expose every UNVERIFIED
-item. Nothing here is called by tests or by the pipeline. Each check is independent; a
-missing key or package is reported and skipped, never fatal to the others.
+Run this on the desktop after the keys are in `.env` to expose every UNVERIFIED item (the
+gateway models need the GSU network or VPN). Nothing here is called by tests or by the
+pipeline. Each check is independent; a missing key or package is reported and skipped, never
+fatal to the others.
 
 Usage: python scripts/smoke_real_services.py [--only alpaca,fred,...] [--ticker AAPL]
 Keys (environment or .env): ALPACA_API_KEY_ID, ALPACA_API_SECRET_KEY, FINNHUB_API_KEY,
-FRED_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, ARCTIC_LITELLM_API_KEY,
-ARCTIC_FALLBACK_API_KEY.
+FRED_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, ARCTIC_LITELLM_API_KEY.
 """
 
 from __future__ import annotations

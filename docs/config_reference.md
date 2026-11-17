@@ -18,7 +18,6 @@ keys marked "pending PLAN4" are added by `plans/PLAN4.md`.
 | `FRED_API_KEY` | FRED DTB3 series. |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | API models (batch endpoints). |
 | `ARCTIC_LITELLM_API_KEY` | Bearer key for the ARCTIC LiteLLM gateway (`llm.gateway.base_url`); never logged. |
-| `ARCTIC_FALLBACK_API_KEY`, `ARCTIC_ENV`, `ARCTIC_NETWORK_MODE`, `GPU_MEM`, `LLM_WALLTIME`, `FINISH_WALLTIME`, `POLL_INTERVAL_MINUTES`, `MAX_JOB_HOURS`, `PORTSTUDY_FINISH_FLAGS`, `PORTSTUDY_WEEK`, `PORTSTUDY_FROM`, `PORTSTUDY_GATEWAY_FALLBACK`, `PORTSTUDY_SHARDS`, `PORTSTUDY_FALLBACK_PORT` | Retired ARCTIC Slurm layout and shuffle array; unused on the desktop; removed in PLAN4 Phases 1 and 2. |
 | `PORTSTUDY_E2E_DIGEST_FILE` | Tests only: where the e2e suite writes its output digest. |
 
 Keys go in a `.env` file outside the repository (`~/.env` inside WSL, mode 600; `docs/desktop_setup.md`); `scripts/smoke_real_services.py` loads it and `check_secrets.py` fails on any key committed by mistake.
@@ -188,8 +187,7 @@ code. See `docs/open_questions.md`.
 
 `models` (real registry) and `stub_models` (tests and `--synthetic`). Each entry: `id`,
 `display_name`, `kind` (`open_weight` or `api`), `provider` (`litellm`,
-`anthropic_batch`, `openai_batch`, `stub`), `provider_model`, `serving` (`gateway`; the
-`slurm_fallback` value, `fallback_eligible` and `role` are removed in PLAN4 Phase 2), `snapshot_id`, `enabled`, `settings`, and `price`
+`anthropic_batch`, `openai_batch`, `stub`), `provider_model`, `serving` (`gateway`, the only value), `snapshot_id`, `enabled`, `settings`, and `price`
 (`input_per_m`, `cached_input_per_m`, `output_per_m`, `batch_discount`). Gateway entries use
 zero prices; API prices follow D3.
 
@@ -201,10 +199,8 @@ guaranteed identical, because requests are batched with other users'). `json_mod
 and its thinking counts toward the output limit, so the 300-token default will return empty answers
 for it; PLAN4 Phase 3 (G15) adds per-model limits (Gemma 300, MiniMax about 2,000 until measured).
 Until that phase is built, set MiniMax's `max_output_tokens` through `llm.settings.<model>`. The `llm.gateway` section contains the gateway `base_url`
-(`https://litellm.rs.gsu.edu/v1`, the ARCTIC LiteLLM gateway; GSU network or VPN required) and
-`fallback_endpoint_file` (retired fallback server; removed in PLAN4 Phase 2). The enabled study
-models are Gemma 4 31B and MiniMax M2.7 on the gateway plus Claude Haiku 5.5 and GPT-6 Luna; the
-Gemma 4 E4B, Phi-4 Mini and Llama 3.2 3B entries are disabled leftovers removed in PLAN4 Phase 2.
+(`https://litellm.rs.gsu.edu/v1`, the ARCTIC LiteLLM gateway; GSU network or VPN required). The enabled study
+models are Gemma 4 31B and MiniMax M2.7 on the gateway plus Claude Haiku 5.5 and GPT-6 Luna.
 
 ## prompts_manifest.yaml
 

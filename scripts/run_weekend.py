@@ -1,4 +1,4 @@
-"""The one script Carter runs by hand each weekend (DECISION(N2)). No scheduler.
+"""The one script Carter runs by hand on the desktop each weekend (DECISION(N2)). No scheduler.
 
 Step 1: J8 and J9 for any earlier week whose replay or backup is not done.
 Step 2: J1 to J6 for the current week in order, waiting on API batches (J5) with a visible
@@ -10,14 +10,13 @@ On a failure the script stops, prints what failed, the fallback that will apply,
 command to rerun that one job. Rerunning the script resumes where it stopped.
 
 Usage: python scripts/run_weekend.py [--week 2026-W46] [--dry-run] [--synthetic]
-                                     [--allow-over-budget] [--gateway-fallback] [--now ISO]
+                                     [--allow-over-budget] [--now ISO]
                                      [--poll-seconds N] [--from J3] [--until J5]
-                                     [--check-walltime HH:MM:SS]
 
-v2 phase 12: `--from <job>` resumes at that job (earlier jobs are left as they are), `--until`
-stops after a job (login mode runs J3 to J5 on the login node), and before J4 a health check
-sends one tiny call per gateway model; on a failure without `--gateway-fallback` the D2 steps
-are printed and the affected sources are marked failed (N1) so the run can continue.
+`--from <job>` resumes at that job (earlier jobs are left as they are) and `--until` stops after
+a job. Before J4 a health check sends one tiny call per gateway model; on a failure the D2 lines
+are printed and the affected sources are marked failed (N1) so the run can continue, and
+`--from J4` retries them once the gateway is back.
 """
 
 from __future__ import annotations
@@ -58,12 +57,8 @@ def say(msg: str) -> None:
     print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def rerun_command(job: str, week: str, synthetic: bool, gateway_fallback: bool = False) -> str:
-    return (
-        f"portstudy run-job {job} --week {week}"
-        + (" --synthetic" if synthetic else "")
-        + (" --gateway-fallback" if gateway_fallback else "")
-    )
+def rerun_command(job: str, week: str, synthetic: bool) -> str:
+    return f"portstudy run-job {job} --week {week}" + (" --synthetic" if synthetic else "")
 
 
 def run(ctx: RunContext, job: str, week: str, synthetic: bool) -> str:
@@ -73,7 +68,7 @@ def run(ctx: RunContext, job: str, week: str, synthetic: bool) -> str:
     except Exception as exc:  # a JobFailed, or a hard crash that left no status file
         say(f"{job} {week} FAILED: {exc}")
         say(f"fallback that will apply: {FALLBACK_HINTS.get(job, '')}")
-        say(f"rerun with: {rerun_command(job, week, synthetic, ctx.gateway_fallback)}")
+        say(f"rerun with: {rerun_command(job, week, synthetic)}")
         raise JobFailed(job, week, str(exc)) from exc
     result = status.result or {}
     summary = _summarize(job, result)
@@ -135,22 +130,6 @@ def wait_for_batches(ctx: RunContext, week: str, synthetic: bool, poll_seconds: 
         time.sleep(poll_seconds)
 
 
-def poll_once(ctx: RunContext, week: str, synthetic: bool) -> str:
-    """One J5 pass (PLAN3 phase 3, finish.sbatch): "pending" means come back later; at the lock
-    margin the pending batches are left for J6 to label as fallbacks (N1) and the run goes on."""
-    state = run(ctx, "J5", week, synthetic)
-    if state != "pending":
-        return state
-    deadline = lock_deadline(week, ctx.cfg) - dt.timedelta(
-        minutes=ctx.cfg.pipeline.lock_margin_minutes
-    )
-    if deadline - ctx.now() <= dt.timedelta(0):
-        say("lock margin reached with batches still pending; J6 will label them as fallbacks")
-        return "margin_reached"
-    say(f"batches pending; exiting {POLL_AGAIN} so the finish job can resubmit itself")
-    return "pending"
-
-
 def step1_catch_up(ctx: RunContext, week: str, synthetic: bool) -> None:
     earlier = [w for w in weeks_with_weights() if w < week]
     for w in earlier:
@@ -186,20 +165,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--synthetic", action="store_true")
     parser.add_argument("--allow-over-budget", action="store_true")
-    parser.add_argument("--gateway-fallback", action="store_true")
     parser.add_argument("--config", default=None, help="study YAML path")
     parser.add_argument("--now", default=None, help="override the clock, ISO datetime with offset")
     parser.add_argument("--poll-seconds", type=int, default=None)
     parser.add_argument("--from", dest="from_job", default="J1", help="resume at this job")
     parser.add_argument("--until", dest="until_job", default="J9", help="stop after this job")
-    parser.add_argument(
-        "--check-walltime", default=None, help="Slurm walltime; warn if it ends after the lock"
-    )
-    parser.add_argument(
-        "--poll-once",
-        action="store_true",
-        help="run J5 once: exit 3 while batches are pending before the lock margin (finish.sbatch)",
-    )
     args = parser.parse_args(argv)
     if args.from_job not in STEP_ORDER or args.until_job not in STEP_ORDER:
         parser.error(f"--from/--until must be one of {STEP_ORDER}")
@@ -215,7 +185,6 @@ def main(argv: list[str] | None = None) -> int:
         allow_over_budget=args.allow_over_budget,
         clock=clock,
         config_path=Path(args.config) if args.config else None,
-        gateway_fallback=args.gateway_fallback,
     )
     week = args.week or current_week(ctx.now())
     poll = (
@@ -225,24 +194,6 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     now = ctx.now()
-    if args.check_walltime:
-        hours = health.parse_walltime(args.check_walltime).total_seconds() / 3600.0
-        if hours > MAX_JOB_HOURS:  # DECISION(W1), the same limits as scripts/arctic/common.sh
-            say(f"error: walltime {args.check_walltime} exceeds the {MAX_JOB_HOURS} hour limit")
-            return 2
-        if hours > WARN_JOB_HOURS:
-            say(
-                f"warning: walltime {args.check_walltime} is above the {WARN_JOB_HOURS} hour target"
-            )
-        ends = now + health.parse_walltime(args.check_walltime)
-        deadline = lock_deadline(week, ctx.cfg)
-        if ends > deadline:
-            say(
-                f"warning: walltime {args.check_walltime} ends {ends.isoformat()} after the lock "
-                f"deadline {deadline.isoformat()}; shorten the job or start earlier"
-            )
-        else:
-            say(f"walltime {args.check_walltime} ends {ends.isoformat()} before the lock")
     if now.weekday() == 5:
         say("warning: Saturday start leaves a smaller buffer for a batch retry before the lock")
     say(
@@ -266,15 +217,12 @@ def main(argv: list[str] | None = None) -> int:
     explicit_j8 = "J8" in (args.from_job, args.until_job)
     try:
         # Review fix H4: the catch-up (J8 and J9 for earlier weeks) runs on every invocation, so
-        # the ARCTIC flows that start at J3 or J6 still replay and score the earlier weeks.
+        # a rerun that starts at J3 or J6 still replays and scores the earlier weeks.
         step1_catch_up(ctx, week, args.synthetic)
         for job in jobs:
             if job == "J4":
                 gateway_health(ctx, week)
-            if job == "J5" and args.poll_once:
-                if poll_once(ctx, week, args.synthetic) == "pending":
-                    return POLL_AGAIN
-            elif job == "J5":
+            if job == "J5":
                 wait_for_batches(ctx, week, args.synthetic, poll)
             elif job == "J8" and not explicit_j8:
                 continue  # this week's replay runs in next weekend's catch-up
@@ -298,9 +246,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 STEP_ORDER = ["J1", "J2", "J3", "J4", "J5", "J6", "J7", "J8", "J9"]
-POLL_AGAIN = 3  # --poll-once exit code while API batches are pending
-MAX_JOB_HOURS = 15  # DECISION(W1)
-WARN_JOB_HOURS = 12
 
 
 def jobs_between(from_job: str, until_job: str) -> list[str]:
@@ -311,7 +256,7 @@ def jobs_between(from_job: str, until_job: str) -> list[str]:
 
 
 def gateway_health(ctx: RunContext, week: str) -> health.HealthReport:
-    """One tiny call per gateway model before J4; print the D2 steps and mark sources on failure."""
+    """One tiny call per gateway model before J4; print the D2 lines and mark sources on failure."""
     from portstudy.pipeline.jobs import _week_runner
 
     report = health.gateway_health_check(ctx, week, _week_runner(ctx, week))
@@ -319,18 +264,9 @@ def gateway_health(ctx: RunContext, week: str) -> health.HealthReport:
         checked = ", ".join(report.ok) if report.ok else "no gateway models"
         say(f"gateway health check ok: {checked}")
         return report
-    for line in health.d2_steps(week, report.failed):
+    for line in health.outage_lines(report.failed):
         say(line)
-    failed = sorted(report.failed)
-    if ctx.gateway_fallback:
-        # Review fix M3: only the fallback-eligible models move to the fallback endpoint; the
-        # other failed gateway models are marked failed (N1) like in the non-fallback run.
-        eligible = [m for m in failed if ctx.registry.get(m).fallback_eligible]
-        failed = [m for m in failed if m not in eligible]
-        say(f"continuing with --gateway-fallback: {', '.join(eligible) or 'no models'} use it")
-        if not failed:
-            return report
-    keys = health.mark_sources_failed(ctx, week, failed, health.HEALTH_REASON)
+    keys = health.mark_sources_failed(ctx, week, sorted(report.failed), health.HEALTH_REASON)
     say(f"marked failed (N1): {', '.join(keys)}; the rest of the week continues")
     return report
 

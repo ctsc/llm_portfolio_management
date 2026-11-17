@@ -990,3 +990,64 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
 - G6 was deleted from the `study.yaml` decisions in this phase (the plan lists it under Phase 2) so
   the Phase 1 grep is clean; it moves to the retired table in `docs/open_questions.md` in Phase 4.
 - Pushes go to GitHub only; the `gitlab` remote is left configured and unused.
+
+## v4 phase 2: remove the ARCTIC Slurm layer and small models
+
+### What changed
+
+- Deleted `scripts/arctic/` (8 files). ARCTIC is now only the LiteLLM gateway URL.
+- `config.py`: `ModelSpec` has no `role` or `fallback_eligible`; `serving` accepts only `gateway`
+  (kept as the endpoint label in LLM records and the cache key); the fallback validator and
+  `gateway.fallback_endpoint_file` are gone. `config/models.yaml`: the three disabled small-model
+  entries are removed.
+- `llm/providers/factory.py`: no fallback endpoint file and no second key; `make_provider` no
+  longer takes `week_id` or `run_started_at`. `pipeline/context.py`: no `gateway_fallback` and no
+  registry rewrite. `pipeline/cli.py` and `scripts/run_weekend.py`: `--gateway-fallback`,
+  `--check-walltime` and `--poll-once` removed with their code; the docstring describes the desktop
+  run. `scripts/check_secrets.py` and `scripts/smoke_real_services.py`: fallback key removed.
+- `llm/health.py`: the walltime parser is gone; `outage_lines` prints the D2 message (sources
+  marked failed, they trade Q0, rerun `--from J4` to retry before the lock).
+- J4's input hash now includes the health check's failed-model list. Before this, a week whose
+  health check failed left J4 `done` with an unchanged hash, so `--from J4` after the gateway
+  recovered would have skipped J4 (the old flow relied on `--gateway-fallback` changing the hash).
+- `study.yaml` decisions: D1, D2 and N2 carry the PLAN4 values; W1 and M1 deleted.
+- CI workflows: no reference to the deleted scripts.
+- README, `docs/config_reference.md`, `docs/design.md`, `docs/runbook.md`: the "PLAN4 Phase 2"
+  notes are removed and the outage and retry steps are described as built.
+  `llm_research/10_open_items_and_next_steps.md` points at this file for build status.
+- Synthetic caches from earlier runs are invalid (the run registry hash changed); no live week has
+  run.
+
+### Tests
+
+- Deleted: `tests/integration/test_v2_phase12_arctic.py`, `tests/unit/test_v3_phase3_arctic.py`.
+  Their tests that do not depend on the deleted scripts moved unchanged in behavior to
+  `tests/unit/test_v4_phase2_gateway.py`: J4 while J2 is pending, the J7 prerequisite refusals,
+  parallel J4 equals sequential with one crashing model, `--from` and `--until`, the health failure
+  marking sources, the rsync command, stub models skipped by the health check.
+- New in the same file: one gateway model down gives only its sources `fallback` with reason
+  `gateway_health_check_failed`, their portfolios hold the strategy's Q0 weights, the other model
+  runs normally, exit code 0, and a rerun with `--from J4` after recovery makes them `normal` again;
+  the removed flags, model fields and gateway key are rejected; `scripts/arctic` is gone.
+- Changed: `test_v2_phase4_litellm.py` and `test_review_fixes.py` (fallback endpoint tests
+  removed), `test_v3_phase1_config.py` (W1 and M1 now absent), `test_phase1_scaffold.py`,
+  `test_v2_phase1_config_identity.py`, `test_v2_phase8_jobs.py`, `test_phase6_llm.py`,
+  `test_phase12_ci.py`, `tests/e2e/conftest.py` (week 12 is a gateway outage with no rerun; the
+  fallback-eligible registry helper is removed), `tests/e2e/test_full_run.py` (the week 12 test is
+  now `test_injected_gateway_health_failure_trades_q0_and_the_run_continues`),
+  `tests/e2e/test_full_run_synthetic.py`.
+- Run: the 13 test files that cover the touched code, 133 tests, all pass; `tests/e2e` collects
+  (16 tests). The e2e suite itself is not run per phase (Carter's instruction); its edited week 12
+  assertions are first exercised in the Phase 11 full run. `ruff check`, `ruff format --check`,
+  `mypy` clean.
+- Completion grep (`slurm|sbatch|walltime|gateway[-_]fallback|fallback_endpoint|arctic_fallback|
+  login mode|e4b|phi-4|llama` over `src scripts config tests .github .gitlab-ci.yml`): no match.
+  `run_weekend.py --synthetic --dry-run` lists J1 to J9.
+
+### Choices made while unattended
+
+- `serving` stays as a one-value field instead of being removed, so record files and cache keys
+  keep their endpoint label and the runner needs no rewrite in this phase.
+- The J4 input-hash change above is not in the plan text; it is needed for the D2 retry the
+  outage message promises.
+- Negative tests build the removed names by string concatenation so the completion grep stays empty.

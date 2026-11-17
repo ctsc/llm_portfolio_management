@@ -34,7 +34,7 @@ Four pooled main comparisons (LLM-minus-baseline rank IC gap, steered-minus-Q0 t
 
 **Prompt types.** `bare`, `placebo`, and the skills files `skills_1` to `skills_4` (`skills_5` is disabled by default; `config/prompts_manifest.yaml`). Every prompt is built from the same fields (ticker, name, sector, the week's news up to the cutoff) at temperature 0, one stock per call, JSON output only. Each skills file must be within 5 percent of the mean skills length and the placebo within 2 percent, so length cannot explain a difference between them.
 
-**Models** (`config/models.yaml`). Gemma 4 31B and MiniMax M2.7 through the ARCTIC LiteLLM gateway (the two models ARCTIC already hosts), and Claude Haiku 5.5 and GPT-6 Luna through their providers' batch APIs. Models banned by GSU's AI tool registry are not used. Three disabled small-model entries left from an earlier plan are removed in PLAN4 Phase 2.
+**Models** (`config/models.yaml`). Gemma 4 31B and MiniMax M2.7 through the ARCTIC LiteLLM gateway (the two models ARCTIC already hosts), and Claude Haiku 5.5 and GPT-6 Luna through their providers' batch APIs. Models banned by GSU's AI tool registry are not used.
 
 **Portfolio count.** With S sources, the pipeline writes 5 (S + 1) + 2 portfolios a week: five strategies, each on S sources plus its own Q0, plus HRP and equal weight. The default 4 models x 6 prompt types give 24 sources and 127 portfolios; with 7 prompt types, 28 sources and 147 portfolios.
 
@@ -121,7 +121,7 @@ Status: the code currently implements the older version (Holm everywhere, ETF-pr
 
 `scripts/run_weekend.py` runs the jobs in order on the desktop and resumes where it stopped. Every job records an inputs hash and an outputs hash in its status file; a finished job is skipped only while its inputs are unchanged and its outputs are intact. Weights are final once `locked.json` exists.
 
-**Where it runs** (decision L1). Carter runs `scripts/run_weekend.py` by hand in WSL2 on his desktop, Friday night or Saturday morning (decision N2). J2 runs Kronos on the local GPU; J4 sends the open-weight requests to ARCTIC's LiteLLM gateway over the GSU VPN; J3 and J5 use the providers' batch APIs; everything else runs on the desktop CPU. The `scripts/arctic/` Slurm layout from PLAN3 is retired and deleted in PLAN4 Phase 2.
+**Where it runs** (decision L1). Carter runs `scripts/run_weekend.py` by hand in WSL2 on his desktop, Friday night or Saturday morning (decision N2). J2 runs Kronos on the local GPU; J4 sends the open-weight requests to ARCTIC's LiteLLM gateway over the GSU VPN; J3 and J5 use the providers' batch APIs; everything else runs on the desktop CPU. Nothing in the repository runs on ARCTIC compute nodes.
 
 ## Failure handling
 
@@ -217,7 +217,6 @@ src/portstudy/
   pipeline/             run context, job status, jobs J1 to J9, fallback policy, typer CLI
   eval/                 statistics, rank IC, hypotheses H1 to H5, factors, report
 scripts/                run_weekend.py and the utilities above
-scripts/arctic/         retired Slurm layout, deleted in PLAN4 Phase 2
 tests/                  unit/  integration/  e2e/
 docs/                   code docs: design, runbook, desktop setup, weekend checklist, config
                         reference, open questions, build decisions, GitHub and GitLab setup
@@ -249,7 +248,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs lint, unit tests and the reposi
 ## Project status
 
 - **Built and tested.** v1, v2 phases 1 to 14, the review fixes from `plans/results.md`, and PLAN3 phases 1 to 6, each recorded in `plans/PROGRESS.md`.
-- **In progress: `plans/PLAN4.md` Phases 1 to 11** (Phase 1, removing the retired G6 test, is done; see `plans/PROGRESS.md`): remove the ARCTIC Slurm layer, desktop runtime (Kronos chunking, live-readiness checks, lock file), the new evaluation and report, docs recheck, and end-to-end verification.
+- **In progress: `plans/PLAN4.md` Phases 1 to 11** (Phases 1 and 2 are done: the retired G6 test, the ARCTIC job scripts, the fallback server path and the small-model entries are removed; see `plans/PROGRESS.md`). Still to build: desktop runtime (Kronos chunking, live-readiness checks, lock file), the new evaluation and report, docs recheck, and end-to-end verification.
 - **Manual work: `manualwork.md`** (Carter, the only manual list): emails to Parag and Andalib, gateway key and VPN, desktop setup, API keys and budget, skills and placebo texts, stock list, preregistration, smoke tests, the pilot, the `frozen-v4` tag.
 - **Not yet verified against live services** (`UNVERIFIED` in config and code): gateway JSON mode, seed support, rate limits and real seconds per request; whether MiniMax needs an output-token override; Kronos per-path sampling and its chunked GPU time.
 

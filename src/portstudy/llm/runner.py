@@ -178,15 +178,10 @@ class WeekRunner:
 
     def provider(self, model_id: str, config_id: str | None = None) -> LlmProvider:
         if model_id not in self._providers:
-            status = (
-                read_run_status(self.week_id).get(f"{model_id}__{config_id}") if config_id else None
-            )
             self._providers[model_id] = make_provider(
                 self.registry.get(model_id),
                 self.stub_seed,
                 gateway=self.cfg.llm.gateway,
-                week_id=self.week_id,
-                run_started_at=status.started_at if status else None,
             )
         return self._providers[model_id]
 

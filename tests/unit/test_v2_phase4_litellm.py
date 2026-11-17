@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 import threading
 import time
 from collections.abc import Callable
@@ -15,7 +14,6 @@ import pandas as pd
 import pytest
 
 from portstudy.config import (
-    GatewayConfig,
     LlmSettings,
     ModelRegistry,
     ModelSpec,
@@ -24,12 +22,10 @@ from portstudy.config import (
 from portstudy.llm.cache import LlmCache
 from portstudy.llm.prompts import load_manifest
 from portstudy.llm.providers.base import BatchItem, LlmProvider, LlmProviderError, RawResult
-from portstudy.llm.providers.factory import make_provider
 from portstudy.llm.providers.litellm import LiteLLMProvider, LlmAuthenticationError
 from portstudy.llm.providers.stub import StubLlmProvider
 from portstudy.llm.runner import WeekRunner, lock_deadline, read_run_status, read_scores
 from portstudy.llm.validate import parse_response
-from portstudy.paths import week_output_dir
 from portstudy.pipeline.context import synthetic_clock
 
 ET = ZoneInfo("America/New_York")
@@ -361,37 +357,6 @@ def test_registry_rejects_enabled_tbd_and_prohibited_ids(model_registry: ModelRe
         )
 
 
-def test_fallback_endpoint_rejects_missing_or_stale_file(tmp_path: Path) -> None:
-    spec = ModelSpec(
-        id="model",
-        display_name="model",
-        kind="open_weight",
-        provider="litellm",
-        provider_model="provider/model",
-        serving="slurm_fallback",
-        fallback_eligible=True,
-    )
-    missing = GatewayConfig(
-        fallback_endpoint_file=str(tmp_path / "missing.json"),
-    )
-    with pytest.raises(FileNotFoundError, match="fallback endpoint file is missing"):
-        make_provider(
-            spec, gateway=missing, week_id="2026-W05", run_started_at="2026-01-01T00:00:00+00:00"
-        )
-
-    endpoint = tmp_path / "stale.json"
-    endpoint.write_text('{"base_url":"http://slurm","week_id":"2026-W05"}\n', encoding="utf-8")
-    old = time.time() - 60
-    os.utime(endpoint, (old, old))
-    with pytest.raises(ValueError, match="fallback endpoint file is stale"):
-        make_provider(
-            spec,
-            gateway=GatewayConfig(fallback_endpoint_file=str(endpoint)),
-            week_id="2026-W05",
-            run_started_at=(dt.datetime.now(dt.UTC) - dt.timedelta(seconds=30)).isoformat(),
-        )
-
-
 class _EndpointProvider(LlmProvider):
     def __init__(self, model_id: str, endpoint: str, fail_after: int | None = None) -> None:
         self.model_id = model_id
@@ -464,14 +429,13 @@ def _runner(
     )
 
 
-def _litellm_registry(registry: ModelRegistry, *, serving: str = "gateway") -> ModelRegistry:
+def _litellm_registry(registry: ModelRegistry) -> ModelRegistry:
     models = [
         model.model_copy(
             update={
                 "provider": "litellm",
                 "provider_model": "provider/model",
-                "serving": serving,
-                "fallback_eligible": serving == "slurm_fallback",
+                "serving": "gateway",
             }
         )
         if model.id == "stub-ow-a"
@@ -586,46 +550,6 @@ def test_open_weight_resume_skips_twenty_completed_records(
     assert summary.n_calls == 30
     assert len(read_scores("2026-W12")) == 50
     assert not read_scores("2026-W12").duplicated(["model", "config_id", "ticker"]).any()
-
-
-def test_gateway_fallback_archives_and_restarts_whole_source(
-    pipeline_dir: Path,
-    tmp_path: Path,
-    model_registry: ModelRegistry,
-    study_config: StudyConfig,
-) -> None:
-    gateway_registry = _litellm_registry(model_registry)
-    initial = _runner(
-        week="2026-W13",
-        registry=gateway_registry,
-        cfg=study_config,
-        provider=_EndpointProvider("stub-ow-a", "gateway"),
-        tickers=3,
-        tmp_path=tmp_path,
-        concurrency=1,
-    )
-    initial.run_open_weight("stub-ow-a")
-    assert set(read_scores("2026-W13")["endpoint"]) == {"gateway"}
-
-    fallback_registry = _litellm_registry(model_registry, serving="slurm_fallback")
-    fallback_provider = _EndpointProvider("stub-ow-a", "slurm_fallback")
-    fallback = _runner(
-        week="2026-W13",
-        registry=fallback_registry,
-        cfg=study_config,
-        provider=fallback_provider,
-        tickers=3,
-        tmp_path=tmp_path,
-        concurrency=1,
-    )
-    fallback.run_open_weight("stub-ow-a")
-
-    archive = week_output_dir("2026-W13") / "llm" / "archive" / "stub-ow-a__bare.gateway.jsonl"
-    assert archive.exists()
-    assert len(archive.read_text(encoding="utf-8").splitlines()) == 3
-    assert fallback_provider.calls == 3
-    assert set(read_scores("2026-W13")["endpoint"]) == {"slurm_fallback"}
-    assert read_run_status("2026-W13")["stub-ow-a__bare"].endpoint == "slurm_fallback"
 
 
 def test_reasoning_only_response_is_logged_as_thinking(

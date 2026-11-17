@@ -147,7 +147,6 @@ class LlmSettings(StrictModel):
 
 class GatewayConfig(StrictModel):
     base_url: str = ""
-    fallback_endpoint_file: str = "data/runtime/fallback_endpoint.json"
 
 
 class LlmConfig(StrictModel):
@@ -278,7 +277,8 @@ class EvalConfig(StrictModel):
 
 class BackupConfig(StrictModel):
     keep_zips: bool = True
-    rsync_target: str | None = None  # e.g. user@host:/path, pulls the dated folders off ARCTIC
+    # e.g. /mnt/c/Users/<name>/portstudy_backups or user@host:/path, a copy off the desktop
+    rsync_target: str | None = None
     master_tables: list[str] = Field(
         default_factory=lambda: [
             "llm_scores",
@@ -357,9 +357,7 @@ class ModelSpec(StrictModel):
     provider_model: str
     snapshot_id: str | None = None
     enabled: bool = True
-    role: Literal["primary", "fallback"] = "primary"
-    serving: Literal["gateway", "slurm_fallback"] = "gateway"
-    fallback_eligible: bool = False
+    serving: Literal["gateway"] = "gateway"
     settings: LlmSettings = LlmSettings()
     price: ModelPrice = ModelPrice()
 
@@ -388,13 +386,6 @@ class ModelRegistry(StrictModel):
         ]
         if unknown_enabled:
             raise ValueError(f"enabled models must have a provider_model: {unknown_enabled}")
-        invalid_fallback = [
-            model.id
-            for model in self.models + self.stub_models
-            if model.serving == "slurm_fallback" and not model.fallback_eligible
-        ]
-        if invalid_fallback:
-            raise ValueError(f"models are not eligible for Slurm fallback: {invalid_fallback}")
         return self
 
     def enabled(self, synthetic: bool = False) -> list[ModelSpec]:

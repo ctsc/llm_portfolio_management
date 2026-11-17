@@ -186,13 +186,7 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
         from portstudy.llm.health import mark_sources_failed, unhealthy_models
 
         out: dict[str, Any] = {}
-        # Review fix M3: under --gateway-fallback only the fallback-eligible models leave the
-        # unhealthy set (they run on the fallback endpoint); the others stay marked failed.
-        unhealthy = {
-            m
-            for m in unhealthy_models(week_id)
-            if not (ctx.gateway_fallback and ctx.registry.get(m).fallback_eligible)
-        }
+        unhealthy = unhealthy_models(week_id)
         models = []
         for model in ctx.open_weight_models():
             if model in unhealthy:  # marked failed by the gateway health check (N1)
@@ -255,7 +249,13 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
             raise RuntimeError("open-weight worker crashed for " + "; ".join(crashed))
         return out
 
-    return run_job(week_id, "J4", _llm_inputs(ctx, week_id), fn, force=ctx.force)
+    from portstudy.llm.health import unhealthy_models as _unhealthy
+
+    # The health result is an input: a rerun after the gateway recovers runs J4 again.
+    inputs = stable_hash(
+        {"llm": _llm_inputs(ctx, week_id), "unhealthy": sorted(_unhealthy(week_id))}
+    )
+    return run_job(week_id, "J4", inputs, fn, force=ctx.force)
 
 
 def J5_api_collect(ctx: RunContext, week_id: str) -> JobStatus:

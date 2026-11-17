@@ -51,7 +51,6 @@ class WeekendRunner:
             data_providers=self.data_providers or synthetic_bundle(self.world),
             llm_providers=dict(self.llm_providers),
             clock=self.clock or synthetic_clock(week),
-            gateway_fallback=bool(kw.get("gateway_fallback", False)),
         )
 
     def run(
@@ -63,7 +62,6 @@ class WeekendRunner:
             lambda **kw: self.context(
                 week,
                 allow_over_budget=kw.get("allow_over_budget", False),
-                gateway_fallback=kw.get("gateway_fallback", False),
             ),
         )
         return int(run_weekend.main(["--synthetic", "--week", week, *(extra or [])]))
@@ -110,15 +108,6 @@ def lock_cutoff_clock(week: str, cfg: StudyConfig, root: Path) -> Callable[[], d
     return now
 
 
-def rehearsal_registry(registry: ModelRegistry) -> ModelRegistry:
-    """stub-ow-a is fallback-eligible so --gateway-fallback switches it (D2); stub-ow-b is not."""
-    stubs = [
-        m.model_copy(update={"fallback_eligible": m.id == "stub-ow-a"})
-        for m in registry.stub_models
-    ]
-    return registry.model_copy(update={"stub_models": stubs})
-
-
 def run_rehearsal(
     runner: WeekendRunner, weeks: list[str], mp: pytest.MonkeyPatch, root: Path
 ) -> None:
@@ -143,9 +132,7 @@ def run_rehearsal(
             runner.clock = None
         elif kind == "gateway_health":
             runner.llm_providers = {"stub-ow-a": GatewayDown()}
-            assert runner.run(w, mp) == 0, w  # D2 steps printed, stub-ow-a sources failed (N1)
-            runner.llm_providers = {"stub-ow-a": StubLlmProvider("stub-ow-a")}
-            assert runner.run(w, mp, ["--from", "J4", "--gateway-fallback"]) == 0, w
+            assert runner.run(w, mp) == 0, w  # D2 lines printed, stub-ow-a sources failed (N1)
         else:
             assert runner.run(w, mp) == 0, w
         runner.llm_providers = {}
@@ -170,9 +157,7 @@ def e2e_root(
     os.environ["PORTSTUDY_DATA_DIR"] = str(root)
     mp = pytest.MonkeyPatch()
     try:
-        runner = WeekendRunner(
-            generous_budget(study_config), rehearsal_registry(model_registry), world
-        )
+        runner = WeekendRunner(generous_budget(study_config), model_registry, world)
         run_rehearsal(runner, e2e_weeks, mp, root)
         yield root
     finally:

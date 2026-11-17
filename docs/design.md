@@ -229,10 +229,10 @@ J1 to J6 in order: J2 runs Kronos on the local GPU, J3 submits the API batches, 
 gateway models with one worker per model (`llm.parallel_models`) and `llm.concurrency` requests at
 a time, J5 polls the batches with a countdown until they are back or the lock margin, and J6
 validates. Step 3 runs J7 and J9. Before J4 a health check sends one tiny call per gateway model; a
-model that fails is marked failed for the week and its sources trade Q0 (D2). Every job resumes from
-its status files. The retired ARCTIC Slurm layout (`scripts/arctic/`, `--poll-once`,
-`--gateway-fallback`, `--check-walltime`, login mode) is still in the tree and is deleted in PLAN4
-Phase 2.
+model that fails is marked failed for the week and its sources trade Q0 (D2). If the gateway comes
+back before the lock, `python scripts/run_weekend.py --from J4` runs the health check again and J4
+retries that model (the health result is part of J4's input hash). Every job resumes from its
+status files.
 
 ## v2 in one page
 

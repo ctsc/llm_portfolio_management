@@ -65,7 +65,6 @@ def test_model_registry_loads(model_registry: ModelRegistry) -> None:
         "claude-haiku-5.5",
         "gpt-6-luna",
     }
-    assert model_registry.get("llama-3.2-3b").enabled is False
     stubs = model_registry.enabled(synthetic=True)
     assert len(stubs) == 4
     assert all(m.provider == "stub" for m in stubs)

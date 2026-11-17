@@ -64,7 +64,6 @@ def test_h4_catch_up_runs_for_every_start_job_and_from_j8_runs_j8(
 
     class Ctx:
         cfg = run_weekend.default_context(synthetic=True).cfg
-        gateway_fallback = False
 
         def now(self):  # type: ignore[no-untyped-def]
             return run_weekend.synthetic_clock("2026-W05")()
@@ -119,7 +118,6 @@ def test_h2_replay_weeks_fill_the_gap_and_a_j1_failure_writes_the_hold(
 
     class Ctx:
         cfg = run_weekend.default_context(synthetic=True).cfg
-        gateway_fallback = False
 
         def now(self):  # type: ignore[no-untyped-def]
             return run_weekend.synthetic_clock("2026-W05")()
@@ -127,15 +125,6 @@ def test_h2_replay_weeks_fill_the_gap_and_a_j1_failure_writes_the_hold(
     monkeypatch.setattr(run_weekend, "default_context", lambda **kw: Ctx())
     assert run_weekend.main(["--synthetic", "--week", "2026-W05"]) == 1
     assert calls == ["J1", "J6", "J7"]
-
-
-def test_h3_login_mode_layout_moved_to_v3_phase3() -> None:
-    """H3 (J4 gated on Kronos in login mode) is superseded by PLAN3 phase 3: J4 no longer needs
-    J2, and the three-job layout is covered in tests/unit/test_v3_phase3_arctic.py."""
-    text = (
-        Path(__file__).resolve().parents[2] / "scripts" / "arctic" / "submit_weekend.sh"
-    ).read_text()
-    assert "wait_for_job" not in text and "afterany" in text
 
 
 def test_m4_m10_current_week_is_dst_aware_and_rolls_at_the_close() -> None:
@@ -271,45 +260,6 @@ def test_m1_m2_provider_errors_are_requeued_and_auth_failures_abort_the_model(
     assert summary.aborted == "authentication_failed"
     assert summary.n_provider_retries == 0
     assert sum(unauth.attempts.values()) == 1, "the first 401 stops the model's run"
-
-
-def test_m3_gateway_fallback_marks_non_eligible_failed_models(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """M3: under --gateway-fallback only fallback-eligible models switch endpoints; the other
-    failed gateway models are still marked failed (N1)."""
-    import sys
-    from types import SimpleNamespace
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-    import run_weekend
-    from portstudy.llm import health
-
-    report = health.HealthReport(
-        week_id="2026-W05",
-        checked_at="x",
-        failed={"big-model": "HTTP 503", "small-model": "HTTP 503"},
-    )
-    marked: list[tuple[list[str], str]] = []
-    monkeypatch.setattr(health, "gateway_health_check", lambda ctx, w, r: report)
-    monkeypatch.setattr(
-        health,
-        "mark_sources_failed",
-        lambda ctx, w, models, reason: marked.append((models, reason)) or models,
-    )
-    monkeypatch.setattr("portstudy.pipeline.jobs._week_runner", lambda ctx, w: None)
-    specs = {
-        "big-model": SimpleNamespace(fallback_eligible=False),
-        "small-model": SimpleNamespace(fallback_eligible=True),
-    }
-    ctx = SimpleNamespace(gateway_fallback=True, registry=SimpleNamespace(get=lambda m: specs[m]))
-    run_weekend.gateway_health(ctx, "2026-W05")  # type: ignore[arg-type]
-    assert marked == [(["big-model"], health.HEALTH_REASON)]
-
-    marked.clear()
-    ctx = SimpleNamespace(gateway_fallback=False, registry=SimpleNamespace(get=lambda m: specs[m]))
-    run_weekend.gateway_health(ctx, "2026-W05")  # type: ignore[arg-type]
-    assert marked == [(["big-model", "small-model"], health.HEALTH_REASON)]
 
 
 def test_m6_view_shift_is_measured_on_fallback_weights_too() -> None:

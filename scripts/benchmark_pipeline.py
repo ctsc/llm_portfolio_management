@@ -1,5 +1,5 @@
 """Per-strategy solve times at a chosen universe size and the implied weekly J7 time, so the
-universe size (DECISION(B4)) and the weekly job walltime can be checked before the freeze.
+universe size (DECISION(B4)) and the weekly job duration can be checked before the freeze.
 
 Usage:
   python scripts/benchmark_pipeline.py --n-stocks 300 --sources 3 --weeks 24

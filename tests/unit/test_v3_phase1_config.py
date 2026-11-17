@@ -26,8 +26,7 @@ def test_study_config_holds_the_plan3_values() -> None:
     assert cfg.llm.gateway.base_url == "https://litellm.rs.gsu.edu/v1"
     assert "minimax-m2.7" not in cfg.llm.settings  # the unsourced 2048 override is gone
     ids = {d.id: d for d in cfg.decisions}
-    assert {"W1", "M1"} <= set(ids) and "G6" not in ids
-    assert "15 hours" in str(ids["W1"].value) and "mem-per-cpu=3G" in str(ids["M1"].value)
+    assert {"G6", "W1", "M1"}.isdisjoint(ids)
     StudyConfig.model_validate(_study("config/study_test.yaml"))
 
 
