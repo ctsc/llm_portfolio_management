@@ -218,7 +218,7 @@ def main() -> None:
         timed(spec.id, call)
 
     print()
-    print("Fix every FAILED line and every UNVERIFIED item listed in PROGRESS.md before the pilot.")
+    print("Fix every FAILED line and every UNVERIFIED item in plans/PROGRESS.md before the pilot.")
 
 
 if __name__ == "__main__":

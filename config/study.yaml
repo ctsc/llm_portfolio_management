@@ -1,8 +1,8 @@
 # Study configuration: every setting and every deferred decision lives here.
-# Decision IDs refer to section 0.3 of PLAN2.md. Code tags each use with DECISION(<ID>).
+# Decision IDs refer to section 0.3 of plans/PLAN2.md and plans/PLAN4.md (docs/open_questions.md). Code tags each use with DECISION(<ID>).
 
 universe:
-  size: 100                       # DECISION(B4): 100 to 300, set after the ARCTIC allocation
+  size: 100                       # DECISION(B4): 100 (ARCTIC startup allocation, 1,000 GPU-hours, 2026-11-16)
   source: sp500                   # DECISION(B2): sector balanced, drawn from the S&P 500
   sectors: 11
   min_history_days: 300
@@ -183,18 +183,11 @@ eval:
     H2_portfolio_vs_q0: per_strategy
     H3_skills_vs_controls: per_model
     H3b_width: all_sources
-    H5_shuffle: per_strategy       # each strategy's steered portfolios plus its Q0
   h4_splits: [market_direction, volatility, earnings_week]   # DECISION(G4)
   min_group_size: 10
   h3b:                            # DECISION(G3b)
     split: median
     min_group_size: 10
-  shuffle:
-    n_shuffles: 500               # DECISION(G6)
-    seed: 99
-    processes: 1
-    shard_size: 25                # shuffles per Slurm array task (one file per shard)
-    strategies: [mvo, robust, topk]  # DECISION(G6): Mean-CVaR and Resampled MVO are excluded for compute
 
 backup:
   keep_zips: true
@@ -267,7 +260,7 @@ decisions:
     value: "MVO, Mean-CVaR, Robust MVO, Resampled MVO, Top-K; each has its own Q0"
     status: confirmed
   - id: S2
-    value: "HRP and equal weight controls; no LLM view, Q0, or shuffle test"
+    value: "HRP and equal weight controls; no LLM view or Q0"
     status: confirmed
   - id: S3
     value: "10,000 Monte Carlo scenarios from the BL posterior; beta=0.95"
@@ -311,12 +304,6 @@ decisions:
   - id: G5
     value: daily
     status: confirmed
-  - id: G6
-    value: >-
-      500 shuffles for the MVO, Robust MVO and Top-K steered portfolios and those three strategies'
-      Q0s only; Mean-CVaR and Resampled MVO are excluded (about 99 percent of the shuffle compute);
-      Slurm array on ARCTIC CPUs, `portstudy shuffle run-local` as the backup (PLAN3)
-    status: confirmed
   - id: W1
     value: >-
       every Slurm job requests a walltime of at most 15 hours (target 12 or less) and never waits idle
@@ -326,7 +313,7 @@ decisions:
     value: "CPU jobs request --mem-per-cpu=3G and only the cores the work uses (PLAN3)"
     status: confirmed
   - id: G7
-    value: "IC tests as v1; portfolio return and shuffle tests one family per strategy"
+    value: "IC tests as v1; portfolio return tests one family per strategy"
     status: confirmed
   - id: N2
     value: "Carter runs one submit script by hand on ARCTIC; no scheduler"

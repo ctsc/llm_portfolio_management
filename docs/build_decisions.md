@@ -1,6 +1,15 @@
 # Build-time decisions
 
-Every non-obvious choice made while building the system, newest first, moved here unchanged from the README; "chosen during build" marks the ones the plan left open. The five study design choices (K1, S4, S5, G3b, P1) and the PLAN3 decisions (G6, W1, M1) stay in `README.md`.
+Every non-obvious choice made while building the system, newest first; "chosen during build" marks
+the ones the plan left open. The study decisions are in `docs/open_questions.md`.
+
+**Retired by PLAN4 (2026-11-11).** Entries below that describe the shuffled-ratings test (v2 phase
+11, v2 phase 14 e2e shuffle, the shuffle projection in v2 phase 9), the ARCTIC Slurm scripts and
+walltime flags (v2 phase 12), the gateway fallback server and `--gateway-fallback` (v2 phase 13 D2
+rerun, v2 phase 12 health check flag, fallback endpoint metadata) or ARCTIC CPU-hour budgets record
+how v1 to v3 were built. They are kept as history and no longer describe the study: the shuffle is
+dropped (G6 retired), nothing runs on ARCTIC compute (L1), and a gateway outage simply fails that
+model's week (D2). `plans/PLAN4.md` Phases 1 and 2 remove that code.
 
 - **v2 phase 14 e2e eval without the in-process shuffle (chosen during build)**: the v1 rehearsal test ran `run_eval` with 2 shuffles over every portfolio, 10.7 minutes on its own with 77 portfolios; it now skips the shuffle, which `test_twenty_shuffles_in_four_shards` and the phase 11 integration tests cover, keeping e2e under the 15-minute bound without shrinking the config.
 - **v2 phase 13 one shared rehearsal run (chosen during build)**: the e2e fixture `e2e_root` is the 30-week rehearsal itself, with the injected failures on fixed week indexes (`tests/e2e/conftest.py::INJECTIONS`: 3 source failure, 6 solver failure in every optimizing strategy, 9 lock-deadline cutoff, 12 gateway health failure recovered with `--gateway-fallback`), and the planted delisting from the synthetic world. The v1 invariants skip those four weeks; a second 30-week run would have doubled CI time.
@@ -21,7 +30,7 @@ Every non-obvious choice made while building the system, newest first, moved her
 - **v2 phase 10 header values (chosen during build)**: the report prints the K1, S4, S5, G3b, and P1 values in force from the config objects beside the `decisions` text, and says "not listed" when a config has no decisions block (the test config).
 - **v2 phase 9 compiled-problem cache (chosen during build)**: cvxpy problems are keyed by their constant data (tickers, SHA-256 of Sigma, and for robust and CVaR the SHA-256 of M plus week and seed) with `mu` as a parameter, so resampled draws, every source in a week, and the shuffle test reuse one canonicalization; `warm_start=False` keeps cached and fresh solves identical.
 - **v2 phase 9 benchmark on synthetic matrices (chosen during build)**: `scripts/benchmark_pipeline.py` times the optimizers on a seeded 3-factor covariance instead of a full pipeline week, so the 300-stock numbers isolate solver cost; the v1 job timing stays behind `--jobs`.
-- **v2 phase 9 shuffle projection (chosen during build)**: CPU hours = weeks x shuffles x (projected sources x strategies) x mean strategy solve time, with 51 projected sources (7 models x 7 prompt types + Q0) as PLAN2 states; the ARCTIC request of 15,000 CPU hours is flagged when exceeded.
+- **v2 phase 9 shuffle projection (chosen during build)**: CPU hours = weeks x shuffles x (projected sources x strategies) x mean strategy solve time, with 51 projected sources (7 models x 7 prompt types + Q0) as PLAN2 states; the CPU-hour comparison against the ARCTIC request is obsolete, since the request now asks for no CPU hours (removed in PLAN4 Phase 1).
 - **v2 phase 9 slow tests (chosen during build)**: pytest `addopts` deselects `-m slow` by default, so the 300-stock benchmark test runs only on request (`pytest -m slow`).
 - **DECISION(G1), portfolio guardrails** (`optimizer.max_weight`): all strategies and controls use a 5 percent cap with no short positions, matching the same investability limits.
 - **DECISION(S2), forecast-free controls**: HRP and equal weight do not use LLM views or Q0 weights, so they provide strategy-independent comparators.

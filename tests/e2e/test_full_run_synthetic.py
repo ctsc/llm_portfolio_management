@@ -113,7 +113,7 @@ def test_full_run_synthetic(
     assert set(ic.loc[ic["signal"] == "baseline", "week_id"]) == set(closed)
     assert _prompt_hashes() == before_prompts
     ctx = WeekendRunner(cfg, model_registry, world).context(e2e_weeks[-1])
-    folder = run_eval(ctx, skip_shuffle=True, folder=e2e_dir / "outputs" / "report")
+    folder = run_eval(ctx, folder=e2e_dir / "outputs" / "report")
     assert (folder / "report.md").exists()
     clean_weeks = [w for w in e2e_weeks if w not in injected]
     data = load_eval_data(cfg, ctx.portfolio_keys(), weeks=clean_weeks)

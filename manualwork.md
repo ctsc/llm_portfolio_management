@@ -1,167 +1,204 @@
 # Manual work (Carter only)
 
-Every manual step still open across the three plans, in the order to do them. Moved here from
-`PLAN3.md` Phase 7, `PLAN2.md` Phase 15 and `PLAN.md` Phase 17 (the v1 items were already folded
-into Phase 15; the crosswalk at the end shows where each went). The letters and numbers below
-keep the `PLAN2.md` Phase 15 labels, because `README.md`, `PROGRESS.md` and `docs/` point at them
-as "PLAN2 phase 15 B" and so on. Nothing here is done by Devin: it needs accounts, keys, money,
-the ARCTIC allocation, research content or a judgment call.
+Last updated: 2026-11-17 (after the full review in `plans/REVIEW5_fable_2026-11-11.md`, Andalib's
+replies, the ARCTIC approval and the final PLAN4 review). This is the only list of work Carter has to do by hand: accounts, keys,
+money, research content, judgment calls, the desktop, and emails. Nothing here is done by Devin.
+It replaces the manual phases of `plans/PLAN.md`, `PLAN2.md`, `PLAN3.md` and `PLAN4.md`. Devin's
+build work is in `plans/PLAN4.md` Phases 1 to 11; do the items below after Phase 11 unless an item
+says otherwise (sections 0 and A can start now).
 
-Already done and removed from this list: PLAN2 phase 15 A1 (repository access and Carter-only
-commits), A2 for the v2 and v3 builds (every commit is `ctsc`), D1 (the repository is on GitHub
-with CI green; GitLab is the fallback mirror and is out of free minutes), the
-`docs/desktop_checklist.md` half of D4 (replaced by `docs/weekend_checklist.md` in PLAN3), and
-PLAN3 phase 7 item 4 (no change to the ARCTIC request is needed).
+Dropped from the older lists because they no longer apply: ARCTIC Slurm setup, `arctic.env`,
+walltime and memory limits, the vLLM fallback server, small-model IDs, the shuffle array, Ollama,
+and the GitLab items already done.
 
-## 0. From PLAN3 Phase 7 (do first)
+## 0. Start the build
+1. Done 2026-11-16: the repository moved to `C:\dev\portfoliomanagement`; the old OneDrive copy is
+   renamed `portfoliomanagement_olddd`. Delete the old copy only after PLAN4 Phase 1 Step 0 passes.
+   The correspondence files are gitignored and no longer backed up by OneDrive; keep a copy
+   elsewhere.
+2. Hand `plans/PLAN4.md` to Devin, starting at Phase 1. Devin commits and pushes as `ctsc` only,
+   with no AI or co-author lines; check `git log` after each phase. Confirm
+   `llm_research/11_correspondence.md` never appears in a commit (it is gitignored).
+3. Done 2026-11-17: deleted the empty `vendor/` folder left by the failed Kronos clone.
 
-1. Ask Andalib (ARCTIC) to confirm the real maximum job length and the memory-per-core policy.
-   If the limit differs from 24 hours, set `MAX_JOB_HOURS` in `scripts/arctic/arctic.env` to stay
-   well under it (`common.sh` refuses any walltime above it; W1).
-2. Delete the untracked `docs/arctic_gpu_request.md` (also settles PLAN2 phase 15 D4) and the
-   untracked duplicate `Project_Proposal_IEEE.pdf` at the repository root (the committed copy is
-   `docs/proposals/Project_Proposal_IEEE.pdf`).
-3. Read the new `README.md` top to bottom against `docs/proposals/Project_Proposal_IEEE.pdf`.
-4. Then continue with PLAN2 phase 15 below.
+## A. Communication and the ARCTIC request
+1. Done 2026-11-16: Parag submitted the request in Elpis and ARCTIC approved it (item 7). Send
+   Parag the updated `Project_Proposal_IEEE.pdf` (2026-11-17: four skills files, 100 stocks, both
+   API models, Sharpe) if he wants the current version.
+2. Done 2026-11-11: emailed Andalib the seven questions. He answered on 2026-11-12 (organized in
+   `llm_research/correspondence/andalib_reply_2026-11-12.md`; facts in
+   `llm_research/09_arctic_process_and_model_facts.md` section G). Since then access was granted through
+   Elpis (item 7); how gateway requests convert into GPU hours and each key's limits are still open.
+3. Done 2026-11-12: no Hydra ticket for the request itself; access went through Parag's Elpis request.
+   The wiki's "Get access" step for joining the project's team on the gateway does use a Hydra
+   ticket, so with Hydra still failing, ask Andalib instead (item 6). Resetting your GSU password
+   may fix Hydra, since ARCTIC services share it.
+4. Done 2026-11-12: replied to Andalib with the revised request. He said the usage numbers look
+   good, confirmed MiniMax's reasoning arrives in `reasoning_content` with `reasoning_tokens` in
+   `usage`, and listed what can be logged to catch model changes (now in PLAN4 G21).
+4a. Done: Parag submitted the request in Elpis, and ARCTIC approved it (LiteLLM access granted,
+   recorded 2026-11-17). Was: send Parag the final `llm_research/current_documents/ARCTIC_Resource_Request.pdf`
+   (finalized 2026-11-16) and the Elpis steps and abstract text in
+   `llm_research/correspondence/elpis_submission_2026-11-16.md`. Parag submits it in Elpis
+   (https://elpis.rs.gsu.edu): his project, Request Resource Allocation, the abstract, add you
+   (`ctierney2`) as a user, attach the PDF as the supporting document.
+5. Now: email the GSU IT help desk (help@gsu.edu, 404-413-4357) about VPN session and idle limits.
+   Every gateway request needs the GSU network or VPN (wiki, rechecked 2026-11-17), and a weekend
+   run can take 4 to 9 hours. Record the answer in `llm_research/09_arctic_process_and_model_facts.md`.
+   Either way, watch for drops in the pilot; the run resumes from the last saved unit.
+5a. If ARCTIC asks for the Code Performance and Scaling document (the policy page lists it as
+   required for allocations; Andalib asked only for the PDF), write it from the measured gateway
+   numbers in `data/outputs/gateway_timing.csv` once you have a key.
+5b. When ARCTIC says how use is metered, and after the timing run, correct the request's per-request
+   estimates (40 GPU-seconds per Gemma request, 90 per MiniMax request) and resend it if the total
+   changes.
+6. Get the LiteLLM key (approved 2026-11-16; Andalib added you to the project as a Manager). Steps
+   from the wiki's "Get access" section (full detail in
+   `llm_research/09_arctic_process_and_model_facts.md` section G):
+   - On the GSU network or VPN, sign in once at https://litellm.rs.gsu.edu/ui with your campus ID.
+   - Status 2026-11-17: signed in, but the Virtual Keys page shows no "Create New Key" button, so
+     you are not on the project's team yet; email Andalib to add you to the team (the email also
+     asks whether a user key can read `/v1/model/info` and who sets per-key limits).
+   - When they confirm, create keys at https://litellm.rs.gsu.edu/ui, Virtual Keys, "+ Create New
+     Key", Team = the project. Make two: `portstudy-weekend` (the weekly run) and `portstudy-dev`
+     (timing runs and tests), so either can be replaced alone. Each is shown once: save it in your
+     password manager.
+   - Store the weekend key as `ARCTIC_LITELLM_API_KEY` in `~/.env` inside WSL (mode 600, never
+     committed, never pasted into chats or files), and check access with
+     `curl -sS https://litellm.rs.gsu.edu/health/liveliness` on the VPN.
+   - Ask Andalib what limits the key has (rate, concurrency, tokens), if the key page does not say.
+7. Done 2026-11-16: ARCTIC granted the default startup allocation (1,000 GPU and 10,000 CPU service
+   units), so the study uses 100 stocks (B4); `universe.size` is already 100. After the timing run,
+   replace `arctic.gpu_seconds_per_request` with the measured values (N7). Every month during the
+   study, check the real GPU and CPU usage in Elpis and note it in the study log; startup
+   allocations cannot be renewed, so more GPU-hours would need a research allocation request (next
+   window January 15 to February 1, starting April 1).
+8. Add citation numbers to the proposal's Related Work paragraph (optional, documents only).
 
-## PLAN2 Phase 15
+## B. Desktop setup (see `docs/desktop_setup.md`)
+1. Re-create the WSL checkout with `git clone` into `~/pm` (replace the copied folder from
+   2026-11-10), create the Python 3.11 venv, install from `uv.lock` with the `ml`, `solvers`,
+   `data`, `api` and `stats` extras.
+2. Pick the Kronos commit (the latest commit on the day you set it up; record it and never change
+   it after the freeze), clone it into `vendor/kronos`, set `baseline.kronos.repo_commit`, set
+   `baseline.forecaster: kronos`.
+3. Run `python scripts/kronos_smoke.py --n-stocks 100 --batch-size 100` with other GPU apps closed;
+   confirm peak GPU memory fits and record the time.
+4. Set `backup.rsync_target` to a folder WSL can write (check with the J9 probe) and decide how the
+   backup reaches cloud storage.
+5. Apply the reliability settings: sleep Never during runs; pause Windows Update (Settings, Windows
+   Update, Pause updates, up to 5 weeks at a time) and renew the pause before it runs out during the
+   study. Active hours cannot cover a weekend (they max out at 18 hours a day).
+6. Confirm on the desktop that the keep-awake helper and the WSL clock check from PLAN4 Phase 3A
+   work (run a synthetic weekend, check `powercfg /requests` in PowerShell while it runs).
 
-### A. Review of the unattended builds
-2. Skim `git log` (every commit should show only `ctsc`) and the `PROGRESS.md` entries for v2
-   phases 1 to 14, the review fixes and v3 phases 1 to 6, including each "Choices made while
-   unattended" section.
-3. Decide on every decision a phase flagged: the shuffle scope and compute projection (now G6:
-   MVO, Robust MVO and Top-K only, 85 CPU hours at 300 stocks and 5.6 at 100 over 24 weeks),
-   universe size (B4, `config/study.yaml` keeps 100 until the allocation is known), and any
-   `view_shift` warning from the benchmark.
-4. Rollback, if ever needed: v1 is commit `030faf4`; revert any phase with git.
+## C. Accounts, keys and budget
+1. Anthropic and OpenAI API keys with monthly spending caps; free keys for Alpaca, Finnhub and FRED
+   (confirm Alpaca's free plan includes news and full daily bars from the consolidated SIP feed for
+   the study dates; the code used to request the single-exchange IEX feed. If SIP is refused,
+   set `data.price_provider: yfinance`). Keys go in `~/.env` only.
+2. Enter real API prices in `config/models.yaml`, test the real prompts on a few stocks per model,
+   run `scripts/estimate_cost.py`, and set the budget (D3). Keep both API models (Claude Haiku 5.5
+   and GPT-6 Luna) if the estimate fits the 50 USD goal; if not, drop the more expensive one and
+   record it in PROGRESS.
+3. Decided 2026-11-12: temperature 0 for every model (D4). Both model cards recommend 1.0; the paper
+   says why 0 was used. Andalib confirmed the gateway passes `seed` through but outputs are not
+   guaranteed identical because requests are batched with other users'; the pilot repeat check
+   (F2) measures how often they agree.
+4. After the gateway timing run, set each gateway model's `max_output_tokens`. Starting values:
+   Gemma 300 and MiniMax 2,000 (MiniMax always thinks, the thinking counts toward the limit, and
+   ARCTIC suggests about 2,000). Raise MiniMax's limit if `finish_reason: length` appears; more than
+   15% invalid answers sends its weeks to the Q0 fallback. Set each model's
+   `request_timeout_seconds` from the same run (MiniMax starts at 600).
+5. Enter a dated `snapshot_id` for each enabled API model in `config/models.yaml` (D5). The
+   preflight refuses a live run while one is null, because an alias can move to a new model version
+   during the study.
 
-### B. Accounts, keys, and spending limits
-1. Create API accounts and keys for Anthropic (Claude Haiku 5.5) and OpenAI (GPT-6 Luna). Put
-   the keys in the `.env` file on ARCTIC only (names in `docs/config_reference.md`). Never commit it.
-2. Set a monthly spending cap in each provider dashboard, so a bug cannot run far past the D3
-   budget.
-3. Create free accounts and keys for Alpaca (prices and news), Finnhub (earnings dates) and FRED
-   (T-bill rate). Confirm Alpaca's free plan includes the news endpoint and full daily bars; if
-   not, switch `data.price_provider` to yfinance in config.
-4. Download the official Fama-French five-factor daily file from the Ken French Data Library when
-   it is needed for the final H5 run, and set `eval.fama_french_file` in config.
+## D. Research content
 
-### C. ARCTIC allocation and environment
-1. Submit the ARCA proposal through Dr. Tamhankar. Once granted, fill `scripts/arctic/arctic.env`
-   from `arctic.env.example`: account, partitions, `GPU_GRES`, `GPU_MEM`, every walltime (each at
-   most `MAX_JOB_HOURS`), `POLL_INTERVAL_MINUTES`, storage path, module and venv.
-2. Set up the Python 3.11 venv on ARCTIC, clone the repository there, and run the test suite once
-   on a login node.
-3. Confirm GSU network or VPN access to `https://litellm.rs.gsu.edu/v1`, create the gateway API
-   key, and store it as `ARCTIC_LITELLM_API_KEY` in `$HOME/.env` on ARCTIC only (mode 600).
-4. Ask ARCTIC whether compute nodes reach the internet and the gateway, and set
-   `ARCTIC_NETWORK_MODE` (`compute` or `login`). Ask about inode and file-count quotas.
-5. When ARCTIC deploys Gemma 4 E4B, Phi-4 Mini and Llama 3.2 3B, enter their gateway model IDs in
-   `config/models.yaml` and enable them.
-6. Clone Kronos at the pinned commit into `vendor/kronos` (set `kronos.repo_commit`) and download
-   `Kronos-base` and `Kronos-Tokenizer-base` from the `NeoQuasar` Hugging Face organization into
-   `HF_HOME`.
-7. Accept the Hugging Face licenses for Gemma and Llama, and download the fallback model weights
-   into `HF_HOME`.
+Decided on 2026-11-11 after the review, already in PLAN4: the LLM view is centered on the Q0
+forecast (E7), Mean-CVaR and Resampled MVO are rescaled on synthetic data before the freeze (S8),
+and a stop on a rebalance day resets the stock's reference price (G1b).
 
-### D. Data folders and backups
-2. Delete the old synthetic `data/` folders before the first v2 run (v1 and v2 file formats
-   differ; nothing real is lost).
-3. Run `run_weekend.py --synthetic` once on ARCTIC, download the backup zip it prints, then run
-   one restore by hand to confirm it works (`docs/runbook.md`).
+Decided on 2026-11-12, also in PLAN4 (nothing left to choose here):
+- **Main comparisons (G7, revised 2026-11-17):** exactly four pooled tests under Holm:
+  LLM-minus-baseline rank IC gap, steered-minus-Q0 tilt IC, skills minus bare, skills minus
+  placebo. Everything else is secondary, and every metric is saved for every unit (G22).
+- **View scale (A8):** fixed at 0.02 for the LLM and baseline views every week; the trailing-IC
+  switch is off (`views.ic_mode: fixed`).
+- **News cutoff (A9):** Friday 16:00 ET, unchanged.
+- **Pilot week (A7):** does not count; every portfolio starts from cash at the first live week
+  (`views.ic_history_start: live_start_week`).
+- **No-price liquidation (U2):** 5 trading days.
+- **Kronos failure (K3):** `momentum_only`.
+- **Confidence-only control portfolios (G19):** built for Robust and Resampled MVO, not Mean-CVaR.
+- **Prompt types (B1):** four skills files, bare and placebo (six types); `skills_5` stays off.
+- **Proposal wording.** If the proposal or paper states the view formula, the news timing or the
+  CVaR setting, update it to E7, S8 and whatever you decide above.
+0. Review the hypotheses I drafted at the end of the proposal (`llm_research/current_documents/`)
+   and rewrite each one to what you actually expect, before the preregistration is frozen.
+1. Write the 4 skills files (`skills_1` to `skills_4`; `skills_5` stays disabled) and the placebo
+   in `prompts/`; run
+   `scripts/check_placebo_length.py` and `scripts/refresh_manifest.py`; confirm the 6,000-token
+   skills cap (C4) and 150-token rationale cap (C7).
+2. Read and approve the base instructions in `prompts/base_instructions.md`.
+3. Build and freeze the stock list (`build_universe` at the approved size; review the sector table
+   and thin-sector log; add `extra_tickers` by hand if needed).
+4. Fill `config/preregistration.yaml`: confirm the four pooled main comparisons Devin writes in
+   (G7), keep the residual-IC control list as written (G9, it matches the proposal), and set the
+   view-sensitivity threshold
+   `view_sensitivity_min_tracking_error` (G13, from the Phase 3B calibration summary and the
+   Phase 11 numbers); set `frozen: true` with the date. This must happen before the pilot. Then
+   push the frozen file under a tag to the public repository so the date can be checked.
+4a. Read `data/outputs/calibration/view_sensitivity.csv` and its summary (PLAN4 Phase 3B) and
+   confirm or override the chosen Mean-CVaR `lam` and Resampled `draw_scale` before the freeze.
+5. Set `timing.live_end_date` (A3) and `timing.pilot_week`.
 
-### E. Smoke tests and benchmarks on ARCTIC
-1. Run `scripts/smoke_real_services.py` for every service (one real call each, printing status,
-   cost and latency). Fix every UNVERIFIED item it exposes (list below and per phase in
-   `PROGRESS.md`): the data adapters (Alpaca, yfinance, Finnhub, FRED, Wikipedia), the Anthropic
-   and OpenAI batch providers, the Kronos vendored API, and the v2 items (gateway JSON mode, seed
-   support, MiniMax reasoning output and output budget, Kronos per-path samples, fallback server
-   choice).
-2. Run `scripts/benchmark_pipeline.py --n-stocks <size> --sources 3 --weeks 24` on ARCTIC:
-   gateway seconds per call and safe concurrency per model, Kronos GPU time over the full
-   universe, J7 time, and one shuffle replay per G6 strategy (pass it as `--replay-seconds`).
-   Confirm the whole weekend fits between the Friday night or Saturday morning start and Monday
-   09:00 ET with margin, and that every job stays under 12 hours (W1). Use the results to set B4
-   (100 to 300), `llm.concurrency` and `eval.shuffle.shard_size`, and compare the projected shuffle
-   CPU hours with the allocation.
-3. Start `llm_fallback.sbatch` once and run one small model through it end to end with
-   `--gateway-fallback`.
+## E. Real-service checks and dry run
+0. Before the freeze, replace the synthetic canary set in `config/canary/` with 10 real tickers and
+   their inputs from one past week (PLAN4 Phase 3A, G21). Never change it after the freeze.
+1. `python scripts/smoke_real_services.py` for every service; fix any UNVERIFIED item it exposes
+   (data adapters, batch providers, Kronos vendored API and per-path sampling, gateway JSON mode and
+   seed).
+2. `python scripts/smoke_real_services.py --time-gateway 20` per gateway model; replace the 4 to 9
+   hour J4 estimate in README with the measured figure and set `llm.concurrency` if ARCTIC allows
+   more or fewer than 4. Read the tokens in, tokens out (including MiniMax reasoning), seconds and
+   `finish_reason: length` share it prints, then use them to correct the ARCTIC request (token
+   ranges, GPU-seconds per request) and `llm_research/04_models_compute_arctic.md`. Check the
+   Alpaca line reports the `sip` feed.
+3. `python scripts/fetch_french_factors.py` once to confirm the URLs and file format.
+4. `python scripts/run_weekend.py --synthetic` once on the desktop, download the backup, and restore
+   it by hand once.
+5. Dry run on the last 3 to 4 real weeks with real providers, as a bug check only (no tuning on
+   returns). Run it with `PORTSTUDY_DATA_DIR` set to a scratch folder, never the live `data/`
+   folder: dry-run weeks in the live folder would feed the trailing IC and every portfolio's
+   starting positions (A7). The preflight refuses a live run if it finds a pre-pilot week.
+6. `python scripts/check_live_ready.py` passes.
 
-### F. Reviews
-1. Read the base instruction wording in `prompts/` and approve or rewrite it, then run
-   `scripts/refresh_manifest.py`.
-2. Read the report header from the synthetic run and confirm the design choice values it prints.
-3. Check the `view_shift` warnings from the benchmark (PLAN2 section 8).
-
-### G. Research content only Carter writes
-1. Write the 4 to 5 skills files and the placebo text in `prompts/`. Run
-   `scripts/check_placebo_length.py`, then `scripts/refresh_manifest.py` to freeze versions and
-   hashes.
-2. Check the real skills file token counts against the 6000 cap (C4), and confirm or change C4
-   and the 150-token rationale cap (C7).
-3. Build the stock list (B2): run `build_universe` at the chosen size, review the printed sector
-   table and the thin-sector log, add any `extra_tickers` by hand, then freeze the universe file
-   with a version tag.
-4. Enter current API model prices in `config/models.yaml` (the committed values are placeholders).
-   Test-run the real prompts on a few stocks for each model, then run `scripts/estimate_cost.py`
-   and recompute the budget (D3). Decide whether any model needs a `max_output_tokens` override
-   (none is set now).
-5. Set `timing.live_end_date` (A3).
-
-### H. Freeze, pilot, and go
-1. Run a dry run on the last 3 to 4 real weeks with real providers, only as a bug check. Do not
-   tune prompts or settings on the returns.
-2. Tag the repository `frozen-v2`. From then on any change is a new version, documented and
-   flagged in the analysis.
-3. Run the one-week pilot with `scripts/arctic/submit_weekend.sh`. Review job success,
-   valid-output rates by model and prompt type, gateway errors, fallback use, batch return times,
-   finish-job resubmissions, cache hits, cost and run time. Hand-check trades, costs and stops
-   against the simulator output.
-4. Fix engineering problems only, record each fix, and drop or swap any model that failed
-   reliability or cost limits (with a log entry saying why).
-5. Start the live run the week after the pilot passes (A2). The pilot week stays excluded from
-   all results.
-6. Every weekend: run `submit_weekend.sh` Friday night if possible (Saturday morning as the
-   backup), read the finish job's summary, and pull the dated backup (`docs/weekend_checklist.md`).
-7. After the last live week: `portstudy shuffle plan`, submit `shuffle_array.sbatch`,
-   `portstudy shuffle collect`, then `portstudy eval`.
-
-## UNVERIFIED items (closed by E1 and E2)
-
-- Every ARCTIC value in `scripts/arctic/arctic.env.example` (account, partitions, GRES, GPU
-  memory, walltimes, poll interval, module, venv, data root, `HF_HOME`, network mode, array
-  throttle), and the real walltime limit behind `MAX_JOB_HOURS`.
-- The serving command in `scripts/arctic/llm_fallback.sbatch` (vLLM assumed) and the
-  fallback-eligible model ids.
-- Gateway behaviour: JSON mode, seeds, rate limits, MiniMax reasoning output and whether it needs
-  an output budget, small-model ids.
-- Kronos per-path sampling (`predict_paths`) on the real checkpoint; the 20-call fallback costs
-  about 20x the GPU time.
-- ARCTIC core speed relative to the build VM, so the 85 CPU hour shuffle projection at 300 stocks
-  (5.6 at 100) is a VM figure until E2.
-- D3, the paid API budget, after the G4 test prompts.
-- Slurm behaviour of the three-job layout and the shuffle array on ARCTIC (dry-run only so far).
-
-## Crosswalk: PLAN.md Phase 17 to the items above
-
-| PLAN.md 17 item | Here | Change from v1 |
-|---|---|---|
-| A1 API accounts and keys | B1 | keys live on ARCTIC |
-| A2 spending caps | B2 | none |
-| A3 Alpaca, Finnhub, FRED accounts | B3 | none |
-| A4 Fama-French file | B4 | none |
-| B1 drivers, CUDA, Python, Ollama | C2 | replaced: ARCTIC venv, no local GPU, no Ollama |
-| B2 pull local models | C5 | replaced: gateway models; Qwen removed (GSU tool registry) |
-| B3 Kronos clone and weights | C6 | on ARCTIC |
-| B4 smoke tests | E1 | adds the v2 UNVERIFIED items |
-| B5 benchmark | E2 | on ARCTIC; the 6 GB swap rule no longer applies |
-| B6 local power settings | none | dropped: nothing runs on a local machine |
-| C1 GitLab project and CI | done | GitHub is the primary host, GitLab the fallback |
-| C2 synthetic run and restore | D3 | on ARCTIC |
-| D1 skills file and placebo | G1 | 4 to 5 skills files, placebo matched to their mean |
-| D2 token caps | G2 | none |
-| D3 stock list | G3 | size chosen after the allocation, thin-sector log added |
-| D4 prices and budget | G4 | gateway models cost $0 |
-| D5 live end date | G5 | none |
-| E1 to E6 freeze, pilot, go | H1 to H6 | tag `frozen-v2`, weekend runs through `submit_weekend.sh` |
+## F. Freeze, pilot, live
+0. Before the freeze: start from an empty live `data/` folder and run `portstudy ledger rebuild`
+   so the price ledger holds only rows from the configured feed; set
+   `llm.gateway.features_frozen: true` once the timing run shows which features the gateway accepts.
+1. Tag the frozen version (`frozen-v4`), push the tag. From then on any change is a new version,
+   logged in PROGRESS and flagged in the analysis.
+2. Run the one-week pilot with `python scripts/run_weekend.py`, then
+   `portstudy repeat-check --week <pilot week>` (G20: 600 extra requests). Read
+   `data/outputs/pilot_repeatability.csv` and keep the agreement numbers for the paper; the canary
+   baseline is saved at the same time. Review job success, valid-output
+   rates per model and prompt, gateway errors, fallback use, batch return times, cost and run time;
+   hand-check trades, costs and stops; read each strategy's view shift (G13), the large-move flags
+   and any removals; read each strategy's expected tracking error against Q0 (G13) and check that
+   a stop on a rebalance day did not cause a Tuesday sale; replace the README's estimated J4 time
+   with the measured one.
+3. Fix engineering problems only; drop or swap a model that failed reliability or cost limits, with
+   a PROGRESS entry.
+4. Start the live run the week after the pilot passes (A2); the pilot week stays out of results.
+5. Every weekend: Friday night (Saturday morning backup) run, read the summary and the new row in
+   `data/outputs/study_log.csv` (including any `model_change` flag from the canary check; a flag
+   does not stop the run, but note it), read `data/outputs/<week>/run_summary.md` and its "needs
+   attention" list, skim `fallbacks.csv`, and confirm the `portstudy audit` result passed, check the backup, follow `docs/weekend_checklist.md`. Renew the
+   Windows Update pause when it nears its end.
+6. After the last live week: wait for the following Monday open, then run `portstudy closeout`
+   (it refuses to run earlier). Then `python scripts/fetch_french_factors.py` (once the library covers the
+   study window), set `eval.factor_source: french`, run `portstudy eval`, and write the paper from
+   the report.

@@ -33,7 +33,7 @@ def test_config_loads_and_has_decisions() -> None:
     assert study_config.optimizer.max_weight == 0.05
     assert study_config.simulator.cost_bps == 10
     ids = {d.id for d in study_config.decisions}
-    for required in ["D1", "D3", "D4", "B1", "B2", "B4", "A6", "C2", "E2", "E3", "G6", "N1"]:
+    for required in ["D1", "D3", "D4", "B1", "B2", "B4", "A6", "C2", "E2", "E3", "N1"]:
         assert required in ids
     assert study_config.decision("D3").status == "provisional"
     assert study_config.decision("C2").value == study_config.llm.no_news_sentence

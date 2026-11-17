@@ -13,8 +13,3 @@ strategies:
     n_scenarios: 2000
   resampled:
     n_draws: 20
-
-eval:
-  shuffle:
-    n_shuffles: 20
-    strategies: [mvo, robust, topk]

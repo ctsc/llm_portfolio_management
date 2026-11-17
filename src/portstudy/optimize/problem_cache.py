@@ -1,5 +1,5 @@
 """Compiled cvxpy problems keyed by their constant data, with the expected return as a
-parameter, so repeated solves (resampled draws, shuffles, many sources per week) skip
+parameter, so repeated solves (resampled draws, many sources per week) skip
 canonicalization. The key always includes the ticker tuple, so a universe change misses."""
 
 from __future__ import annotations

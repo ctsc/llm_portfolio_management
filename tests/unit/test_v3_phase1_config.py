@@ -1,11 +1,10 @@
-"""v3 phase 1: PLAN3 config values, the shuffle-strategy validator and the wording check."""
+"""v3 phase 1: PLAN3 config values and the wording check."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 from portstudy.config import StudyConfig
@@ -26,24 +25,10 @@ def test_study_config_holds_the_plan3_values() -> None:
     cfg = StudyConfig.model_validate(raw)
     assert cfg.llm.gateway.base_url == "https://litellm.rs.gsu.edu/v1"
     assert "minimax-m2.7" not in cfg.llm.settings  # the unsourced 2048 override is gone
-    assert cfg.eval.shuffle.strategies == ["mvo", "robust", "topk"]
     ids = {d.id: d for d in cfg.decisions}
-    assert {"G6", "W1", "M1"} <= set(ids)
-    assert "Mean-CVaR and Resampled MVO are excluded" in str(ids["G6"].value)
+    assert {"W1", "M1"} <= set(ids) and "G6" not in ids
     assert "15 hours" in str(ids["W1"].value) and "mem-per-cpu=3G" in str(ids["M1"].value)
-    test_cfg = StudyConfig.model_validate(_study("config/study_test.yaml"))
-    assert test_cfg.eval.shuffle.strategies == ["mvo", "robust", "topk"]
-    assert test_cfg.eval.shuffle.n_shuffles == 20
-
-
-def test_shuffle_strategies_must_be_enabled() -> None:
-    raw = _study()
-    raw["strategies"]["enabled"] = ["mvo", "topk"]
-    raw["eval"]["shuffle"]["strategies"] = ["mvo", "robust"]
-    with pytest.raises(ValueError, match="eval.shuffle.strategies not in strategies.enabled"):
-        StudyConfig.model_validate(raw)
-    raw["eval"]["shuffle"]["strategies"] = ["mvo"]
-    assert StudyConfig.model_validate(raw).eval.shuffle.strategies == ["mvo"]
+    StudyConfig.model_validate(_study("config/study_test.yaml"))
 
 
 def test_wording_check_rejects_the_researcher(tmp_path: Path) -> None:

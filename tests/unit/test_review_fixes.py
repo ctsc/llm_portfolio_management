@@ -397,33 +397,6 @@ def test_m9_log_files_redact_gateway_credentials(
     logging.getLogger("portstudy.redaction_test").handlers.clear()
 
 
-def test_m11_real_metrics_start_from_the_value_entering_the_selected_weeks(
-    monkeypatch: pytest.MonkeyPatch, study_config: StudyConfig
-) -> None:
-    """M11: with a pilot week excluded, the real total return is measured over the selected weeks
-    from the value carried into them, not from `initial_value`."""
-    import pandas as pd
-
-    from portstudy.eval import shuffle
-
-    v0 = study_config.simulator.initial_value
-    daily = pd.DataFrame(
-        {
-            "date": pd.to_datetime(["2026-02-02", "2026-02-03", "2026-02-09", "2026-02-10"]),
-            "week_id": ["2026-W05", "2026-W05", "2026-W06", "2026-W06"],
-            "value": [v0 * 1.05, v0 * 1.10, v0 * 1.00, v0 * 0.99],
-        }
-    )
-    monkeypatch.setattr(shuffle, "read_daily", lambda portfolio: daily)
-    both = shuffle.real_metrics(study_config, "p", ["2026-W05", "2026-W06"])
-    assert both["total_return"] == pytest.approx(-0.01)
-    only_second = shuffle.real_metrics(study_config, "p", ["2026-W06"])
-    assert only_second["total_return"] == pytest.approx(0.99 / 1.10 - 1.0)
-    assert shuffle.real_metrics(study_config, "p", ["2026-W07"])["total_return"] != pytest.approx(
-        -0.01
-    )
-
-
 def test_m7_dropped_view_branch_reuses_the_written_q0(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

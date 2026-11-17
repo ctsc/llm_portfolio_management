@@ -1,7 +1,8 @@
 # Design: one page per pipeline stage
 
-One section per pipeline stage, current as of PLAN3. PLAN2.md section 0.3 and PLAN3.md section 0.1
-hold the decisions. Each stage names the module that implements it.
+One section per pipeline stage. Decisions are in `docs/open_questions.md` and `plans/PLAN4.md`
+section 0.3. Each stage names the module that implements it. Where the code still differs from the
+current design, the section says which PLAN4 phase changes it.
 
 ## Source and portfolio identities (`types.py`)
 
@@ -36,8 +37,8 @@ Every cvxpy problem is compiled once per constant data and reused with `mu` as a
 MVO is keyed by (tickers, SHA-256 of Sigma, delta, cap); robust MVO adds the SHA-256 of M, because
 its uncertainty factor changes with every source; mean-CVaR adds M, the week, the seed, and the
 scenario settings, because the scenario shocks `Z L'` are built from `Sigma + M`. Resampled MVO
-therefore compiles once and solves 200 draws against the cached problem, and the shuffle test
-(same week and source, shuffled scores) hits the same entries. Solves run with `warm_start=False`
+therefore compiles once and solves 200 draws against the cached problem, and every source in a
+week reuses the same compiled problem. Solves run with `warm_start=False`
 so a cached solve equals a fresh build to 1e-9. The cache holds 16 problems (LRU) and the ticker
 tuple is in every key, so a universe change misses rather than reusing stale data.
 
@@ -46,7 +47,7 @@ then the highest-volume leftovers) and logs `universe_thin_sector` for each sect
 quota, `universe_leftover_slots` with the slots filled from leftovers, and `universe_short` if
 the size still cannot be reached. `scripts/benchmark_pipeline.py` times every strategy and control
 on a synthetic 3-factor covariance at a chosen size and projects the weekly J7 time at the full
-source count and the shuffle CPU hours (weeks x shuffles x steered portfolios x mean solve time).
+source count.
 
 ## Week alignment (`calendar.py`)
 
@@ -58,7 +59,8 @@ open (`window_end_date`). Every table that holds returns stores all three column
 ## Snapshot (`data/snapshot.py`)
 
 Prices for at least 300 trading days back to the cutoff, news in `(previous cutoff, cutoff]`
-(7 calendar days for the first snapshot), reference data, rates, ETF prices. News published
+(7 calendar days for the first snapshot), reference data, rates, ETF prices. Alpaca bars currently use the IEX feed (one small exchange); PLAN4 Phase 3 (G16)
+switches to the consolidated SIP feed, with yfinance as the fallback. News published
 after 16:00 ET on the cutoff day is dropped strictly, near-duplicates are removed, and each
 stock's text is capped at the token budget (newest first). The checks in `data/checks.py` map
 each issue code to `skip_stock`, `forward_fill`, or `halt`. The folder is immutable
@@ -113,8 +115,7 @@ recorded. Invalid output stores `low = likely = high = 0`, `valid = false`, and 
 
 Open-weight models use the OpenAI-compatible LiteLLM provider with a bounded worker pool, one
 stock per call, temperature 0, and no tools. The serving endpoint is included in the cache key
-and stored per source-week. Switching to a fallback archives gateway records and restarts the
-source there. The main thread validates and writes completed records so a crash can resume.
+and stored per source-week. The main thread validates and writes completed records so a crash can resume.
 Invalid output: retry once, then store
 `low = likely = high = 0`, an empty width, and `fallback_flag = invalid_output`
 (`invalid_truncated` when the answer hit the output limit). Valid width is `high - low`. Cache
@@ -128,8 +129,11 @@ batch not finished by the lock deadline minus the margin.
 ```
 Rank IC:    Spearman(likely rating at Friday cutoff, total return from next Monday open to the following Monday open)
 Trailing IC: mean of last 8 scored weeks, floored at 0 ; fixed 0.02 for the first 5 live weeks
+            (pending PLAN4 Phase 3A, decision A8: IC_b = IC_L = 0.02 every week)
 Residual:   s = a + c z_b + e ;  z_L = standardize(e)        (invalid outputs excluded)
 Views:      q_b = pi + IC_b sigma z_b ;  q_L = pi + IC_L sigma z_L
+            (pending PLAN4 Phase 3B, decision E7: q_L = mu_Q0 + IC_L sigma z_L, centered on the
+            Q0 posterior mean so a rating of 0 is neutral)
 Uncertainty: r_i = clip(k_sd_i / median(k_sd), 0.25, 4)
              Omega_b,ii = tau Sigma_ii r_i
              c_i = clip(1 - width_i / 10, 0.1, 1) ;  Omega_L,ii = tau Sigma_ii / c_i
@@ -181,67 +185,54 @@ portfolio (`no_rebalance`). `clean_weeks` returns the normal weeks for IC histor
 
 ## Evaluation (`eval/`)
 
-```
-Min detectable gap: 2.8 * sd / sqrt(T)
-```
+**Current design (the proposal's Evaluation section; built in PLAN4 Phases 4 to 9).** Every test
+uses saved ratings, weights and returns and reruns no model or optimizer. Rank IC is computed
+across stocks within a week, so market direction does not move it; portfolios are judged on their
+active return, the weekly return minus the same strategy's Q0.
 
-H1: `IC_llm_raw - IC_baseline` per rating source (win above the tie band, loss below, else tie),
-Holm across all sources. H2: `IC_combined - IC_baseline` per source with combined = ranked BL
-tilt (E3), Holm across sources; and each steered portfolio's weekly return minus its own
-strategy's Q0 on the source's clean weeks, Holm within each strategy. H3: every `skills` prompt
-type (from `manifest.by_kind`) vs bare and vs placebo per model, Holm per model (G3). H3b (G3b):
-per source and week, valid stocks split at the median range width (width at or below the median
-is narrow); rank IC of `likely` in each group; weeks with a group under `eval.h3b.min_group_size`
-or with every width equal are skipped and counted; weekly gap narrow minus wide, Holm across
-sources. H4 (G4, exploratory, no Holm): per strategy and week the mean gap vs its Q0 across the
-sources clean that week, strategy mean with a bootstrap CI, ranked; weeks with no clean source
-are dropped and counted; the v1 market direction and volatility splits run on the source IC gaps
-and on each strategy's weekly gap, the earnings split on source IC. Solver-failed weeks stay in
-the data and are counted per portfolio in the metrics table, with the mean `view_shift`. Controls
-(HRP, EW) appear in the metrics and factor tables and in no hypothesis family. The report opens
-with the portfolio count, weeks, fallback and fallback-served weeks, and the K1, S4, S5, G3b, and
-P1 values read from config, then one section per strategy (metrics, H2 return table, H5 table,
-equity curve with its Q0, steered portfolios, HRP, and EW) and a warning for any strategy whose
-mean `view_shift` is below 0.01. H5: factor regression on daily returns for every portfolio (G5),
-with the Fama-French five-factor file (`eval.fama_french_file`) as the primary regressors in the
-live study and the ETF proxies only as the offline fallback; and the shuffled-ratings test over
-the MVO, Robust MVO and Top-K steered portfolios and those three strategies' Q0s, 500 shuffles
-each, Holm within each strategy, with view strength held fixed (G6). Mean-CVaR and Resampled MVO
-have no shuffle test (about 99 percent of the shuffle compute); the report prints an exclusion
-line for each and their Q0 comparison and factor regression stand.
+- H1: weekly IC gap (LLM likely minus baseline, both on the same stocks) per source with Newey-West SE, Student-t critical
+  values, block-bootstrap CI and sign-flip p-value; residual IC from weekly Fama-MacBeth regressions
+  on the baseline score, momentum, size, volatility, beta, sector and trailing value, profitability
+  and investment loadings; ICIR, hit rate, quintile spread.
+- H2: IC of the steered BL tilt minus IC of Q0's tilt, on the same stocks; per steered portfolio the mean active return vs Q0, information
+  ratio, tracking error, Ledoit-Wolf Sharpe-difference test, extra turnover and break-even cost,
+  reported over all clean weeks and over active-view weeks.
+- H3: skills minus bare and minus placebo on IC and on active return, plus a pooled regression with
+  model and week fixed effects clustered by week; model-vs-model comparisons on the same prompt.
+- H3b: narrow minus wide IC, a score-by-confidence interaction, and a width vs absolute-error check.
+- H4 (exploratory): strategy ranking, strategy-vs-strategy active-return differences, regime
+  interaction regressions.
+- H5: daily active return regressed on Fama-French five factors plus momentum (Kenneth French daily
+  data) with Newey-West SE; the placebo prompt as the content control (length and any view change; chance is handled by the tests); deflated Sharpe and a t > 3 flag for any
+  headlined portfolio.
+- Multiple testing: Holm on four pooled main comparisons fixed in `config/preregistration.yaml` before
+  the live run; Benjamini-Hochberg on everything else; H4 unadjusted.
+- Metrics: Sharpe net of the T-bill rate, Sortino, maximum drawdown and CVaR from daily returns,
+  certainty-equivalent return, turnover, cost, stops, view shift, fallback and solver-failed weeks.
+- Minimum detectable effect `2.8 * sd / sqrt(T)` is printed for every main test; a gap below it is
+  inconclusive, not evidence of no effect.
 
-### Sharded shuffle (`eval/shuffle.py`, v2 phase 11)
+Formulas and reasoning: `llm_research/05_evaluation_methodology.md` and
+`06_evaluation_research_findings.md`.
 
-Each shuffle permutes the `low, likely, high, width` rows across stocks per clean week with an
-RNG seeded by SHA-256 of `(seed, portfolio, index, week)`, then reruns residualize, views, BL,
-and the portfolio's own strategy; Q0 permutes `z_b` and `k_sd` together. CVaR and resampled MVO
-draw their common random numbers from `(week, strategy)`, so the identity permutation reproduces
-the stored weights. Shuffles are grouped into `Shard(portfolio, start, stop)` of
-`eval.shuffle.shard_size`; `run_shard` writes `data/shuffle/<portfolio>/<start>_<stop>.json`
-atomically with `complete: true`, skips a complete file, and reruns a file without the marker.
-`collect` fails listing every missing range; `shuffle_test` in the report runs missing shards
-in-process first. A portfolio with no clean weeks is written as skipped and reported. The primary paired p-value is the exact sign-flip
-permutation; Newey-West is reported beside it. Gaps below the minimum detectable gap are
-inconclusive, not evidence of no effect. A null result is acceptable.
+**What the code does today (until PLAN4).** H1 and H2 IC gaps with Holm across sources; H2
+portfolio gaps vs Q0 on clean weeks with Holm within each strategy; H3 on IC only, Holm per model;
+H3b narrow minus wide; H4 ranking and splits; ETF-proxy factor regressions of total returns; and
+Sharpe without risk-free subtraction. The retired G6 test (`docs/open_questions.md`) was deleted
+in PLAN4 Phase 1.
 
-## ARCTIC job layout (`scripts/arctic/`, PLAN3 phase 3)
+## Weekly run on the desktop (`scripts/run_weekend.py`)
 
-Three Slurm jobs per weekend, submitted by `submit_weekend.sh`: `kronos.sbatch` (J1, J2 on a GPU
-node, `--mem=$GPU_MEM`) and `llm.sbatch` (J3 then J4, 2 CPU cores, `--mem-per-cpu=3G`) start at
-the same time with no dependency between them, because J4 never reads the Kronos output;
-`finish.sbatch` (1 core, `--mem-per-cpu=3G`, `FINISH_WALLTIME` 03:00:00) runs with
-`--dependency=afterany` on both. The finish job runs J5 once with `run_weekend.py --poll-once`:
-exit 3 (batches pending before the lock margin) makes it resubmit itself with
-`--begin=now+${POLL_INTERVAL_MINUTES}minutes` and exit; exit 0 lets it run J6 to J9 in the same
-job. At the lock margin J6 marks the pending sources failed (N1) and the run continues. In
-`login` network mode J1 and J3 run on the login node first and the LLM job runs J4 only; no
-batch is ever polled from the login shell. `J7` refuses to run until J6 is done and, unless J6
-planned a hold, J2 is done and J4 is done or every open-weight source carries its fallback mark.
-Inside J4 every enabled open-weight model has its own worker (`llm.parallel_models`), its own
-`llm.concurrency` pool and its own record files; a crashed worker marks that model's sources
-failed and the others finish. `common.sh` refuses any walltime above `MAX_JOB_HOURS` (15, W1)
-and warns above 12; `shuffle_array.sbatch` runs one shard per task on one core (M1), and
-`portstudy shuffle plan` lowers the shard size in the plan when a shard would run past two hours.
+Carter runs `scripts/run_weekend.py` by hand in WSL2 on the desktop (decision N2), Friday night or
+Saturday morning. Step 1 replays and backs up any earlier week that is behind (J8, J9). Step 2 runs
+J1 to J6 in order: J2 runs Kronos on the local GPU, J3 submits the API batches, J4 calls the two
+gateway models with one worker per model (`llm.parallel_models`) and `llm.concurrency` requests at
+a time, J5 polls the batches with a countdown until they are back or the lock margin, and J6
+validates. Step 3 runs J7 and J9. Before J4 a health check sends one tiny call per gateway model; a
+model that fails is marked failed for the week and its sources trade Q0 (D2). Every job resumes from
+its status files. The retired ARCTIC Slurm layout (`scripts/arctic/`, `--poll-once`,
+`--gateway-fallback`, `--check-walltime`, login mode) is still in the tree and is deleted in PLAN4
+Phase 2.
 
 ## v2 in one page
 
@@ -258,14 +249,13 @@ and warns above 12; `shuffle_array.sbatch` runs one shard per task on one core (
 - **Uncertainty.** Baseline `Omega_b,ii = tau Sigma_ii clip(s_i / median(s), 0.25, 4)` with `s_i` the
   Kronos path spread (K1); LLM `Omega_L,ii = tau Sigma_ii / c_i`, `c_i = clip(1 - width_i / 10, 0.1, 1)`.
 - **Common random numbers.** Scenario and draw matrices are seeded by `(seed, week, strategy)`, so every
-  source, each Q0, and every shuffle of one strategy see the same `Z` in one week; differences between
+  source and each Q0 of one strategy see the same `Z` in one week; differences between
   portfolios come from the views alone.
 - **Fallback chain.** Solver failure -> previous weights -> the same strategy's Q0 -> equal weight. A
   failed source (crash, invalid storm, batch not back, gateway health failure) trades its strategy's Q0
   with `decision_source = fallback_q0`; `IC_L = 0` drops the LLM view rows and the weights equal Q0 exactly.
-- **Single endpoint per source and week.** A source runs on the gateway or on the D2 fallback server,
-  never both: the endpoint file must name the current week and be newer than the run's start, and mixed
-  endpoints in one week are logged and flagged.
+- **Gateway outage (D2).** A model that fails the pre-J4 health check is marked failed for the week;
+  its sources trade Q0 and that week is left out of their statistics. There is no fallback server.
 - **Guardrails at each rebalance.** The 5 percent cap, no shorts, and full investment hold at every
   rebalance for every strategy and control; between rebalances weights drift with prices, as in v1, so a
   position can sit above 5 percent until Monday's open. Stops (-8 percent, +15 percent) and the 10 bps

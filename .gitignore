@@ -13,3 +13,7 @@ dist/
 .coverage
 htmlcov/
 vendor/kronos/
+
+# Correspondence stays local (emails with Parag and Andalib)
+llm_research/11_correspondence.md
+llm_research/correspondence/

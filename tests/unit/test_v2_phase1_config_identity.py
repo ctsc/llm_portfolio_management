@@ -147,7 +147,6 @@ def test_portstudy_config_environment_override(monkeypatch: pytest.MonkeyPatch) 
     assert cfg.llm.model_ids == ["stub-ow-a", "stub-ow-b"]
     assert cfg.strategies.cvar.n_scenarios == 2000
     assert cfg.strategies.resampled.n_draws == 20
-    assert cfg.eval.shuffle.n_shuffles == 20
 
 
 def test_cli_accepts_config_option() -> None:

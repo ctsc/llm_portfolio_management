@@ -1,7 +1,7 @@
 # GitHub setup
 
 GitHub (`https://github.com/ctsc/llm_portfolio_management`) hosts the source and runs lint and
-tests in GitHub Actions on every push. It never runs the weekly pipeline (decision N2): that is the
+tests in GitHub Actions on every push. It never runs the weekly pipeline (decision N2): that is
 Carter's hand-run `scripts/run_weekend.py`. GitLab is the fallback host (`docs/gitlab_setup.md`).
 
 ## 1. Remotes
@@ -43,7 +43,7 @@ phase checklist test counts one commit per phase. Python 3.11 with a pip cache i
 ## 3. Confirm the first run
 
 1. Open the Actions tab; the `ci` workflow starts on the push.
-2. Every job must be green before the repository is tagged for the freeze (phase 15 H).
+2. Every job must be green before the repository is tagged for the freeze (`manualwork.md` F).
 3. No repository secrets or variables are needed. Nothing in CI calls a real service; the
    adapters are mock-tested only.
 

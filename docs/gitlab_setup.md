@@ -29,7 +29,7 @@ Windows checkout see the same bytes.
 2. Stages: `lint` (ruff, mypy), `test` (pytest over `tests/unit` and `tests/integration` with
    coverage), `checks` (prompt manifest hashes, placebo length, banned words, secret patterns,
    yamllint). The `e2e` job runs only on the default branch.
-3. Every stage must be green before the repository is tagged `frozen-v2` (PLAN2 phase 15 H).
+3. Every stage must be green before the repository is tagged `frozen-v4` (`manualwork.md` F).
 
 ## 4. Notes
 

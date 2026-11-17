@@ -18,7 +18,7 @@ def _py_files() -> list[Path]:
 
 
 def test_every_unverified_marker_is_listed_in_progress() -> None:
-    progress = (REPO_ROOT / "PROGRESS.md").read_text(encoding="utf-8")
+    progress = (REPO_ROOT / "plans" / "PROGRESS.md").read_text(encoding="utf-8")
     files_with_marker = {p for p in _py_files() if "UNVERIFIED" in p.read_text(encoding="utf-8")}
     assert files_with_marker, "expected UNVERIFIED markers on the real-service adapters"
     missing = [p.name for p in files_with_marker if p.name not in progress]

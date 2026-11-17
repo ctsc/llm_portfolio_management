@@ -910,3 +910,83 @@ gateway sustains about 20 requests in flight (PLAN2 phase 15 E confirms the real
   A to H that the README, this file and `docs/` cite; items already done (A1, A2 for the builds,
   D1, the checklist half of D4, PLAN3 phase 7 item 4) are noted at the top and dropped from the
   list, and the UNVERIFIED list carries the corrected G6 projection.
+
+## v4 phase 1: remove the shuffle test
+
+Built in `C:\dev\portfoliomanagement` on native Windows (Python 3.11.15 venv via `uv`, extras
+`dev` and `solvers`). Carter's instructions for this build (2026-11-17): PLAN4 is the only plan in
+force, push to GitHub (`origin master`) only, no long e2e or full-suite run after every phase
+(targeted tests per phase instead), `llm_research/` status sections may be updated.
+
+### Step 0: repository migration check (passed)
+
+- `git fsck --no-dangling`: no errors. HEAD `44949aa`. Remotes `origin` (GitHub) and `gitlab` present.
+- `git status` showed the reorganization from working rule 4 plus four small path-only edits not
+  named there (`config/study.yaml` header comment and B4 comment, `src/portstudy/config.py`
+  docstring, one constant in `scripts/benchmark_pipeline.py`, one message in
+  `scripts/smoke_real_services.py`); all point at `plans/` and are kept.
+- Old folder (`portfoliomanagement_olddd`) against the new one, SHA-256 of every file outside
+  `.git`, `.venv` and the caches: 204 old files, 205 new, 187 identical, none missing from the new
+  folder. One file exists only in the new folder (`llm_research/13_litellm_gateway_reference.md`)
+  and 17 differ; every one of the 17 has a later modification time in the new folder (edits made
+  after the move on 2026-11-16 and 2026-11-17). The gitignored correspondence files are present.
+  `data/` is empty in both folders and neither has a `.env` file.
+- Baseline on the unchanged code (Windows): `pytest tests/unit tests/integration`: about 329
+  passed, 1 skipped, 4 failed, 2 files not collected, 13 min 43 s. The 4 failures are the Slurm
+  script tests that need `/bin/bash` (deleted in Phase 2); the 2 uncollected files imported the
+  Linux-only `resource` module through `scripts/benchmark_pipeline.py`. `ruff check`,
+  `ruff format --check` and `mypy` clean. The e2e suite was not run (Carter's instruction).
+- Result: nothing was lost in the move; the old folder can be deleted.
+
+### What changed
+
+- Deleted `src/portstudy/eval/shuffle.py`, the `portstudy shuffle` sub-app (`plan`, `run`,
+  `run-local`, `collect`) and `--skip-shuffle`; `run_eval(ctx, folder=None)` and
+  `build_report(data, folder)` take no shuffle arguments.
+- Removed `ShuffleConfig`, `eval.shuffle`, its validator and the `H5_shuffle` family from
+  `config.py`, `study.yaml` and `study_test.yaml`; a YAML with `eval.shuffle` now fails validation.
+- `eval/report.py`: no shuffle tables, figure, sections or exclusion line; the H5 factor table is
+  unchanged until Phase 8.
+- `scripts/benchmark_pipeline.py`: shuffle columns, `--replay-seconds` and
+  `ARCTIC_REQUEST_CPU_HOURS` removed; it reports solve times, J7 seconds per week at the run's and
+  the projected source count, and peak memory.
+- Comments in `optimize/mean_variance.py` and `optimize/problem_cache.py` reworded.
+- `study.yaml` decisions: G6 deleted, S2 and G7 texts no longer mention the shuffle.
+- README, `docs/config_reference.md`, `docs/design.md`, `docs/desktop_setup.md`, `docs/runbook.md`:
+  the "until PLAN4 Phase 1" notes are removed. `llm_research/05_evaluation_methodology.md` code
+  status updated.
+- The 2026-11-11 reorganization (working rule 4) is part of this commit.
+
+### Tests
+
+- Deleted: `tests/integration/test_v2_phase11_shuffle.py`, `tests/unit/test_v3_phase2_shuffle.py`
+  (both tested only the removed module).
+- Changed (shuffle assertions removed): `test_phase11_report.py`, `test_review_fixes.py`
+  (`test_m11_real_metrics...` deleted, it tested `shuffle.real_metrics`), `test_v2_phase9_scale.py`
+  (projection test reduced to J7), `test_v3_phase1_config.py` (validator test deleted),
+  `test_v2_phase10_eval.py`, `test_v2_phase1_config_identity.py`, `test_phase1_scaffold.py` (G6 no
+  longer a required decision), `test_v3_phase3_arctic.py` (two shuffle env entries),
+  `tests/e2e/test_full_run.py` (`test_twenty_shuffles_in_four_shards` deleted),
+  `tests/e2e/test_full_run_synthetic.py`.
+- Added: `tests/unit/test_v4_phase1_shuffle_removed.py` (no CLI command or option, config key
+  rejected, module gone).
+- After the change: `pytest tests/unit tests/integration` gives the same 4 `/bin/bash` failures as
+  the baseline and nothing else; `tests/e2e` collects (16 tests, not run). `ruff check`,
+  `ruff format --check`, `mypy` clean.
+- Completion checks: `grep -rni shuffle src scripts config tests` (outside `scripts/arctic`, which
+  Phase 2 deletes) finds only `rng.shuffle(words)` in the synthetic provider and the new negative
+  test. A 4-week synthetic study (`run_weekend.py --synthetic`, `config/study_test.yaml`) followed
+  by `portstudy eval --synthetic` finished in 9.9 s with no shuffle text. `benchmark_pipeline.py
+  --n-stocks 100 --sources 3 --weeks 24` on this machine: mean solve seconds MVO 0.011, Mean-CVaR
+  6.02, Robust 0.033, Resampled 1.56, Top-K 0.001; J7 30.5 s per week at 3 sources, 396.7 s
+  projected at 51.
+
+### Choices made while unattended
+
+- The `resource` import guard planned for Phase 3 was done here, because without it the Phase 1
+  benchmark check and `test_v2_phase9_scale.py` cannot run on Windows. Peak memory uses `resource`
+  on Linux, `psutil` when installed, and prints `n/a` otherwise.
+- `scripts/arctic/shuffle_array.sbatch` is left for Phase 2, which deletes the whole folder.
+- G6 was deleted from the `study.yaml` decisions in this phase (the plan lists it under Phase 2) so
+  the Phase 1 grep is clean; it moves to the retired table in `docs/open_questions.md` in Phase 4.
+- Pushes go to GitHub only; the `gitlab` remote is left configured and unused.

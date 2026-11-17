@@ -7,7 +7,7 @@ Solvers are tried in the configured order (OSQP, then CLARABEL). On failure the 
 week's weights are returned with `fallback_flag = "solver_failed"`.
 
 The problem is compiled once per (tickers, Sigma, delta, cap) with mu as a cvxpy Parameter and
-reused for every later mu (resampled draws, shuffles, each source in a week); `use_cache=False`
+reused for every later mu (resampled draws, each source in a week); `use_cache=False`
 builds the same parametrized problem fresh, so both paths share one canonicalization.
 """
 

@@ -1,28 +1,32 @@
 # Specialized LLM Skills Across Fixed Quantitative Portfolio Optimization Strategies
 
-MS Computer Science research project, Georgia State University. Carter Tierney, advised by Dr. Parag Tamhankar. Compute: GSU ARCTIC.
+MS Computer Science research project, Georgia State University. Carter Tierney, advised by Dr. Parag Tamhankar. LLM calls: GSU ARCTIC's LiteLLM gateway. Everything else: Carter's desktop (WSL2).
 
-This repository is the system behind a controlled study of how large language model (LLM) views change the results of different quantitative portfolio optimization strategies. The data, the quant baseline, the Ledoit-Wolf covariance, the way views are built, and the guardrails are held fixed, so only the LLM's ratings and the strategy change. Each LLM rates every stock as a range (low, most likely, high) using a bare prompt, one of four to five specialized skills files, or a placebo (filler text the same length as a skills file). These ratings become Black-Litterman views that steer five fixed strategies, and each strategy is compared with its own quant-baseline-only version, which ranks stocks on momentum plus a pretrained forecasting model. A weekly evaluation tracks the rank information coefficient (IC) and portfolio returns over a live run to find which strategies the LLM helps or hurts the most, and why. The research proposal and the ARCTIC resource request are in `docs/proposals/`.
+This repository is the system behind a controlled study of how large language model (LLM) views change the results of different quantitative portfolio optimization strategies. The data, the quant baseline, the Ledoit-Wolf covariance, the way views are built, and the guardrails are held fixed, so only the LLM's ratings and the strategy change. Each LLM rates every stock as a range (low, most likely, high) using a bare prompt, one of four specialized skills files, or a placebo (filler text the same length as a skills file). These ratings become Black-Litterman views that steer five fixed strategies, and each strategy is compared with its own quant-baseline-only version, which ranks stocks on momentum plus a pretrained forecasting model. A weekly evaluation tracks the rank information coefficient (IC) and portfolio returns over a live run to find which strategies the LLM helps or hurts the most, and why. The research proposal and the ARCTIC resource request are in `llm_research/current_documents/`; the research notes, methodology and findings are in `llm_research/`; the build plans are in `plans/`.
 
-## Research question and hypotheses
+## Research questions
 
 *How can LLM views built from specialized skills improve quantitative portfolio optimization strategies, and which strategies do LLMs help or hurt the most, and why?*
 
-- **H1** How often do the LLM's ratings alone beat the quant baseline's ratings?
-- **H2** How often does adding the LLM views improve each strategy's portfolio, compared with the same strategy run on the baseline alone (Q0)?
-- **H3** Do specialized skills change the result compared with bare prompts and placebo?
-- **H4** Which strategies do the LLM views help or hurt the most, and in which conditions (up or down markets, high or low volatility, earnings weeks)?
-- **H5** How much of the result comes from luck or general market movement rather than the LLM?
+- **RQ1** How often do the LLM's ratings alone beat the quant baseline's ratings?
+- **RQ2** How often does adding the LLM views improve each strategy's portfolio, compared with the same strategy run on the baseline alone (Q0)?
+- **RQ3** Do specialized skills change the result compared with bare prompts and placebo?
+- **RQ4** Which strategies do the LLM views help or hurt the most, and in which conditions (up or down markets, high or low volatility, earnings weeks)?
+- **RQ5** How much of the result comes from luck or general market movement rather than the LLM?
 
-| Hypothesis | Test | Holm family (`eval.holm_families`) |
-|---|---|---|
-| H1 | weekly rank IC of each LLM source minus the baseline's rank IC | all sources |
-| H2 (ratings) | weekly rank IC of the combined score (`bl_tilt`) minus the baseline's | all sources |
-| H2 (portfolios) | each steered portfolio's weekly return minus its strategy's Q0 return | per strategy |
-| H3 | each skills source's weekly rank IC minus the same model's bare and placebo rank IC | per model |
-| H3b | rank IC of narrow-range ratings minus wide-range ratings, split at each source-week's median width | all sources |
-| H4 | strategies ranked by their mean H2 gap; gaps compared across market direction, volatility and earnings-week groups | exploratory, no Holm |
-| H5 | Fama-French five-factor alpha, plus 500 shuffled-rating replays per MVO, Robust MVO and Top-K portfolio | per strategy |
+The proposal ends with a stated hypothesis for each research question. Code, config and the report keep the IDs H1 to H5 (Hn tests RQn).
+
+| ID (RQ) | Test (current design; see `docs/design.md`) |
+|---|---|
+| H1 | weekly rank IC of each LLM source minus the baseline's, plus residual IC (Fama-MacBeth, controlling for the baseline score, momentum, size, volatility, beta, sector and factor loadings) |
+| H2 (ratings) | weekly rank IC of the LLM-steered Black-Litterman tilt minus Q0's tilt, on the same stocks |
+| H2 (portfolios) | each steered portfolio's active return vs its strategy's Q0: mean, information ratio, tracking error, Ledoit-Wolf Sharpe test, break-even cost; all weeks and active-view weeks |
+| H3 | skills vs bare and vs placebo on rank IC and on active return, pooled across models with model and week fixed effects |
+| H3b | narrow minus wide rating ranges, a score-by-confidence interaction, and a width vs error check |
+| H4 | strategies ranked by mean active return, strategy-vs-strategy differences, market, volatility and earnings-week splits (exploratory) |
+| H5 | daily active return regressed on Fama-French five factors plus momentum; the placebo prompt as the content control |
+
+Four pooled main comparisons (LLM-minus-baseline rank IC gap, steered-minus-Q0 tilt IC gap, skills minus bare, skills minus placebo) are fixed in `config/preregistration.yaml` before the live run and corrected with Holm; every other comparison uses Benjamini-Hochberg. Every metric is computed for every source, portfolio, model, prompt and strategy and saved to `results/eval/all_metrics.csv`, and null results are reported (G22). The shuffled-ratings test of earlier plans is dropped. The code still implements the older evaluation until `plans/PLAN4.md` Phases 1 to 9 are built.
 
 ## Study design
 
@@ -30,23 +34,23 @@ This repository is the system behind a controlled study of how large language mo
 
 **Prompt types.** `bare`, `placebo`, and the skills files `skills_1` to `skills_4` (`skills_5` is disabled by default; `config/prompts_manifest.yaml`). Every prompt is built from the same fields (ticker, name, sector, the week's news up to the cutoff) at temperature 0, one stock per call, JSON output only. Each skills file must be within 5 percent of the mean skills length and the placebo within 2 percent, so length cannot explain a difference between them.
 
-**Models** (`config/models.yaml`). Enabled by default: Gemma 4 31B and MiniMax M2.7 through the ARCTIC LiteLLM gateway, and Claude Haiku 5.5 and GPT-6 Luna through their providers' batch APIs. Gemma 4 E4B, Phi-4 Mini (3.8B) and Llama 3.2 3B are registered but disabled until ARCTIC deploys them on the gateway. Models banned by GSU's AI tool registry are not used.
+**Models** (`config/models.yaml`). Gemma 4 31B and MiniMax M2.7 through the ARCTIC LiteLLM gateway (the two models ARCTIC already hosts), and Claude Haiku 5.5 and GPT-6 Luna through their providers' batch APIs. Models banned by GSU's AI tool registry are not used. Three disabled small-model entries left from an earlier plan are removed in PLAN4 Phase 2.
 
-**Portfolio count.** With S sources, the pipeline writes 5 (S + 1) + 2 portfolios a week: five strategies, each on S sources plus its own Q0, plus HRP and equal weight. The default 4 models x 6 prompt types give 24 sources and 127 portfolios; the largest planned configuration (7 models x 7 prompt types) gives 49 sources and 252 portfolios.
+**Portfolio count.** With S sources, the pipeline writes 5 (S + 1) + 2 portfolios a week: five strategies, each on S sources plus its own Q0, plus HRP and equal weight. The default 4 models x 6 prompt types give 24 sources and 127 portfolios; with 7 prompt types, 28 sources and 147 portfolios.
 
 **Output schema** (DECISION(C3)). The model returns JSON with integer `low`, `likely` and `high` ratings in [-5, 5], `low <= likely <= high`, and a short `rationale`. Anything else is invalid; one retry is allowed.
 
 **Controls.** Each strategy's Q0 (the same strategy with only the baseline view), HRP and equal weight (no forecasts at all), the placebo prompt, residualization of the LLM score against the baseline, and common random numbers: every portfolio in a week uses the same seeded scenario and resampling draws, so two portfolios differ only through their views.
 
-**Fixed settings.** Every study setting is fixed in `config/study.yaml`, tagged `DECISION(<id>)` in code, and frozen with the `frozen-v2` tag before the live run. Code never changes a study setting.
+**Fixed settings.** Every study setting is fixed in `config/study.yaml`, tagged `DECISION(<id>)` in code, and frozen with the `frozen-v4` tag before the live run. Code never changes a study setting.
 
-**Live run only.** A one-week pilot runs first, then the live run on real weekly data. There is no backtest, because the LLMs may already have seen news and prices from any past period. The universe is 100 to 300 S&P 500 stocks balanced across the eleven sectors; the number depends on the ARCTIC allocation (`universe.size`, 100 until confirmed).
+**Live run only.** A one-week pilot runs first, then the live run on real weekly data. There is no backtest, because the LLMs may already have seen news and prices from any past period. The universe is 100 S&P 500 stocks balanced across the eleven sectors (`universe.size`, decision B4), the size ARCTIC's startup allocation of 1,000 GPU-hours fits.
 
 ## Methodology
 
-`docs/design.md` walks through every stage and `PLAN2.md` holds the formula sheet. For the N stocks in the week's universe:
+`docs/design.md` walks through every stage and `plans/PLAN2.md` holds the formula sheet. For the N stocks in the week's universe:
 
-**Quant baseline.** Momentum features (`M12_1 = P[t-21]/P[t-252] - 1`, `M3 = P[t]/P[t-63] - 1`, one-month reversal `R1 = -(P[t]/P[t-21] - 1)`) are rank-averaged into `m`. Kronos, a pretrained candlestick foundation model, samples 20 five-day price paths per stock on a GPU; their mean gives the forecast `k` and their standard deviation `s` the forecast spread. The baseline score is `b = 0.5 u(m) + 0.5 u(k)` with `u(x) = rank(x)/N`, standardized to `z_b`.
+**Quant baseline.** Momentum features (`M12_1 = P[t-21]/P[t-252] - 1`, `M3 = P[t]/P[t-63] - 1`, one-month reversal `R1 = -(P[t]/P[t-21] - 1)`) are rank-averaged into `m`. Kronos, a pretrained candlestick foundation model, samples 20 five-day price paths per stock on the desktop GPU; their mean gives the forecast `k` and their standard deviation `s` the forecast spread. The baseline score is `b = 0.5 u(m) + 0.5 u(k)` with `u(x) = rank(x)/N`, standardized to `z_b`.
 
 **Risk model and prior.** The Ledoit-Wolf shrinkage covariance of 252 daily returns, scaled by 5 to weekly (`Sigma`), and the market-cap equilibrium prior `pi = delta Sigma w_mkt` with `delta = 2.5`.
 
@@ -57,7 +61,9 @@ q_b = pi + IC_b sigma z_b          Omega_b,ii = tau Sigma_ii clip(s_i / median(s
 q_L = pi + IC_L sigma z_L          Omega_L,ii = tau Sigma_ii / c_i,  c_i = clip(1 - width_i/10, 0.1, 1)   (E1)
 ```
 
-with `tau = 0.05`. The view strengths `IC_b` and `IC_L` are the trailing eight-week mean rank ICs of each signal, floored at zero (a fixed 0.02 during the five-week cold start). A Kronos spread above the median widens the baseline's uncertainty on that stock; a wide rating range (`width = high - low`) widens the LLM's. If `IC_L = 0`, or a source has no valid ratings, the LLM view rows are dropped and each portfolio trades exactly its strategy's Q0 weights.
+Pending PLAN4 Phase 3B (decision E7): the LLM view becomes `q_L = mu_Q0 + IC_L sigma z_L`, centered on the Q0 posterior mean, so a rating of 0 leaves MVO and Top-K equal to Q0.
+
+with `tau = 0.05`. The view strengths `IC_b` and `IC_L` are the trailing eight-week mean rank ICs of each signal, floored at zero (a fixed 0.02 during the five-week cold start). Pending PLAN4 Phase 3A (decision A8): both are fixed at 0.02 every week, so no view is switched off. A Kronos spread above the median widens the baseline's uncertainty on that stock; a wide rating range (`width = high - low`) widens the LLM's. If `IC_L = 0`, or a source has no valid ratings, the LLM view rows are dropped and each portfolio trades exactly its strategy's Q0 weights.
 
 **Black-Litterman.** With the stacked views `P = [I; I]`, `A = inv(tau Sigma) + P' inv(Omega) P`, the posterior mean is `mu_BL = solve(A, inv(tau Sigma) pi + P' inv(Omega) q)` and the posterior covariance of the mean is `M = inv(A)`. Black-Litterman runs once per source per week; every strategy reads the same `mu_BL` and `M`.
 
@@ -79,11 +85,14 @@ with `tau = 0.05`. The view strengths `IC_b` and `IC_L` are the trailing eight-w
 
 ## Statistics
 
-- **Win, tie, loss.** Each weekly gap counts as a tie when its absolute value is below `eval.tie_band` (0.01); wins and losses are the rest.
-- **Tests on each weekly gap series.** The sign test on wins and losses; the exact sign-flip permutation test on the mean gap (10,000 draws; `p_perm` is the primary p-value and the one Holm adjusts within each family); Newey-West standard errors for the mean, correcting for neighboring weeks being related; and a paired bootstrap interval (2,000 resamples) for the mean gap.
-- **Minimum detectable gap.** From the observed weekly standard deviation and week count at the 0.05 level; a gap below it is inconclusive, not evidence of no effect, and the report says so.
-- **Factor regressions.** The Fama-French five-factor model on daily portfolio returns when `eval.fama_french_file` is set (the live study); the ETF proxies in `universe.etf_proxies` are the offline fallback only.
-- **Shuffled-ratings test** (DECISION(G6)). 500 replays per portfolio with the same scores given to random stocks, for the MVO, Robust MVO and Top-K steered portfolios and those three strategies' Q0s. Mean-CVaR and Resampled MVO are excluded: their solves are about 99 percent of the shuffle compute (22 s and 18 s per solve at 300 stocks against 0.08 s, 0.41 s and 0.003 s), and the Q0 comparison and factor regression still cover them. The report prints an explicit exclusion line for each.
+The evaluation uses only saved ratings, weights and returns, so it adds no compute (decision G12 and the proposal's Evaluation section).
+
+- **Paired weekly gaps.** Mean gap with Newey-West standard errors and Student-t critical values, a block-bootstrap 95% interval, a sign-flip permutation p-value (exact when there are 24 weeks or fewer), win, tie and loss counts, and the minimum detectable effect `2.8 sd / sqrt(T)`.
+- **Multiple testing.** Holm on the pre-registered main comparisons; Benjamini-Hochberg on the rest; H4 exploratory.
+- **Portfolio metrics.** Annualized Sharpe net of the T-bill rate (with the probabilistic and deflated Sharpe), Sortino, maximum drawdown and CVaR from daily returns, information ratio and tracking error vs Q0, certainty-equivalent return, turnover, break-even cost, stop counts, view shift.
+- **Factor regressions.** Kenneth French daily FF5 plus momentum on daily active returns for the final run; the ETF proxies in `universe.etf_proxies` for live monitoring only.
+
+Status: the code currently implements the older version (Holm everywhere, ETF-proxy regressions of total returns, and Sharpe without the risk-free rate). `plans/PLAN4.md` Phases 5 to 9 bring it to the version above.
 
 ## Weekly pipeline
 
@@ -110,9 +119,9 @@ with `tau = 0.05`. The view strengths `IC_b` and `IC_L` are the trailing eight-w
 | J8 | Replays every portfolio from the ledger for the closed weeks, scores rank IC for each source and appends it to the IC history. |
 | J9 | Dated CSV backup, zip and optional rsync to a second location. |
 
-`scripts/run_weekend.py` runs the jobs in order and resumes where it stopped; `--poll-once` makes one J5 pass and exits 3 while batches are pending. Every job records an inputs hash and an outputs hash in its status file; a finished job is skipped only while its inputs are unchanged and its outputs are intact. Weights are final once `locked.json` exists.
+`scripts/run_weekend.py` runs the jobs in order on the desktop and resumes where it stopped. Every job records an inputs hash and an outputs hash in its status file; a finished job is skipped only while its inputs are unchanged and its outputs are intact. Weights are final once `locked.json` exists.
 
-**ARCTIC layout** (`scripts/arctic/`, DECISION(W1)). `submit_weekend.sh` submits three Slurm jobs: `kronos.sbatch` (J1, J2 on a GPU node) and `llm.sbatch` (J3, J4 on CPU cores) at the same time with no dependency between them, then `finish.sbatch` with `--dependency=afterany` on both. The finish job runs J5 once; if batches are still pending it resubmits itself `POLL_INTERVAL_MINUTES` later and exits, otherwise it runs J6 to J9. In `login` network mode J1 and J3 run on the login node first and the LLM job runs J4 only. No job waits idle for anything outside the cluster, and `common.sh` refuses any walltime above 15 hours.
+**Where it runs** (decision L1). Carter runs `scripts/run_weekend.py` by hand in WSL2 on his desktop, Friday night or Saturday morning (decision N2). J2 runs Kronos on the local GPU; J4 sends the open-weight requests to ARCTIC's LiteLLM gateway over the GSU VPN; J3 and J5 use the providers' batch APIs; everything else runs on the desktop CPU. The `scripts/arctic/` Slurm layout from PLAN3 is retired and deleted in PLAN4 Phase 2.
 
 ## Failure handling
 
@@ -120,11 +129,11 @@ No failure is silent and every fallback is labeled in the data.
 
 - **Source failure (N1).** A source that fails validation or misses the lock trades its strategy's Q0 weights, tagged `fallback_q0` with the reason; that week is excluded from the source's clean-week tests.
 - **Model failure.** When one model's J4 worker crashes, the other models finish and keep their records, then J4 fails naming the model so a rerun resumes it from the cache; an authentication error marks that model's sources failed and the week proceeds.
-- **Gateway outage (D2).** A health check before J4 marks the failing models' sources; with `--gateway-fallback`, the fallback-eligible small models are served from Carter's own Slurm vLLM job (`llm_fallback.sbatch`) instead, one endpoint per source-week, recorded with the scores.
+- **Gateway outage (D2).** A health check before J4 marks the failing model's sources failed for the week; they trade Q0 and that week is left out of their statistics. There is no fallback server.
 - **Provider errors.** Transport errors, rate limits and server errors are retried by the provider and then requeued twice before the task is dropped.
 - **Solver failure.** Each strategy falls back in order to its previous weights, its own Q0, then equal weight, with `fallback_flag` set and `view_shift` measured on the weights actually traded.
 - **Missed week.** If J1 or J2 fails, the week is written as `no_rebalance` and locked, so the replay still applies stops, dividends and daily values; the replay also fills any calendar gap between locked weeks.
-- **Walltime.** Every Slurm job asks for at most 15 hours (target 12); a job that still hits its limit is rerun from the named job (`run_weekend.py --from J4`), because every job resumes from its status files.
+- **Interrupted run.** If the desktop sleeps, restarts or loses the network, rerun `run_weekend.py` (or `--from` the named job); every job resumes from its status files.
 - **History cannot drift.** The simulator reads only the append-only raw ledger. Snapshots are frozen at the cutoff and news after 16:00 ET is dropped.
 - **Secrets never reach logs.** The JSON-lines log handler redacts credential-bearing keys, bearer tokens and API keys.
 
@@ -132,17 +141,16 @@ No failure is silent and every fallback is labeled in the data.
 
 ## Compute
 
-| Job | Where | Cores and memory | Expected wall time (100 / 300 stocks) |
-|---|---|---|---|
-| `kronos.sbatch` (J1, J2) | ARCTIC GPU node | 1 GPU, `--mem=$GPU_MEM` | under 1 h / about 1 h |
-| `llm.sbatch` (J3, J4) | ARCTIC CPU node | 2 cores, `--mem-per-cpu=3G` | about 1.9 h / 5.8 h at 40 s per request on the large models |
-| `finish.sbatch` (J5 to J9) | ARCTIC CPU node | 1 core, `--mem-per-cpu=3G` | about 0.2 h / 0.7 h per pass |
-| `llm_fallback.sbatch` (vLLM, D2 only) | ARCTIC GPU node | 1 GPU, `--mem=$GPU_MEM` | up to `LLM_FALLBACK_WALLTIME` |
-| `shuffle_array.sbatch` (one shard) | ARCTIC CPU array | 1 core, `--mem-per-cpu=3G` | 0.2 min / 4.1 min of solves per 25-shuffle shard |
-| API models | Anthropic and OpenAI batch endpoints | - | polled by the finish job |
-| Market data | Alpaca (prices, news, corporate actions), yfinance (reference), FRED (rates), Finnhub (earnings) | - | inside J1 |
+| Work | Where | Measured or estimated time per weekend (300 / 100 stocks) |
+|---|---|---|
+| J2 Kronos | desktop GPU (RTX 3050, 6 GB) | 56 min / 3 min measured 2026-11-10 (300 stocks likely slowed by GPU memory spill; about 10 min expected with chunking, PLAN4 Phase 3) |
+| J4 gateway ratings, 2 models | ARCTIC LiteLLM gateway | about 4 to 9 h / proportionally less (estimate: 30 to 60 s per request, 4 at a time per model; MiniMax reasoning could add to it; to be measured, `manualwork.md` E) |
+| J3 / J5 API models | Anthropic and OpenAI batch endpoints | providers allow up to 24 h; usually back during J4 |
+| J7 all strategies | desktop CPU (Ryzen 5 8400F) | about 63 min at 28 sources (estimated from the measured per-source slope), 112 min at 51 / 20 min at 51 |
+| J1, J6, J8, J9 | desktop | minutes |
+| Final evaluation | desktop | minutes |
 
-The shuffled-ratings test over 24 weeks, 51 sources and the three G6 strategies projects to 5.6 CPU hours at 100 stocks and 85 CPU hours at 300 (solve time only; `scripts/benchmark_pipeline.py`, with `--replay-seconds` to add a measured replay time). Without the cluster, `portstudy shuffle run-local --processes N` runs the same shards on any machine. The budget table with its basis is in `PROGRESS.md` (v3 phase 3).
+ARCTIC allocation (granted 2026-11-16): the default startup allocation of 1,000 GPU and 10,000 CPU service units, so the study uses 100 stocks. ARCTIC request (revised 2026-11-12): GPU hours for the gateway LLM calls only (2,730 for 300 stocks, 910 for 100), no CPU hours or storage. The per-request figures behind it (about 40 V100-equivalent GPU-seconds per Gemma request and 90 per MiniMax request, whose reasoning counts as output) are estimates, and how gateway requests convert into GPU service units is not yet known (`llm_research/09_arctic_process_and_model_facts.md`). Desktop benchmark details: `docs/desktop_setup.md` and `llm_research/04_models_compute_arctic.md`.
 
 ## Quick start
 
@@ -150,8 +158,7 @@ Python 3.11 is required.
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate          # Windows
-source .venv/bin/activate       # macOS or Linux
+source .venv/bin/activate       # Linux or WSL2 (the study runs in WSL2; docs/desktop_setup.md)
 pip install -e ".[dev]"
 ```
 
@@ -162,30 +169,29 @@ python scripts/run_weekend.py --synthetic --week 2026-W02
 python scripts/run_weekend.py --synthetic --week 2026-W03
 python scripts/run_weekend.py --synthetic --week 2026-W04
 portstudy status --week 2026-W04 --synthetic
-portstudy eval --synthetic --skip-shuffle
+portstudy eval --synthetic
 ```
 
-Each run ends with a per-portfolio summary (status, weights file, hash). The report lands in `data/outputs/report/report.md` with CSV tables and PNG figures beside it. Drop `--skip-shuffle` to run the shuffled-ratings test (lower `eval.shuffle.n_shuffles` to try it quickly). Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_calendars), `.[api]` (anthropic, openai, tiktoken), `.[ml]` (torch, transformers for Kronos).
+Each run ends with a per-portfolio summary (status, weights file, hash). The report lands in `data/outputs/report/report.md` with CSV tables and PNG figures beside it. Optional extras: `.[data]` (alpaca-py, yfinance, finnhub-python, pandas_market_calendars), `.[api]` (anthropic, openai, tiktoken), `.[ml]` (torch, transformers for Kronos).
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `python scripts/run_weekend.py [--week W] [--synthetic] [--from J] [--until J] [--poll-once] [--dry-run] [--gateway-fallback] [--check-walltime T]` | The weekly run: catch-up replay and backup, J1 to J6, J7, J9; resumable |
-| `portstudy run-job J4 --week W [--force] [--gateway-fallback]` | Run or rerun one job |
+| `python scripts/run_weekend.py [--week W] [--synthetic] [--from J] [--until J] [--dry-run] [--allow-over-budget]` | The weekly run: catch-up replay and backup, J1 to J6, J7, J9; resumable |
+| `portstudy run-job J4 --week W [--force]` | Run or rerun one job |
 | `portstudy run-week --week W` | All jobs in order, stopping at the first failure |
 | `portstudy status --week W` | State, timestamps, and error of every job |
 | `portstudy replay` | Rebuild every portfolio from the ledger and rescore closed weeks |
 | `portstudy backup --week W [--dry-run]` | Dated CSV backup folder plus zip |
-| `portstudy eval [--skip-shuffle]` | Full evaluation report |
-| `portstudy shuffle plan\|run\|run-local\|collect` | H5 shards for a Slurm array (plan prints the estimated minutes per shard), one shard, all shards locally, or assemble the results |
+| `portstudy eval` | Full evaluation report |
 | `python scripts/make_synthetic_world.py` | Write the seeded synthetic market to `data/synthetic/` |
-| `python scripts/benchmark_pipeline.py [--n-stocks 300 --sources 3 --weeks 24]` | Seconds per solve per strategy, weekly J7 time, shuffle CPU hours per G6 strategy |
+| `python scripts/benchmark_pipeline.py [--n-stocks 300 --sources 3 --weeks 24]` | Seconds per solve per strategy, weekly J7 time, peak memory |
 | `python scripts/estimate_cost.py` | Projected API cost from logged token counts |
 | `python scripts/refresh_manifest.py --check\|--write` | Prompt file hashes; a prompt edited without a version bump fails |
 | `python scripts/check_placebo_length.py` | Skills within 5 percent and placebo within 2 percent of the enabled skills mean |
 | `python scripts/smoke_real_services.py [--dry-run]` | Tiny real calls per service and enabled model |
-| `bash scripts/arctic/submit_weekend.sh [--week W] [--dry-run]` | The ARCTIC weekend: three Slurm jobs, printed with their ids and rerun commands |
+| `python scripts/kronos_smoke.py --n-stocks 300` | Kronos forecast time and peak GPU memory on synthetic prices |
 
 Add `--synthetic` to any pipeline command to use the synthetic world and stub LLM. Set `PORTSTUDY_DATA_DIR` (default `./data`) to move the data root.
 
@@ -209,17 +215,17 @@ src/portstudy/
                         strategies/ (mvo, cvar, robust, resampled, topk, hrp, equal weight, registry)
   sim/                  ledger-driven simulator with stops, trade and daily records
   pipeline/             run context, job status, jobs J1 to J9, fallback policy, typer CLI
-  eval/                 statistics, rank IC, hypotheses H1 to H5, factors, shuffle, report
+  eval/                 statistics, rank IC, hypotheses H1 to H5, factors, report
 scripts/                run_weekend.py and the utilities above
-scripts/arctic/         common.sh, submit_weekend.sh, kronos / llm / finish / llm_fallback /
-                        shuffle_array .sbatch, arctic.env.example
+scripts/arctic/         retired Slurm layout, deleted in PLAN4 Phase 2
 tests/                  unit/  integration/  e2e/
-docs/                   design, runbook, config reference, open questions, ARCTIC setup, weekend
-                        checklist, GitHub and GitLab setup, build decisions, proposals/
-data/                   (gitignored) ledger/ snapshots/ outputs/ logs/ portfolios/ shuffle/ backups/
-PLAN2.md, PLAN3.md      the phased build plans and study decisions
-PROGRESS.md             build log, one entry per phase
-results.md              the read-only code review that preceded PLAN3
+docs/                   code docs: design, runbook, desktop setup, weekend checklist, config
+                        reference, open questions, build decisions, GitHub and GitLab setup
+llm_research/           research notes, methodology, findings, references, correspondence;
+                        current_documents/ holds the current proposal and ARCTIC request
+data/                   (gitignored) ledger/ snapshots/ outputs/ logs/ portfolios/ backups/
+plans/                  PLAN.md, PLAN2.md, PLAN3.md, PLAN4.md (the current plan), PROGRESS.md (build
+                        log), results.md (the code review that preceded PLAN3)
 ```
 
 ## Testing and quality gates
@@ -236,32 +242,34 @@ python scripts/check_banned_words.py
 python scripts/check_secrets.py
 ```
 
-The suite proves, among other things: a hand-calculated simulator example to the cent and exact-threshold stops; Black-Litterman equal to the closed form and portfolios with a dropped LLM view equal to Q0; a labeled fallback or clean rerun for every injected failure (crash and resume, batch never returns, cost cap, invalid-output storm, data outage, late lock, a crashed model worker); the planted synthetic effect recovered by H1 and H3 with the placebo-vs-bare false-positive rate at the nominal level; identical outputs from two runs with the same seed; the ARCTIC scripts under shellcheck with the three-job layout checked in both network modes.
+The suite proves, among other things: a hand-calculated simulator example to the cent and exact-threshold stops; Black-Litterman equal to the closed form and portfolios with a dropped LLM view equal to Q0; a labeled fallback or clean rerun for every injected failure (crash and resume, batch never returns, cost cap, invalid-output storm, data outage, late lock, a crashed model worker); the planted synthetic effect recovered by H1 and H3 with the placebo-vs-bare false-positive rate at the nominal level; identical outputs from two runs with the same seed.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs lint, unit tests and the repository checks on every push and the integration and e2e jobs on `master`; `.gitlab-ci.yml` mirrors it for the GitLab fallback host.
 
 ## Project status
 
-- **Built and tested.** v1, v2 phases 1 to 14, the review fixes from `results.md`, and PLAN3 phases 1 to 6, each recorded in `PROGRESS.md`.
-- **Remaining manual work** (Carter, every step listed in `manualwork.md`): PLAN2 phase 15 (accounts, keys and limits; the ARCTIC allocation, `arctic.env` and model weights; smoke tests of every real service; the skills and placebo texts; the pilot week; the `frozen-v2` tag) and the PLAN2 project completion checklist.
-- **Not yet verified against live services** (`UNVERIFIED` in config and code): gateway JSON mode, seed support and rate limits; the MiniMax output format and whether it needs an output-token override; Kronos per-path sampling and its real GPU time; ARCTIC partitions, memory policy and the real per-request LLM time; the shuffle replay time per shuffle.
+- **Built and tested.** v1, v2 phases 1 to 14, the review fixes from `plans/results.md`, and PLAN3 phases 1 to 6, each recorded in `plans/PROGRESS.md`.
+- **In progress: `plans/PLAN4.md` Phases 1 to 11** (Phase 1, removing the retired G6 test, is done; see `plans/PROGRESS.md`): remove the ARCTIC Slurm layer, desktop runtime (Kronos chunking, live-readiness checks, lock file), the new evaluation and report, docs recheck, and end-to-end verification.
+- **Manual work: `manualwork.md`** (Carter, the only manual list): emails to Parag and Andalib, gateway key and VPN, desktop setup, API keys and budget, skills and placebo texts, stock list, preregistration, smoke tests, the pilot, the `frozen-v4` tag.
+- **Not yet verified against live services** (`UNVERIFIED` in config and code): gateway JSON mode, seed support, rate limits and real seconds per request; whether MiniMax needs an output-token override; Kronos per-path sampling and its chunked GPU time.
 
 ## Documentation
 
 | File | Contents |
 |---|---|
-| `docs/proposals/` | The IEEE project proposal and the ARCTIC resource request (PDF and LaTeX) |
-| `PLAN2.md`, `PLAN3.md` | The build plans and study decisions (`PLAN3.md` section 0.1 for G6, W1, M1) |
-| `PROGRESS.md` | What was built in each phase, tests, measurements, open items |
-| `results.md` | The read-only code review: formula proofs, pipeline checks, findings by severity |
-| `docs/design.md` | One section per pipeline stage with the exact formulas, plus the ARCTIC job layout |
+| `llm_research/` | Research notes: overview, decisions, pipeline and methods, compute and ARCTIC, evaluation methodology and findings, dropped methods, literature, correspondence; `current_documents/` has the current proposal and ARCTIC request |
+| `plans/PLAN4.md` | The current build plan (Devin) |
+| `manualwork.md` | Every manual step Carter has to do, in one file |
+| `plans/PLAN.md`, `PLAN2.md`, `PLAN3.md` | Earlier build plans (PLAN2 section 0.3 still holds the unchanged decision values) |
+| `plans/PROGRESS.md` | What was built in each phase, tests, measurements, open items |
+| `plans/results.md` | The read-only code review: formula proofs, pipeline checks, findings by severity |
+| `docs/design.md` | One section per pipeline stage with the exact formulas and the current evaluation design |
+| `docs/desktop_setup.md` | WSL2 setup, Kronos, keys, backups, benchmarks, reliability settings |
+| `docs/weekend_checklist.md` | Before, during and after each weekend run |
+| `docs/runbook.md` | Status, reruns, every failure and its fallback, restore from backup |
 | `docs/config_reference.md` | Every config key with default, meaning, and decision id |
-| `docs/open_questions.md` | Decision table with config locations and code tags |
-| `docs/runbook.md` | Status, reruns, every failure and its fallback, restore from backup, the ARCTIC weekend |
-| `docs/arctic_setup.md` | ARCTIC setup: env file, venv, model weights, network, W1 and M1 |
-| `docs/weekend_checklist.md` | Before, during and after each ARCTIC weekend run |
-| `docs/github_setup.md` | Remotes, the Actions workflow (primary host) |
-| `docs/gitlab_setup.md` | The same for GitLab, kept as the fallback host |
+| `docs/open_questions.md` | Current and retired decisions |
+| `docs/github_setup.md`, `docs/gitlab_setup.md` | Remotes and CI (GitHub primary, GitLab fallback) |
 | `docs/build_decisions.md` | Every build-time choice, newest first |
 
 License: MIT.
@@ -276,10 +284,6 @@ The five study design choices, with value, config key, and reason (they match `c
 - **G3b, median width split** (`eval.h3b`): splitting at each week's median gives two groups of similar size, so neither group's rank IC is much noisier than the other; weeks with a group under 10 stocks are skipped.
 - **P1, skills length tolerance 5%** (`llm.skills_length_tolerance`): keeps the skills files close enough in length that length cannot explain differences between them; the placebo stays within 2% of their mean.
 
-The PLAN3 decisions:
-
-- **G6, shuffle scope** (`eval.shuffle.strategies`): MVO, Robust MVO and Top-K only, because Mean-CVaR and Resampled MVO were about 99 percent of the shuffle compute and the Q0 comparison and factor regression still cover them.
-- **W1, walltime** (`MAX_JOB_HOURS` in `arctic.env`): every Slurm job at most 15 hours, target 12, and never idle waiting on outside work, so a stalled API batch cannot burn an allocation.
-- **M1, memory** (`--mem-per-cpu=3G`): CPU jobs request 3 GB per core and only the cores they use, so service units are charged for work done.
+The PLAN4 decisions (`docs/open_questions.md`): everything except LLM calls runs on the desktop (L1); Kronos runs in chunks (K2); a gateway outage fails that model's week (D2); the shuffle test, Slurm walltime and memory rules are retired (G6, W1, M1); and the evaluation uses pre-registered main comparisons, intention-to-treat and active-week reporting, residual IC, risk-free-adjusted and daily downside metrics, French factors and small-sample inference (G7 to G12).
 
 D3, the paid API budget, is the only provisional decision; see `docs/open_questions.md`. Every other build-time choice is in `docs/build_decisions.md`.

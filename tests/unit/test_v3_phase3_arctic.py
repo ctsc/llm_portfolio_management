@@ -248,14 +248,12 @@ def _env_file(tmp_path: Path, **overrides: str) -> Path:
         "LLM_WALLTIME": "06:00:00",
         "FINISH_WALLTIME": "03:00:00",
         "POLL_INTERVAL_MINUTES": "7",
-        "SHUFFLE_WALLTIME": "02:00:00",
         "MAX_JOB_HOURS": "15",
         "PYTHON_MODULE": "python/3.11",
         "VENV_PATH": str(tmp_path / "venv"),
         "DATA_ROOT": str(tmp_path / "data"),
         "HF_HOME": str(tmp_path / "hf"),
         "ARCTIC_NETWORK_MODE": "login",
-        "SHUFFLE_MAX_PARALLEL": "10",
         "LLM_FALLBACK_WALLTIME": "10:00:00",
     }
     values.update(overrides)

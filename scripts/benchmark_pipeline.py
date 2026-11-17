@@ -1,6 +1,5 @@
-"""Per-strategy solve times at a chosen universe size, the implied weekly J7 time, and the
-projected shuffle CPU hours, so the universe size (DECISION(B4)) and the ARCTIC request can
-be checked before the freeze.
+"""Per-strategy solve times at a chosen universe size and the implied weekly J7 time, so the
+universe size (DECISION(B4)) and the weekly job walltime can be checked before the freeze.
 
 Usage:
   python scripts/benchmark_pipeline.py --n-stocks 300 --sources 3 --weeks 24
@@ -15,12 +14,9 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import json
 import os
-import resource
 import tempfile
 import time
-from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -45,15 +41,8 @@ BENCHMARK_COLUMNS = [
     "projected_sources",
     "j7_projected_s_per_week",
     "weeks",
-    "n_shuffles",
-    "shuffle_cpu_hours",
-    "shuffle_cpu_hours_with_replay",
-    "shuffle_strategies",
-    "shuffle_portfolios",
-    "shuffle_hours_by_strategy",
     "peak_memory_mb",
 ]
-ARCTIC_REQUEST_CPU_HOURS = 15_000
 
 
 def synthetic_inputs(
@@ -110,48 +99,30 @@ def projection(
     controls: list[str],
     n_sources: int,
     projected_sources: int,
-    weeks: int,
-    n_shuffles: int,
-    shuffle_strategies: Sequence[str] | None = None,
-    replay_seconds: float | None = None,
 ) -> dict[str, float]:
-    """Weekly J7 seconds now and at the full source count, plus shuffle CPU hours (DECISION(G6),
-    PLAN3): one solve per week per shuffle per portfolio of each shuffled strategy (its steered
-    portfolios plus its Q0), at that strategy's mean solve time, with a per-strategy breakdown
-    under `shuffle_hours_<strategy>`; `shuffle_cpu_hours_with_replay` adds one simulator replay
-    of `replay_seconds` per shuffle (NaN when no replay time is given)."""
+    """Weekly J7 seconds at the run's source count and at a projected source count."""
     mean = {name: float(np.mean(values)) for name, values in times.items() if values}
     strategy_mean = {name: mean[name] for name in strategies}
     control_total = sum(mean[name] for name in controls)
     j7_now = (n_sources + 1) * sum(strategy_mean.values()) + control_total
     j7_projected = (projected_sources + 1) * sum(strategy_mean.values()) + control_total
-    shuffled = [s for s in (shuffle_strategies or strategies) if s in strategy_mean]
-    per_strategy_portfolios = projected_sources + 1  # steered portfolios plus the strategy's Q0
-    hours = {
-        s: weeks * n_shuffles * per_strategy_portfolios * strategy_mean[s] / 3600.0
-        for s in shuffled
-    }
-    shuffle_hours = sum(hours.values())
-    n_portfolios = per_strategy_portfolios * len(shuffled)
-    replay_hours = (
-        weeks * n_shuffles * n_portfolios * replay_seconds / 3600.0
-        if replay_seconds is not None
-        else float("nan")
-    )
-    mean_solve = float(np.mean([strategy_mean[s] for s in shuffled])) if shuffled else 0.0
-    out = {
+    return {
         "j7_s_per_week": j7_now,
         "j7_projected_s_per_week": j7_projected,
-        "shuffle_cpu_hours": shuffle_hours,
-        "shuffle_cpu_hours_with_replay": shuffle_hours + replay_hours,
-        "steered_portfolios": float(n_portfolios),
-        "mean_solve_s": mean_solve,
     }
-    out.update({f"shuffle_hours_{s}": h for s, h in hours.items()})
-    return out
 
 
 def peak_memory_mb() -> float:
+    """Peak resident memory in MB: `resource` on Linux (WSL2), `psutil` if installed, else NaN."""
+    try:
+        import resource
+    except ImportError:
+        try:
+            import psutil  # type: ignore[import-not-found,import-untyped,unused-ignore]
+        except ImportError:
+            return float("nan")
+        info = psutil.Process().memory_info()
+        return float(getattr(info, "peak_wset", info.rss)) / 1024.0**2
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
 
 
@@ -165,21 +136,9 @@ def benchmark_table(
     projected_sources: int,
     seed: int,
     today: dt.date,
-    replay_seconds: float | None = None,
 ) -> pd.DataFrame:
     times = time_strategies(cfg, strategies, controls, n_stocks, n_sources, seed)
-    shuffle_strategies = [s for s in cfg.eval.shuffle.strategies if s in strategies]
-    proj = projection(
-        times,
-        strategies,
-        controls,
-        n_sources,
-        projected_sources,
-        weeks,
-        cfg.eval.shuffle.n_shuffles,
-        shuffle_strategies,
-        replay_seconds,
-    )
+    proj = projection(times, strategies, controls, n_sources, projected_sources)
     memory = peak_memory_mb()
     rows = []
     for name in [*strategies, *controls]:
@@ -197,14 +156,6 @@ def benchmark_table(
                 "projected_sources": projected_sources,
                 "j7_projected_s_per_week": proj["j7_projected_s_per_week"],
                 "weeks": weeks,
-                "n_shuffles": cfg.eval.shuffle.n_shuffles,
-                "shuffle_cpu_hours": proj["shuffle_cpu_hours"],
-                "shuffle_cpu_hours_with_replay": proj["shuffle_cpu_hours_with_replay"],
-                "shuffle_strategies": ",".join(shuffle_strategies),
-                "shuffle_portfolios": proj["steered_portfolios"],
-                "shuffle_hours_by_strategy": json.dumps(
-                    {s: proj[f"shuffle_hours_{s}"] for s in shuffle_strategies}
-                ),
                 "peak_memory_mb": memory,
             }
         )
@@ -254,12 +205,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--controls", default=None, help="comma list; default: configured")
     parser.add_argument("--weeks", type=int, default=24, help="pilot plus live weeks (about 24)")
     parser.add_argument(
-        "--replay-seconds",
-        type=float,
-        default=None,
-        help="seconds of one simulator replay per shuffle (from a timed `portstudy replay`)",
-    )
-    parser.add_argument(
         "--project-sources",
         type=int,
         default=51,
@@ -289,7 +234,6 @@ def main(argv: list[str] | None = None) -> int:
         args.project_sources,
         args.seed,
         dt.date.today(),
-        replay_seconds=args.replay_seconds,
     )
     path = write_benchmark(table, Path(args.out_dir) if args.out_dir else None)
     shown = table.loc[:, ["strategy", "solves", "first_solve_s", "mean_solve_s"]]
@@ -300,27 +244,9 @@ def main(argv: list[str] | None = None) -> int:
         f"J7 seconds per week at {args.project_sources} sources: "
         f"{first['j7_projected_s_per_week']:.1f}"
     )
-    shuffled = [s for s in cfg.eval.shuffle.strategies if s in strategies]
-    by_strategy = json.loads(first["shuffle_hours_by_strategy"])
-    print(
-        f"shuffle CPU hours, solves only ({args.weeks} weeks x {first['n_shuffles']} shuffles x "
-        f"{int(first['shuffle_portfolios'])} portfolios of {', '.join(shuffled)} "
-        f"incl. their Q0s; DECISION(G6)): {first['shuffle_cpu_hours']:.1f}"
-    )
-    for s in shuffled:
-        print(f"  {s}: {by_strategy[s]:.1f} CPU hours")
-    if args.replay_seconds is None:
-        print("  replay time not included: pass --replay-seconds from a timed `portstudy replay`")
-    else:
-        print(
-            f"shuffle CPU hours with one {args.replay_seconds:.1f}s replay per shuffle: "
-            f"{first['shuffle_cpu_hours_with_replay']:.1f}"
-        )
-    if first["shuffle_cpu_hours_with_replay"] > ARCTIC_REQUEST_CPU_HOURS or (
-        first["shuffle_cpu_hours"] > ARCTIC_REQUEST_CPU_HOURS
-    ):
-        print(f"WARNING: projection exceeds the {ARCTIC_REQUEST_CPU_HOURS} CPU hour request")
-    print(f"peak memory: {first['peak_memory_mb']:.0f} MB; table written to {path}")
+    peak = first["peak_memory_mb"]
+    peak_text = f"{peak:.0f} MB" if np.isfinite(peak) else "n/a"
+    print(f"peak memory: {peak_text}; table written to {path}")
     return 0
 
 

@@ -1,6 +1,6 @@
 """Typed study configuration loaded from config/study.yaml and config/models.yaml.
 
-Unknown keys are an error. Every study decision from PLAN2.md section 0.3 is listed
+Unknown keys are an error. Every study decision from plans/PLAN2.md section 0.3 is listed
 under `decisions` with an id, a value, and a status of confirmed or provisional.
 """
 
@@ -252,20 +252,6 @@ class PipelineConfig(StrictModel):
     lock_margin_minutes: int = 30
 
 
-def _default_shuffle_strategies() -> list[StrategyName]:
-    return ["mvo", "robust", "topk"]
-
-
-class ShuffleConfig(StrictModel):
-    """DECISION(G6): shuffles run for these strategies (steered and Q0) only; PLAN3 0.1."""
-
-    n_shuffles: int = 500
-    seed: int = 99
-    processes: int = 1
-    shard_size: int = 25
-    strategies: list[StrategyName] = Field(default_factory=_default_shuffle_strategies)
-
-
 class H3bConfig(StrictModel):
     """DECISION(G3b): per source and week, stocks at or below the median width vs the rest."""
 
@@ -288,7 +274,6 @@ class EvalConfig(StrictModel):
     )
     min_group_size: int = 10
     h3b: H3bConfig = H3bConfig()
-    shuffle: ShuffleConfig = ShuffleConfig()
 
 
 class BackupConfig(StrictModel):
@@ -336,20 +321,6 @@ class StudyConfig(StrictModel):
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate decision ids")
         return value
-
-    @model_validator(mode="after")
-    def _validate_shuffle_strategies(self) -> StudyConfig:
-        """DECISION(G6): an explicit `eval.shuffle.strategies` entry must name enabled strategies;
-        the default (mvo, robust, topk) narrows to the enabled ones for reduced test configs."""
-        shuffle = self.eval.shuffle
-        if "strategies" not in shuffle.model_fields_set:
-            narrowed = [s for s in shuffle.strategies if s in self.strategies.enabled]
-            object.__setattr__(shuffle, "strategies", narrowed)  # models are frozen
-            return self
-        missing = [s for s in shuffle.strategies if s not in self.strategies.enabled]
-        if missing:
-            raise ValueError(f"eval.shuffle.strategies not in strategies.enabled: {missing}")
-        return self
 
     @model_validator(mode="after")
     def _validate_optimizer_and_topk(self) -> StudyConfig:

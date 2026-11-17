@@ -231,6 +231,5 @@ def test_eval_config_has_h3b_and_per_strategy_families(study_config: StudyConfig
     full = load_study_config(Path(__file__).resolve().parents[2] / "config" / "study.yaml")
     assert full.eval.holm_families["H2_portfolio_vs_q0"] == "per_strategy"
     assert full.eval.holm_families["H3b_width"] == "all_sources"
-    assert full.eval.holm_families["H5_shuffle"] == "per_strategy"
     with pytest.raises(ValueError):
         study_config.eval.h3b.model_copy(update={"split": "mean"}).model_validate({"split": "mean"})

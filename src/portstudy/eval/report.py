@@ -29,12 +29,6 @@ from portstudy.eval.hypotheses import (  # noqa: E402
     portfolio_metrics,
 )
 from portstudy.eval.rank_ic import long_table  # noqa: E402
-from portstudy.eval.shuffle import shuffle_test  # noqa: E402
-
-SHUFFLE_EXCLUDED_LINE = (
-    "No shuffled-ratings test for this strategy (excluded under DECISION(G6) for compute; "
-    "see the Q0 comparison and factor regression)."
-)
 from portstudy.io import write_csv_atomic, write_text_atomic  # noqa: E402
 from portstudy.paths import report_dir  # noqa: E402
 from portstudy.pipeline.context import RunContext  # noqa: E402
@@ -167,31 +161,7 @@ def _fig_h4_ranking(ranking: pd.DataFrame, folder: Path) -> None:
     plt.close(fig)
 
 
-def _fig_shuffle(dists: pd.DataFrame, table: pd.DataFrame, folder: Path) -> None:
-    if len(dists) == 0:
-        return
-    keys = list(table["portfolio"])
-    n = len(keys)
-    cols = 4
-    rows = (n + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(3 * cols, 2.4 * rows), squeeze=False)
-    for ax, key in zip(axes.flat, keys):
-        d = dists[dists["portfolio"] == key]["total_return"]
-        ax.hist(d, bins=20, color="lightgrey")
-        real = table.loc[table["portfolio"] == key, "real_total_return"].iloc[0]
-        ax.axvline(real, color="red")
-        ax.set_title(key, fontsize=7)
-        ax.tick_params(labelsize=6)
-    for ax in list(axes.flat)[n:]:
-        ax.axis("off")
-    fig.tight_layout()
-    fig.savefig(folder / "fig_shuffle_histograms.png", dpi=120)
-    plt.close(fig)
-
-
-def build_report(
-    data: EvalData, folder: Path, skip_shuffle: bool = False, n_shuffles: int | None = None
-) -> dict[str, Any]:
+def build_report(data: EvalData, folder: Path) -> dict[str, Any]:
     folder.mkdir(parents=True, exist_ok=True)
     tables: dict[str, pd.DataFrame] = {}
     tables["weekly_ic_long"] = long_table(data.ic)
@@ -210,14 +180,6 @@ def build_report(
     tables["earnings_exposure"] = earnings_exposure(data)
     factors, source = factor_table(data.daily_values, data.weeks, data.cfg.eval.fama_french_file)
     tables["h5_factors"] = factors
-    shuffle_table = pd.DataFrame()
-    dists = pd.DataFrame()
-    if not skip_shuffle:
-        shuffle_table, dists = shuffle_test(
-            data.cfg, data.portfolios, data.weeks, n_shuffles=n_shuffles
-        )
-        tables["h5_shuffle"] = shuffle_table
-        tables["h5_shuffle_distributions"] = dists
     for name, df in tables.items():
         _save(df, name, folder)
     _fig_ic_series(data, folder)
@@ -225,15 +187,12 @@ def build_report(
     _fig_equity(data, folder)
     _fig_h3b(tables["h3b_width"], folder)
     _fig_h4_ranking(tables["h4_strategy_ranking"], folder)
-    _fig_shuffle(dists, shuffle_table, folder)
-    md = _markdown(data, tables, source, skip_shuffle)
+    md = _markdown(data, tables, source)
     write_text_atomic(md, folder / "report.md")
     return {"folder": str(folder), "tables": sorted(tables), "factor_source": source}
 
 
-def _markdown(
-    data: EvalData, tables: dict[str, pd.DataFrame], factor_source: str, skip_shuffle: bool
-) -> str:
+def _markdown(data: EvalData, tables: dict[str, pd.DataFrame], factor_source: str) -> str:
     out: list[str] = ["# Evaluation report", ""]
     out.append(
         f"Weeks evaluated: {len(data.weeks)} ({data.weeks[0] if data.weeks else ''} to "
@@ -273,7 +232,7 @@ def _markdown(
         "Exploratory: no Holm correction."
     )
     out.append("")
-    out.extend(_strategy_sections(data, tables, skip_shuffle))
+    out.extend(_strategy_sections(data, tables))
     gap_cols = [
         "portfolio",
         "n_weeks",
@@ -393,26 +352,6 @@ def _markdown(
         out.append("Investment factor (CMA) unavailable from ETF proxies: reported as a gap.")
         out.append("")
     out.append(_md_table(tables["h5_factors"]))
-    out.append("## H5: shuffled-ratings test")
-    if skip_shuffle:
-        out.append("_skipped (run without --skip-shuffle)_")
-        out.append("")
-    else:
-        cols = [
-            "portfolio",
-            "n_shuffles",
-            "real_total_return",
-            "shuffle_mean_total_return",
-            "percentile_total_return",
-            "p_total_return",
-            "p_total_return_holm",
-            "significant_total_return",
-            "real_sharpe",
-            "p_sharpe_holm",
-        ]
-        out.append(
-            _md_table(tables["h5_shuffle"], [c for c in cols if c in tables["h5_shuffle"].columns])
-        )
     out.append("## Figures")
     for f in (
         "fig_weekly_ic.png",
@@ -422,7 +361,6 @@ def _markdown(
         *[f"fig_equity_{s}.png" for s in data.strategies()],
         "fig_h3b_width.png",
         "fig_h4_ranking.png",
-        "fig_shuffle_histograms.png",
     ):
         out.append(f"- {f}")
     out.append("")
@@ -468,9 +406,7 @@ def _header_lines(data: EvalData) -> list[str]:
     return lines
 
 
-def _strategy_sections(
-    data: EvalData, tables: dict[str, pd.DataFrame], skip_shuffle: bool
-) -> list[str]:
+def _strategy_sections(data: EvalData, tables: dict[str, pd.DataFrame]) -> list[str]:
     out: list[str] = []
     metric_cols = [
         "portfolio",
@@ -496,15 +432,6 @@ def _strategy_sections(
         "significant",
         "min_detectable_gap",
     ]
-    h5_cols = [
-        "portfolio",
-        "n_shuffles",
-        "real_total_return",
-        "shuffle_mean_total_return",
-        "p_total_return",
-        "p_total_return_holm",
-        "significant_total_return",
-    ]
     metrics = tables["portfolio_metrics_as_traded"]
     for strategy in data.strategies():
         keys = [data.q0_key(strategy), *data.steered_for(strategy), *data.controls]
@@ -526,26 +453,13 @@ def _strategy_sections(
             h2 = h2[h2["strategy"] == strategy]
         out.append("H2 return vs Q0 (clean weeks, Holm within this strategy):")
         out.append(_md_table(h2, [c for c in h2_cols if c in h2.columns]))
-        if strategy not in data.cfg.eval.shuffle.strategies:
-            out.append(SHUFFLE_EXCLUDED_LINE)
-        elif not skip_shuffle and "h5_shuffle" in tables:
-            h5 = tables["h5_shuffle"]
-            if len(h5) and "strategy" in h5.columns:
-                h5 = h5[h5["strategy"] == strategy]
-            out.append("H5 shuffled-ratings test (Holm within this strategy):")
-            out.append(_md_table(h5, [c for c in h5_cols if c in h5.columns]))
         out.append(f"Equity curve: `fig_equity_{strategy}.png`")
         out.append("")
     return out
 
 
-def run_eval(
-    ctx: RunContext,
-    skip_shuffle: bool = False,
-    n_shuffles: int | None = None,
-    folder: Path | None = None,
-) -> Path:
+def run_eval(ctx: RunContext, folder: Path | None = None) -> Path:
     data = load_eval_data(ctx.cfg, ctx.portfolio_keys())
     target = folder or report_dir()
-    build_report(data, target, skip_shuffle=skip_shuffle, n_shuffles=n_shuffles)
+    build_report(data, target)
     return target

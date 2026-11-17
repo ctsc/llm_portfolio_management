@@ -38,7 +38,6 @@ the job resumes it (every job is idempotent and resumable).
 
 ```
 portstudy run-job J4 --week 2026-W46
-portstudy run-job J4 --week 2026-W46 --gateway-fallback   # eligible models only
 portstudy run-job J7 --week 2026-W46 --force      # rerun even if done with the same inputs
 ```
 
@@ -52,10 +51,11 @@ portstudy run-job J7 --week 2026-W46 --force      # rerun even if done with the 
 | J1 snapshot (data provider down, a check with rule `halt`) | No snapshot. If still failing at the lock, J6 writes `no_rebalance`: every portfolio holds last week's positions, stops still run. | Check the provider status page and the key in `.env`; rerun J1. For a `halt` issue read `issues.csv` in the partial logs and decide whether the stock should be dropped (`data.checks` rules in `study.yaml`). |
 | J2 baseline (Kronos, covariance) | Same as J1: `no_rebalance` for all. | Rerun J2. If Kronos cannot load, set `baseline.forecaster: stub` for the week and log the change. |
 | J3 API submit (`CostCapExceeded`) | Batches not submitted. The API portfolios will trade their strategy's Q0 weights (`fallback_q0`). | Read the projected total in the log line. Either run `portstudy run-job J3 --week ... --allow-over-budget` (the week is logged as over budget, decision D3) or accept the fallback. |
-| J4 open-weight inference (crash or gateway unavailable) | Partial records are saved as calls complete. If not finished by the lock margin, those portfolios trade their strategy's Q0 (`fallback_q0`). | Rerun J4 to resume. To switch eligible sources, provision a fresh fallback endpoint file and use `--gateway-fallback`; gateway records are archived and the source restarts on the fallback. |
+| J4 open-weight inference (crash or gateway unavailable) | Partial records are saved as calls complete. A model that fails the pre-J4 health check is marked failed for the week (decision D2) and its portfolios trade their strategy's Q0 (`fallback_q0`). If a source is not finished by the lock margin, it does the same. | Check the GSU VPN and `ARCTIC_LITELLM_API_KEY`, then rerun J4 to resume from the cache. There is no fallback server; a model that stays down misses the week and that week is left out of its statistics. |
 | J5 API collect (`pending`) | Batches not back yet. `run_weekend.py` polls until the lock margin (Monday 8:30 am ET by default). | Wait, or rerun J5 later. After the margin J6 labels the batch failed and the portfolios trade their strategy's Q0. |
 | J6 validate (`runs still incomplete before the lock margin`) | Nothing written yet. | Finish J4 or J5 first, or wait for the margin. |
-| J6 marks `invalid_rate` failures | That rating source trades its strategy's Q0 weights for the week (decision N1). | Nothing to do for the week; investigate the model's raw answers in the jsonl records. If `invalid_truncated` dominates, raise `max_output_tokens` for that model in `llm.settings`. |
+| J6 says runs are incomplete although J4 finished | Until PLAN4 Phase 3 (decision N5) a gateway request that fails after its retries leaves no record, J4 still shows done, and J6 waits until the lock margin and then sends the source to Q0. | Rerun J4 with `--force` to retry the missing requests. After Phase 3 such a request is recorded as an invalid `provider_error` answer and J4 stays failed until every request has a record. |
+| J6 marks `invalid_rate` failures | That rating source trades its strategy's Q0 weights for the week (decision N1). | Nothing to do for the week; investigate the model's raw answers in the jsonl records. If `invalid_truncated` dominates, raise `max_output_tokens` for that model in `llm.settings`. This is expected for MiniMax M2.7 at the default 300 tokens: it always thinks, the thinking counts toward the limit, and the answer comes back empty with `finish_reason: length` (ARCTIC suggests about 2,000). |
 | J7 weights (`LockViolation`) | Weights not written because the clock is past Monday 9:00 am ET. | Too late for the week: the simulator holds positions (`no_rebalance`). Record what happened. Never backdate the clock. |
 | J7 `solver_failed` | The portfolio keeps last week's weights with the flag. | Check `sigma_matrix.csv` for a bad stock; rerun J7 with `--force` after fixing the data. |
 | J8 replay and score | Results lag. | Rerun J8 any time; it rebuilds every portfolio from the ledger and rescores every closed week. |
@@ -90,94 +90,57 @@ Use `config/study_test.yaml` for a small offline run; the test suite's shared `s
 fixture loads it too, so pytest exercises every strategy and control at test scale. Any change to a `decisions.*` value after
 the live start must be logged and versioned the same way (see `docs/open_questions.md`).
 
-## 7. Sizing the universe and the shuffle budget
+## 7. Sizing the universe
 
-`universe.size` (DECISION(B4)) is set between 100 and 300 after the ARCTIC allocation. Before
-freezing it, run the optimizer benchmark at the candidate size:
+`universe.size` (DECISION(B4)) is 300 if ARCTIC approves the full gateway request and 100 if it
+approves the smaller option. Before freezing it, run the optimizer benchmark at the candidate size:
 
 ```
 python scripts/benchmark_pipeline.py --n-stocks 300 --sources 3 --weeks 24
 ```
 
-It prints seconds per solve for every strategy and control, the weekly J7 time at the given and
-at the projected source count (`--project-sources`, default 51), peak memory, and the projected
-shuffle CPU hours for the G6 strategies only (`eval.shuffle.strategies`: MVO, Robust MVO, Top-K),
-per strategy and in total, warning only above 15,000 CPU hours. `--replay-seconds` adds a measured
-simulator replay time per shuffle-week to a second projection; without it the solve-only figure is
-printed and labeled as such. PLAN3 phase 2 measured 5.6 CPU hours at 100 stocks and 85.2 at 300
-(24 weeks, 51 sources, this VM); the full table is in `PROGRESS.md`. The same table
-is written to `data/benchmarks/<date>.csv`. `--jobs` times J1 to J9 once on the synthetic world
-instead. When the universe is built, the log shows `universe_thin_sector` for every sector that
-could not fill its quota and `universe_leftover_slots` for the slots filled by the highest-volume
-leftovers.
+It prints seconds per solve for every strategy and control, the weekly J7 time at the given and at
+the projected source count (`--project-sources`, default 51), and peak memory; the same table is
+written to `data/benchmarks/<date>.csv`. Desktop measurements from 2026-11-10 are in
+`docs/desktop_setup.md`. On native Windows peak memory prints `n/a` unless `psutil` is installed;
+the documented path is WSL2. `--jobs` times J1 to J9 once
+on the synthetic world instead. When the universe is built, the log shows `universe_thin_sector`
+for every sector that could not fill its quota and `universe_leftover_slots` for the slots filled
+by the highest-volume leftovers.
 
-## 8. Shuffle test as a Slurm array
+## 8. The desktop weekend
 
-```
-portstudy shuffle plan --out data/shuffle/shards.csv        # one row per shard
-portstudy shuffle run --shard-index $SLURM_ARRAY_TASK_ID --shards data/shuffle/shards.csv
-portstudy shuffle run-local --processes 8                   # same work on one machine
-portstudy shuffle collect                                   # fails listing missing shards
-```
-
-Only the G6 strategies are sharded: each of MVO, Robust MVO and Top-K contributes its Q0 and its
-steered portfolios; Mean-CVaR, Resampled MVO and the controls never appear in the plan. `plan`
-prints the estimated minutes per shard from the newest `data/benchmarks/*.csv` (slowest shuffled
-strategy, one solve per week per shuffle) and lowers the shard size in the plan when a shard would
-exceed `--max-shard-minutes` (120) without touching `eval.shuffle.shard_size`. Shards can run in
-any order and any number of times; a complete shard file is skipped and a half-written one (no
-`complete` marker) is rerun. `collect` writes `h5_shuffle.csv` and the distributions to the report
-folder with Holm applied within each strategy. Without the cluster, `run-local --processes N`
-runs the same shards on one machine and `collect` reads them the same way.
-
-## 9. The ARCTIC weekend
-
-Setup is in `docs/arctic_setup.md`; everything below assumes `scripts/arctic/arctic.env` is filled in.
-
-**Compute mode** (`ARCTIC_NETWORK_MODE=compute`, compute nodes reach the internet):
+Setup is in `docs/desktop_setup.md`; the per-weekend routine is `docs/weekend_checklist.md`.
 
 ```
-bash scripts/arctic/submit_weekend.sh   # kronos.sbatch (J1, J2) and llm.sbatch (J3, J4) at once; finish.sbatch afterany both
+python scripts/run_weekend.py                      # resumes where it stopped
+python scripts/run_weekend.py --from J7            # rerun from one job
 ```
 
-**Login mode** (`ARCTIC_NETWORK_MODE=login`, only the login node has network):
+`--gateway-fallback`, `--check-walltime` and `--poll-once` still exist in the code but belong to the
+retired ARCTIC Slurm layout; do not use them (PLAN4 Phase 2 removes them). A job that dies (sleep,
+restart, network) is rerun with the same command; every job resumes from its status files.
+
+**Backups.** J9 writes `data/backups/<week>_<timestamp>/` and a zip, and with `backup.rsync_target`
+set copies both with `rsync -a --partial`; a failed rsync is printed and logged, never raised.
+Restore as in section 5.
+
+## 9. After the last live week
 
 ```
-bash scripts/arctic/submit_weekend.sh   # J1 and J3 here, then kronos.sbatch (J2), llm.sbatch (J4), finish.sbatch afterany both
+portstudy eval            # report under data/outputs/report/
 ```
 
-Both print the job ids, the log paths under `logs/arctic/`, and the exact rerun command for each job.
-The finish job (1 core, `FINISH_WALLTIME` 03:00:00) runs J5 once with `--poll-once`; while API
-batches are pending it resubmits itself `POLL_INTERVAL_MINUTES` later (default 60) and exits, so
-no job sits idle; once collected it runs J6 to J9. Nothing polls a batch from the login shell.
-Every walltime must be at most 15 hours (`MAX_JOB_HOURS`, W1): `common.sh` refuses longer ones
-and `run_weekend.py --check-walltime` warns above 12 or when a walltime ends after the Monday
-09:00 ET lock. A job killed by its walltime is rerun from the job it was in, for example
-`python scripts/run_weekend.py --from J7` (every job resumes from its status files) or
-`sbatch ... scripts/arctic/finish.sbatch` again. Service-unit use per job:
-`sacct -j <jobid> --format=JobID,Elapsed,AllocCPUS,MaxRSS,State`; `squeue -u $USER` shows what is
-still queued, including a finish job waiting on `--begin`.
+The final evaluation (residual IC, active-return factor regressions on
+Kenneth French daily factors, Ledoit-Wolf Sharpe tests, pre-registered main comparisons) is
+specified in `plans/PLAN4.md` Phases 5 to 9 and `llm_research/05_evaluation_methodology.md`.
 
-**D2, gateway down.** Before J4 the pipeline sends one tiny prompt per gateway model. On a failure it
-prints these steps and continues with the affected sources marked failed (they trade their strategy's Q0):
+## Where to look (pending PLAN4 Phase 3A, decision N6)
 
-```
-sbatch scripts/arctic/llm_fallback.sbatch                       # serves the fallback-eligible models
-python scripts/run_weekend.py --from J4 --gateway-fallback      # eligible models move to the fallback endpoint
-```
+After Phase 3A every weekend run will leave: an event timeline `data/logs/runs/<run_id>.jsonl`
+(every job start, end, retry, fallback and resume), job logs `data/logs/<job>/<date>.jsonl` and
+library warnings `data/logs/libraries/<date>.jsonl` (all tagged with the `run_id`), status files
+with full tracebacks, `data/outputs/<week>/fallbacks.csv` (every degradation and its reason),
+`data/outputs/<week>/run_summary.md` (what happened and what needs attention), and the result of
+`portstudy audit --week <week>`. Until then, the job logs and status files are the record.
 
-The second command reruns J4 (the registry changed, so its inputs hash changed), J6, J7 and J9. Models
-that are not fallback-eligible stay failed for that week.
-
-**Backups.** J9 writes `data/backups/<week>_<timestamp>/` and a zip, and with `backup.rsync_target` set
-copies both with `rsync -a --partial`; a failed rsync is printed and logged, never raised. Restore as in
-section 5.
-
-**After the last week.**
-
-```
-portstudy shuffle plan --out data/shuffle/shards.csv
-sbatch --array=0-$(( $(wc -l < data/shuffle/shards.csv) - 2 ))%${SHUFFLE_MAX_PARALLEL} scripts/arctic/shuffle_array.sbatch
-portstudy shuffle collect                                       # fails loudly on missing shards
-portstudy eval                                                  # report under data/outputs/report/
-```

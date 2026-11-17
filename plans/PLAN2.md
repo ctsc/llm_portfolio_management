@@ -881,7 +881,7 @@ The project is complete only when every box below is checked. Each item names ho
 - [ ] **ETF proxies** (SPY, IWM, IWD, IWF, QUAL) present in the price data for every live week.
 
 ### 2. ARCTIC compute
-- [ ] ARCA allocation granted (requested: 2,500 GPU hours, 15,000 CPU hours, 200 GB for 12 months) and `arctic.env` filled in.
+- [ ] ARCA allocation granted (requested: 2,500 GPU hours, 1,500 CPU hours, 200 GB for 12 months) and `arctic.env` filled in.
 - [ ] VPN and gateway key work from where the weekend jobs run.
 - [ ] A GPU Slurm job runs Kronos over the full universe and writes `baseline.csv` with `k_sd`.
 - [ ] A CPU Slurm job runs J7 and J8 for every portfolio before the Monday lock.
