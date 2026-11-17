@@ -1,11 +1,13 @@
 """Time one Kronos baseline week on synthetic OHLCV and report GPU memory.
 
-Usage: python scripts/kronos_smoke.py --n-stocks 300 --device cuda
+Usage: python scripts/kronos_smoke.py --n-stocks 300 --device cuda [--batch-size 100]
+Exits 0 with a message when torch or CUDA is unavailable (unless --device cpu is passed).
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 
 import numpy as np
@@ -31,21 +33,31 @@ def synthetic_ohlcv(n_stocks: int, days: int, seed: int) -> dict[str, pd.DataFra
     return out
 
 
-def main() -> None:
+def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--n-stocks", type=int, default=300)
     p.add_argument("--n-samples", type=int, default=20)
-    p.add_argument("--device", default="cuda")
+    p.add_argument("--device", default="cuda", choices=["cuda", "cpu"])
+    p.add_argument("--batch-size", type=int, default=None)
     a = p.parse_args()
 
-    import torch
+    try:
+        import torch
+    except ImportError:
+        print("kronos smoke skipped: torch is not installed (install the ml extra)")
+        return 0
 
     print("torch", torch.__version__, "cuda available:", torch.cuda.is_available())
+    if a.device == "cuda" and not torch.cuda.is_available():
+        print("kronos smoke skipped: CUDA is not available (rerun with --device cpu)")
+        return 0
     if torch.cuda.is_available():
         print("gpu:", torch.cuda.get_device_name(0))
         torch.cuda.reset_peak_memory_stats()
 
     cfg = KronosConfig()
+    if a.batch_size is not None:
+        cfg = cfg.model_copy(update={"batch_size": a.batch_size})
     data = synthetic_ohlcv(a.n_stocks, cfg.context_candles + 10, seed=1)
     fc = KronosForecaster(cfg, device=a.device)
 
@@ -56,11 +68,19 @@ def main() -> None:
     t2 = time.perf_counter()
 
     print(f"load_s={t1 - t0:.1f}  forecast_s={t2 - t1:.1f}", end="  ")
-    print(f"stocks={a.n_stocks}  samples={a.n_samples}")
+    print(f"stocks={a.n_stocks}  samples={a.n_samples}  batch_size={cfg.batch_size}")
     print(f"rows={len(out)}  nan_k={int(out['k'].isna().sum())}")
+    for stats in fc.last_chunk_stats:
+        peak = stats["peak_gpu_mb"]
+        peak_text = f"{peak:.0f} MB" if isinstance(peak, float) else "n/a"
+        print(
+            f"chunk {stats['chunk_index'] + 1}/{stats['n_chunks']}: "
+            f"{stats['n_tickers']} tickers in {stats['seconds']:.1f}s, peak_gpu={peak_text}"
+        )
     if torch.cuda.is_available():
         print(f"peak_gpu_mem_gb={torch.cuda.max_memory_allocated() / 1e9:.2f}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

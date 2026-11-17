@@ -34,6 +34,7 @@ class MVResult:
     solver: str
     objective: float
     fallback_flag: str | None = None
+    solver_status: str = ""
 
 
 def _normalize_capped_weights(raw: np.ndarray, cap: float) -> np.ndarray:
@@ -98,7 +99,10 @@ def solve_mean_variance(
             raw = np.asarray(w.value, dtype=float)
             raw = _normalize_capped_weights(raw, cfg.max_weight)
             return MVResult(
-                pd.Series(raw, index=tickers, name="weight"), name, float(problem.value)
+                pd.Series(raw, index=tickers, name="weight"),
+                name,
+                float(problem.value),
+                solver_status=str(problem.status),
             )
         last_error = f"{name}: status {problem.status}"
     if previous is None:

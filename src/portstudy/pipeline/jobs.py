@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from portstudy import calendar as cal
-from portstudy.baseline.combine import build_baseline, read_baseline
+from portstudy.baseline.combine import build_baseline, read_baseline, read_baseline_meta
 from portstudy.config import repo_root
 from portstudy.data import ledger
 from portstudy.data.snapshot import make_snapshot, read_snapshot, snapshot_exists
@@ -136,7 +136,12 @@ def J2_baseline(ctx: RunContext, week_id: str) -> JobStatus:
         base = build_baseline(week_id, ctx.cfg, snap, logger=ctx.log("baseline"))
         risk = build_risk_model(week_id, ctx.cfg.risk, snap, tickers=list(base["ticker"]))
         build_prior(week_id, ctx.cfg.risk, risk, snap.reference)
-        return {"n_stocks": len(base), "alpha": risk.alpha}
+        meta = read_baseline_meta(week_id)
+        return {
+            "n_stocks": len(base),
+            "alpha": risk.alpha,
+            "kronos_fallback": bool(meta.get("kronos_fallback", False)),
+        }
 
     folder = week_output_dir(week_id)
     return run_job(
@@ -147,6 +152,7 @@ def J2_baseline(ctx: RunContext, week_id: str) -> JobStatus:
         force=ctx.force,
         outputs=lambda: [
             folder / "baseline.csv",
+            folder / "baseline_meta.json",
             folder / "prior.csv",
             folder / "sigma_matrix.csv",
         ],
@@ -203,7 +209,7 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
                 "n_cached": s.n_cached,
                 "n_invalid": s.n_invalid,
                 "n_provider_retries": s.n_provider_retries,
-                "n_dropped": s.n_dropped,
+                "n_provider_error": s.n_provider_error,
             }
             if s.aborted:  # review fix M2: authentication failure is model-wide
                 result["aborted"] = s.aborted
@@ -247,6 +253,20 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
             # Every other model has finished and kept its records; J4 fails so a rerun resumes the
             # crashed model from its cache (or J6 marks it by N1 at the lock margin).
             raise RuntimeError("open-weight worker crashed for " + "; ".join(crashed))
+        # N5: a finished model must have a record (valid, invalid or provider_error) for every
+        # planned request; anything left unrecorded fails J4 so a rerun resumes it. Aborted
+        # models (authentication, budget) write no records by design and were just marked failed.
+        aborted_models = {model for model in models if results[model].get("aborted")}
+        counter = _week_runner(ctx, week_id)
+        unrecorded = [
+            f"{model}: {counter.n_unrecorded(model)}"
+            for model in models
+            if model not in aborted_models and counter.n_unrecorded(model) > 0
+        ]
+        if unrecorded:
+            raise RuntimeError(
+                "open-weight run left requests without records: " + ", ".join(unrecorded)
+            )
         return out
 
     from portstudy.llm.health import unhealthy_models as _unhealthy
@@ -812,18 +832,23 @@ def current_week(now: dt.datetime) -> str:
 
     Review fixes M4 and M10: `now` is read in America/New_York (DST-aware), and the week rolls
     forward only at the cutoff day's close (16:00 ET, 13:00 on an early close), so a run started
-    on Friday before the close does not freeze a snapshot without Friday's bar. A naive `now` is
-    taken as ET.
+    on the cutoff day before the close does not freeze a snapshot without that day's bar; this
+    also holds when the cutoff is not a Friday (for example a Thursday before a Friday holiday).
+    A naive `now` is taken as ET.
     """
     local = now.astimezone(_ET) if now.tzinfo else now
     day = local.date()
-    friday = day - dt.timedelta(days=(day.weekday() - 4) % 7)
+    friday = day + dt.timedelta(days=(4 - day.weekday()) % 7)
     week = cal.week_id(friday)
-    cutoff = cal.cutoff_day(week)
-    close = dt.time(13, 0) if cal.is_early_close(cutoff) else dt.time(16, 0)
-    if day == cutoff and local.time() < close:
-        return cal.prev_week_id(week)
-    return week
+    while True:
+        cutoff = cal.cutoff_day(week)
+        if cutoff < day:
+            return week
+        if cutoff == day:
+            close = dt.time(13, 0) if cal.is_early_close(cutoff) else dt.time(16, 0)
+            if local.time() >= close:
+                return week
+        week = cal.prev_week_id(week)
 
 
 def read_weights_lock(week_id: str) -> dict[str, Any] | None:

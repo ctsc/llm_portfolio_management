@@ -22,6 +22,7 @@ timing:
 data:
   price_provider: alpaca          # alpaca | yfinance | synthetic
   news_provider: alpaca           # alpaca | synthetic
+  alpaca_feed: sip                # DECISION(G16): consolidated feed; if the free plan refuses it set price_provider: yfinance
   reference_provider: yfinance    # yfinance | synthetic
   rate_provider: fred             # fred | synthetic
   earnings_provider: finnhub      # finnhub | synthetic
@@ -61,6 +62,7 @@ synthetic:
 
 baseline:
   forecaster: stub                # stub | kronos
+  on_kronos_failure: momentum_only  # DECISION(K3): hold | momentum_only
   momentum_lookbacks:
     long: 252
     skip: 21
@@ -73,6 +75,8 @@ baseline:
     context_candles: 252
     horizon: 5
     n_samples: 20
+    batch_size: 100               # DECISION(K2): stocks per chunk; frozen with the config (chunking changes the sampled paths)
+    device: cuda                  # cuda | cpu
     temperature: 1.0
     top_p: 0.9
     seed: 7
@@ -108,7 +112,7 @@ llm:
     seed: 1234
     max_output_tokens: 300
     reasoning: none
-    send_seed: true                 # UNVERIFIED: confirm ARCTIC accepts seed
+    send_seed: true                 # passed through by the gateway (ARCTIC, 2026-11-12); outputs not guaranteed identical
     json_mode: true                 # UNVERIFIED: confirm ARCTIC accepts response_format
   settings: {}
   concurrency:
@@ -118,6 +122,7 @@ llm:
     stub-ow-b: 1
   gateway:
     base_url: https://litellm.rs.gsu.edu/v1  # ARCTIC LiteLLM gateway; GSU network or VPN required
+    features_frozen: false         # DECISION(G15): set true after the pilot; then a rejected seed or response_format is a failure
 
 views:
   tau: 0.05

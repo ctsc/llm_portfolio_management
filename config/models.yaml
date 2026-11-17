@@ -9,6 +9,7 @@ models:
     provider_model: google/gemma-4-31B-it
     enabled: true
     serving: gateway
+    settings: {max_output_tokens: 300, request_timeout_seconds: 180}
     price: {input_per_m: 0.0, cached_input_per_m: 0.0, output_per_m: 0.0, batch_discount: 0.0}
   - id: minimax-m2.7
     display_name: MiniMax M2.7
@@ -17,6 +18,9 @@ models:
     provider_model: MiniMaxAI/MiniMax-M2.7
     enabled: true
     serving: gateway
+    # MiniMax always thinks and its reasoning counts toward the limit; both values are
+    # starting points until measured with --time-gateway (DECISION(G15)).
+    settings: {max_output_tokens: 2000, request_timeout_seconds: 600}
     price: {input_per_m: 0.0, cached_input_per_m: 0.0, output_per_m: 0.0, batch_discount: 0.0}
   - id: claude-haiku-5.5
     display_name: Claude Haiku 5.5
@@ -30,6 +34,7 @@ models:
       cached_input_per_m: 0.10
       output_per_m: 5.00
       batch_discount: 0.50
+      confirmed: false  # set true when the real prices are entered (manualwork.md C2)
   - id: gpt-6-luna
     display_name: GPT-6 Luna
     kind: api
@@ -42,6 +47,7 @@ models:
       cached_input_per_m: 0.25
       output_per_m: 4.00
       batch_discount: 0.50
+      confirmed: false  # set true when the real prices are entered (manualwork.md C2)
 
 # Stub models used by tests and the synthetic run. They mirror the shape of the real registry.
 stub_models:
@@ -73,6 +79,7 @@ stub_models:
       cached_input_per_m: 0.10
       output_per_m: 5.00
       batch_discount: 0.50
+      confirmed: true
   - id: stub-api-b
     display_name: Stub API B
     kind: api
@@ -85,3 +92,4 @@ stub_models:
       cached_input_per_m: 0.25
       output_per_m: 4.00
       batch_discount: 0.50
+      confirmed: true

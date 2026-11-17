@@ -9,6 +9,7 @@ import abc
 import gc
 import hashlib
 import logging
+import time
 from collections.abc import Mapping
 
 import numpy as np
@@ -36,6 +37,13 @@ class ForecastProvider(abc.ABC):
 def _ticker_seed(seed: int, ticker: str) -> int:
     digest = hashlib.sha256(f"{seed}:{ticker}".encode()).digest()
     return int.from_bytes(digest[:8], "little")
+
+
+def chunk_seed(seed: int, sample_index: int, chunk_index: int) -> int:
+    """Per-(sample, chunk) seed for DECISION(K2) batching, small enough for both
+    `torch.manual_seed` and `np.random.seed`."""
+    digest = hashlib.sha256(f"{seed}:{sample_index}:{chunk_index}".encode()).digest()
+    return int.from_bytes(digest[:4], "little")
 
 
 class StubForecaster(ForecastProvider):
@@ -83,6 +91,10 @@ class StubForecaster(ForecastProvider):
 class KronosForecaster(ForecastProvider):
     """Wrapper over the vendored Kronos code (vendor/kronos) and Hugging Face weights.
 
+    DECISION(K2): tickers are forecast in chunks of `cfg.batch_size`; chunking changes the
+    sampled paths of the real model, so `batch_size` is frozen with the config and the batched
+    result is not claimed to equal an unbatched run.
+
     # UNVERIFIED: needs real smoke test (v2 phase 15). The vendored API surface
     # (KronosTokenizer, Kronos, KronosPredictor, predict_batch) is taken from the
     # shiyu-coder/Kronos README and must be confirmed against the pinned commit.
@@ -95,6 +107,7 @@ class KronosForecaster(ForecastProvider):
         self.cfg = cfg
         self.device = device
         self._predictor: object | None = None
+        self.last_chunk_stats: list[dict[str, object]] = []
 
     def _load(self) -> object:
         if self._predictor is not None:
@@ -186,74 +199,81 @@ class KronosForecaster(ForecastProvider):
             pd.Series(pd.bdate_range(x.iloc[-1], periods=horizon + 1)[1:]) for x in x_stamps
         ]
         paths_by_ticker: dict[str, list[pd.DataFrame]] = {ticker: [] for ticker in tickers}
+        batch = self.cfg.batch_size
+        n_chunks = -(-len(tickers) // batch)
+        self.last_chunk_stats = []
         try:
             # UNVERIFIED: the pinned predictor may expose individual paths through this adapter.
             path_method = getattr(predictor, "predict_paths", None)
-            if callable(path_method):
-                self.logger.info(
-                    "kronos_sampling_path",
-                    extra={
-                        "extra_fields": {
-                            "sampling_path": "per_path_samples",
-                            "n_samples": n_samples,
-                            "verification": "UNVERIFIED",
-                        }
-                    },
-                )
-                torch.manual_seed(seed)
-                np.random.seed(seed)
-                for ticker, frame, x_stamp, y_stamp in zip(tickers, frames, x_stamps, y_stamps):
-                    sample_paths = path_method(
-                        frame,
-                        x_stamp,
-                        y_stamp,
-                        pred_len=horizon,
-                        T=self.cfg.temperature,
-                        top_p=self.cfg.top_p,
-                        sample_count=n_samples,
-                        verbose=False,
-                    )
-                    if not isinstance(sample_paths, (list, tuple)) or not all(
-                        isinstance(path, pd.DataFrame) for path in sample_paths
+            self.logger.info(
+                "kronos_sampling_path",
+                extra={
+                    "extra_fields": {
+                        "sampling_path": (
+                            "per_path_samples"
+                            if callable(path_method)
+                            else "repeated_single_sample"
+                        ),
+                        "n_samples": n_samples,
+                        "verification": "UNVERIFIED",
+                    }
+                },
+            )
+            for chunk_index, start in enumerate(range(0, len(tickers), batch)):
+                chunk = tickers[start : start + batch]
+                cuda = torch.cuda.is_available()
+                if cuda:
+                    torch.cuda.reset_peak_memory_stats()
+                t0 = time.perf_counter()
+                chunk_frames = frames[start : start + batch]
+                chunk_x = x_stamps[start : start + batch]
+                chunk_y = y_stamps[start : start + batch]
+                if callable(path_method):
+                    chunk_rng = chunk_seed(seed, 0, chunk_index)
+                    torch.manual_seed(chunk_rng)
+                    np.random.seed(chunk_rng)
+                    for ticker, frame, x_stamp, y_stamp in zip(
+                        chunk, chunk_frames, chunk_x, chunk_y
                     ):
-                        raise TypeError("Kronos predict_paths must return a sequence of DataFrames")
-                    paths_by_ticker[ticker].extend(sample_paths)
-            else:
-                self.logger.info(
-                    "kronos_sampling_path",
-                    extra={
-                        "extra_fields": {
-                            "sampling_path": "repeated_single_sample",
-                            "n_samples": n_samples,
-                            "verification": "UNVERIFIED",
-                        }
-                    },
-                )
-                for sample_index in range(n_samples):
-                    sample_seed = seed + sample_index
-                    if hasattr(predictor, "predict_batch"):
-                        torch.manual_seed(sample_seed)
-                        np.random.seed(sample_seed)
-                        predictions = predictor.predict_batch(  # type: ignore[attr-defined]
-                            frames,
-                            x_stamps,
-                            y_stamps,
+                        sample_paths = path_method(
+                            frame,
+                            x_stamp,
+                            y_stamp,
                             pred_len=horizon,
                             T=self.cfg.temperature,
                             top_p=self.cfg.top_p,
-                            sample_count=1,
+                            sample_count=n_samples,
                             verbose=False,
                         )
-                        if len(predictions) != len(tickers):
-                            raise ValueError(
-                                "Kronos predict_batch returned an unexpected ticker count"
+                        if not isinstance(sample_paths, (list, tuple)) or not all(
+                            isinstance(path, pd.DataFrame) for path in sample_paths
+                        ):
+                            raise TypeError(
+                                "Kronos predict_paths must return a sequence of DataFrames"
                             )
-                    else:
-                        predictions = []
-                        for frame, x_stamp, y_stamp in zip(frames, x_stamps, y_stamps):
-                            torch.manual_seed(sample_seed)
-                            np.random.seed(sample_seed)
-                            predictions.append(
+                        paths_by_ticker[ticker].extend(sample_paths)
+                else:
+                    for sample_index in range(n_samples):
+                        chunk_rng = chunk_seed(seed, sample_index, chunk_index)
+                        torch.manual_seed(chunk_rng)
+                        np.random.seed(chunk_rng)
+                        if hasattr(predictor, "predict_batch"):
+                            predictions = predictor.predict_batch(  # type: ignore[attr-defined]
+                                chunk_frames,
+                                chunk_x,
+                                chunk_y,
+                                pred_len=horizon,
+                                T=self.cfg.temperature,
+                                top_p=self.cfg.top_p,
+                                sample_count=1,
+                                verbose=False,
+                            )
+                            if len(predictions) != len(chunk):
+                                raise ValueError(
+                                    "Kronos predict_batch returned an unexpected ticker count"
+                                )
+                        else:
+                            predictions = [
                                 predictor.predict(  # type: ignore[attr-defined]
                                     frame,
                                     x_stamp,
@@ -264,9 +284,21 @@ class KronosForecaster(ForecastProvider):
                                     sample_count=1,
                                     verbose=False,
                                 )
-                            )
-                    for ticker, prediction in zip(tickers, predictions):
-                        paths_by_ticker[ticker].append(prediction)
+                                for frame, x_stamp, y_stamp in zip(chunk_frames, chunk_x, chunk_y)
+                            ]
+                        for ticker, prediction in zip(chunk, predictions):
+                            paths_by_ticker[ticker].append(prediction)
+                stats: dict[str, object] = {
+                    "chunk_index": chunk_index,
+                    "n_chunks": n_chunks,
+                    "n_tickers": len(chunk),
+                    "seconds": time.perf_counter() - t0,
+                    "peak_gpu_mb": (torch.cuda.max_memory_allocated() / 1024**2 if cuda else None),
+                }
+                self.last_chunk_stats.append(stats)
+                self.logger.info("kronos_chunk", extra={"extra_fields": dict(stats)})
+                if cuda:
+                    torch.cuda.empty_cache()
             out: dict[str, tuple[float, float]] = {}
             for ticker, frame in zip(tickers, frames):
                 last_close = float(frame["close"].iloc[-1])
@@ -286,4 +318,4 @@ def make_forecaster(cfg: BaselineConfig) -> ForecastProvider:
     """Provider chosen by config `baseline.forecaster: stub | kronos`."""
     if cfg.forecaster == "stub":
         return StubForecaster()
-    return KronosForecaster(cfg.kronos)
+    return KronosForecaster(cfg.kronos, device=cfg.kronos.device)

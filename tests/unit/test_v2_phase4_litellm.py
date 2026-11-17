@@ -256,10 +256,14 @@ def test_429_storm_leaves_open_weight_calls_for_j6(
     )
     assessed = runner.assess_run("stub-ow-a", "bare", now=cutoff, deadline=cutoff)
 
-    # Review fix M1: the task is queued again twice after the provider's own three attempts.
+    # Review fix M1: the task is queued again twice after the provider's own three attempts,
+    # then becomes a provider_error record so the source completes (N5).
     assert calls == 9
-    assert summary.n_calls == 3 and summary.n_provider_retries == 2 and summary.n_dropped == 1
-    assert read_run_status("2026-W15")["stub-ow-a__bare"].n_done == 0
+    assert (
+        summary.n_calls == 3 and summary.n_provider_retries == 2 and summary.n_provider_error == 1
+    )
+    assert read_run_status("2026-W15")["stub-ow-a__bare"].n_done == 1
+    # The provider_error record counts as invalid, so the source fails the 15% rule.
     assert assessed.state == "failed"
 
 

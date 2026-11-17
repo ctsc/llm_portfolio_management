@@ -58,7 +58,7 @@ def build_real_providers(cfg: StudyConfig, fixture_mode: bool = False) -> Provid
     rates = FredRateProvider(http(limits.fred_per_minute))
 
     if d.price_provider == "alpaca":
-        prices = AlpacaPriceProvider(http(limits.alpaca_per_minute))
+        prices = AlpacaPriceProvider(http(limits.alpaca_per_minute), feed=d.alpaca_feed)
     elif d.price_provider == "yfinance":
         fetch = FixtureFetch(repo_root() / d.fixture_dir) if fixture_mode else None
         prices = YFinancePriceProvider(fetch.history) if fetch else YFinancePriceProvider()  # type: ignore[assignment]

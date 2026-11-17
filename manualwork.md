@@ -56,9 +56,14 @@ and the GitLab items already done.
    from the wiki's "Get access" section (full detail in
    `llm_research/09_arctic_process_and_model_facts.md` section G):
    - On the GSU network or VPN, sign in once at https://litellm.rs.gsu.edu/ui with your campus ID.
-   - Status 2026-11-17: signed in, but the Virtual Keys page shows no "Create New Key" button, so
-     you are not on the project's team yet; email Andalib to add you to the team (the email also
-     asks whether a user key can read `/v1/model/info` and who sets per-key limits).
+   - Status 2026-11-17: signed in, but no "Create New Key" button. Andalib's answer: Parag must
+     create the project in LiteLLM and add you, and you still open a Hydra ticket requesting
+     LiteLLM access. Steps: (a) ask Parag to sign in at https://litellm.rs.gsu.edu/ui, create the
+     project and add you; (b) reset your GSU password, then sign in to Hydra; (c) open the Hydra
+     ticket (project name, both model IDs, LiteLLM access, the team question).
+   - The starting gateway limit is about $10, raised on request. After the timing run, read the
+     dollar cost per request from `gateway_timing.csv` and ask Andalib to raise the limit before
+     the pilot if the projected study spend is above it (PLAN4 N7).
    - When they confirm, create keys at https://litellm.rs.gsu.edu/ui, Virtual Keys, "+ Create New
      Key", Team = the project. Make two: `portstudy-weekend` (the weekly run) and `portstudy-dev`
      (timing runs and tests), so either can be replaced alone. Each is shown once: save it in your
@@ -66,7 +71,8 @@ and the GitLab items already done.
    - Store the weekend key as `ARCTIC_LITELLM_API_KEY` in `~/.env` inside WSL (mode 600, never
      committed, never pasted into chats or files), and check access with
      `curl -sS https://litellm.rs.gsu.edu/health/liveliness` on the VPN.
-   - Ask Andalib what limits the key has (rate, concurrency, tokens), if the key page does not say.
+   - Rate, concurrency and per-call token limits were not stated; the timing run shows the
+     `x-ratelimit-*` headers if the gateway sends them.
 7. Done 2026-11-16: ARCTIC granted the default startup allocation (1,000 GPU and 10,000 CPU service
    units), so the study uses 100 stocks (B4); `universe.size` is already 100. After the timing run,
    replace `arctic.gpu_seconds_per_request` with the measured values (N7). Every month during the
@@ -97,7 +103,8 @@ and the GitLab items already done.
    (confirm Alpaca's free plan includes news and full daily bars from the consolidated SIP feed for
    the study dates; the code used to request the single-exchange IEX feed. If SIP is refused,
    set `data.price_provider: yfinance`). Keys go in `~/.env` only.
-2. Enter real API prices in `config/models.yaml`, test the real prompts on a few stocks per model,
+2. Enter real API prices in `config/models.yaml` and set `confirmed: true` on each (the preflight
+   refuses a live run while a price is unconfirmed), test the real prompts on a few stocks per model,
    run `scripts/estimate_cost.py`, and set the budget (D3). Keep both API models (Claude Haiku 5.5
    and GPT-6 Luna) if the estimate fits the 50 USD goal; if not, drop the more expensive one and
    record it in PROGRESS.

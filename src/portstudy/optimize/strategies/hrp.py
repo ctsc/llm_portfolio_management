@@ -71,7 +71,7 @@ def run(inputs: StrategyInputs, cfg: StudyConfig) -> StrategyResult:
     check_weights(capped, cfg.optimizer)
     return StrategyResult(
         capped,
-        "single_linkage",
+        f"{cfg.strategies.hrp.linkage}_linkage",
         float("nan"),
         diagnostics={
             "linkage_order": [tickers[i] for i in order],

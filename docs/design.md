@@ -59,8 +59,10 @@ open (`window_end_date`). Every table that holds returns stores all three column
 ## Snapshot (`data/snapshot.py`)
 
 Prices for at least 300 trading days back to the cutoff, news in `(previous cutoff, cutoff]`
-(7 calendar days for the first snapshot), reference data, rates, ETF prices. Alpaca bars currently use the IEX feed (one small exchange); PLAN4 Phase 3 (G16)
-switches to the consolidated SIP feed, with yfinance as the fallback. News published
+(7 calendar days for the first snapshot), reference data, rates, ETF prices. Alpaca bars use the consolidated SIP feed (`data.alpaca_feed`, G16), with yfinance as the fallback
+provider. The company name and GICS sector in `reference.csv` come from the frozen universe file,
+not from the weekly reference call (C8); that call supplies market caps and earnings dates only,
+and a missing cap is carried from the most recent earlier snapshot (`market_cap_carried`). News published
 after 16:00 ET on the cutoff day is dropped strictly, near-duplicates are removed, and each
 stock's text is capped at the token budget (newest first). The checks in `data/checks.py` map
 each issue code to `skip_stock`, `forward_fill`, or `halt`. The folder is immutable

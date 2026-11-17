@@ -136,6 +136,16 @@ Follow-ups from Andalib (2026-11-12 to 2026-11-16):
 | Model versions | The gateway returns no model version or `system_fingerprint`; `/v1/models` lists names only. Each response has the `model` field, an `x-litellm-model-id` header (the gateway's deployment ID; may change when a model is reconfigured, but will not catch every change) and an `x-litellm-version` header (gateway software version). `/v1/model/info` has an `updated_at` per model that changes when gateway settings are edited, not when the model server behind it changes, and also for changes that do not affect outputs, such as pricing. He still recommends the canaries. |
 | VPN | GSU IT help desk: help@gsu.edu or 404-413-HELP (4357). |
 
+Andalib, 2026-11-17 (summary in the gitignored `llm_research/correspondence/andalib_reply_2026-11-17.md`):
+
+| Topic | Answer |
+|---|---|
+| Hydra | Still needed: after the Elpis allocation, open a Hydra ticket requesting LiteLLM access and mention the project team. This replaces the 2026-11-12 "no Hydra ticket" note, which applied to the allocation request only. He suggested resetting the GSU password to fix the Hydra login. |
+| LiteLLM project | The PI (Parag) creates the project in LiteLLM, then adds Carter to it. Without it there is no team to create keys under, which is why the "Create New Key" button is missing. |
+| Spending limit | Probably $10 to start, raised if it is hit. This is the gateway's own dollar budget, separate from the 1,000 GPU service units in Elpis. What one request costs in gateway dollars is unknown until the first responses (`x-litellm-response-cost`). |
+| VPN | Required to call the models, not only for the UI. |
+| Other limits | Rate, per-call token and concurrency limits were not stated. |
+
 Allocation granted (2026-11-16): the default startup allocation for GSU users, 1,000 GPU service
 units and 10,000 CPU service units, metered as GPU and CPU usage. Carter has the allocation's Slurm
 account name and value (kept in his own records, not here). Startup allocation rules from the policy
@@ -157,9 +167,9 @@ send the key through 1Password" process):
 2. Be on an approved ARCTIC project in Elpis (done).
 3. Sign in once at https://litellm.rs.gsu.edu/ui with the GSU campus ID and password so the account
    exists.
-4. Open a Hydra ticket naming the project and the models; ARCTIC staff add the user to the project
-   on the service and reply. Once per project. (Carter's Hydra login failed on 2026-11-12; if it
-   still fails, ask Andalib by email instead.)
+4. Parag creates the project in the LiteLLM UI and adds Carter (Andalib, 2026-11-17). Open a Hydra
+   ticket requesting LiteLLM access, naming the project and the models; ARCTIC staff confirm. Once
+   per project. (Carter's Hydra login fails; reset the GSU password first.)
 5. Create the key: sign in at https://litellm.rs.gsu.edu/ui, Virtual Keys, "+ Create New Key",
    Team = the project, a descriptive name, Models left empty (all project models) or only the ones
    needed, "Create Key", and copy it at once (shown only once) into a password manager.

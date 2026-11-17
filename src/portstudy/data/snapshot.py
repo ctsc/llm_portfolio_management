@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -27,7 +30,7 @@ from portstudy.data.checks import (
     issues_frame,
     tickers_to_skip,
 )
-from portstudy.data.providers.base import ProviderBundle
+from portstudy.data.providers.base import REFERENCE_COLUMNS, ProviderBundle
 from portstudy.hashing import sha256_file
 from portstudy.io import read_csv, read_json, write_csv_atomic, write_json_atomic
 from portstudy.logging_setup import now_et
@@ -65,6 +68,113 @@ def estimate_tokens(text: str) -> int:
 
 def _normalize_headline(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(text).lower()).strip()
+
+
+def _valid_cap(value: Any) -> bool:
+    try:
+        cap = float(value)
+    except (TypeError, ValueError):
+        return False
+    return cap > 0 and not math.isnan(cap)
+
+
+def carry_market_caps(
+    reference: pd.DataFrame,
+    earlier: Callable[[str], float | None],
+    earlier_week: Callable[[str], str | None] | None = None,
+) -> tuple[pd.DataFrame, list[Issue]]:
+    """Fill missing market caps from the most recent earlier snapshot (DECISION(C8)).
+
+    `earlier(ticker)` returns that ticker's most recent earlier cap or None; `earlier_week`
+    (optional) names the snapshot it came from. Carried and missing caps are issues, never
+    skipped stocks; more than 10% degraded adds a summary warning."""
+    ref = reference.copy()
+    issues: list[Issue] = []
+    carried = missing = 0
+    for idx, row in ref.iterrows():
+        cap = row.get("market_cap")
+        if _valid_cap(cap):
+            continue
+        tk = str(row["ticker"])
+        prev = earlier(tk)
+        if prev is not None:
+            ref.at[idx, "market_cap"] = prev
+            carried += 1
+            details = {}
+            if earlier_week is not None:
+                details["from_week"] = earlier_week(tk) or ""
+            issues.append(
+                Issue(
+                    "info",
+                    tk,
+                    "market_cap_carried",
+                    "market cap carried from the most recent earlier snapshot",
+                    "carry",
+                    details,
+                )
+            )
+        else:
+            missing += 1
+            issues.append(
+                Issue(
+                    "warning",
+                    tk,
+                    "market_cap_missing",
+                    "no earlier snapshot has a market cap for this ticker",
+                    "carry",
+                )
+            )
+    if len(ref) and (carried + missing) > 0.10 * len(ref):
+        issues.append(
+            Issue(
+                "warning",
+                "*",
+                "market_caps_degraded",
+                f"market caps degraded: {carried} carried, {missing} missing of {len(ref)}",
+                "carry",
+            )
+        )
+    return ref, issues
+
+
+def _earlier_cap_lookup(
+    week_id: str,
+) -> tuple[Callable[[str], float | None], Callable[[str], str | None]]:
+    """Walk back up to 60 weeks (latest snapshot version per week) for a ticker's cap."""
+    snapshots: list[tuple[str, pd.Series]] | None = None
+
+    def load() -> list[tuple[str, pd.Series]]:
+        out: list[tuple[str, pd.Series]] = []
+        w = week_id
+        for _ in range(60):
+            w = cal.prev_week_id(w)
+            versions = _existing_versions(w)
+            if versions:
+                df = read_csv(snapshot_dir(w, versions[-1]) / "reference.csv")
+                if {"ticker", "market_cap"} <= set(df.columns):
+                    out.append((w, df.set_index(df["ticker"].astype(str))["market_cap"]))
+        return out
+
+    def find(ticker: str) -> tuple[float, str] | None:
+        nonlocal snapshots
+        if snapshots is None:
+            snapshots = load()
+        for w, caps in snapshots:
+            if ticker in caps.index:
+                value = caps[ticker]
+                if _valid_cap(value):
+                    return float(value), w
+        return None
+
+    def cap(ticker: str) -> float | None:
+        found = find(ticker)
+        return found[0] if found else None
+
+    def wk(ticker: str) -> str | None:
+        found = find(ticker)
+        return found[1] if found else None
+
+    return cap, wk
 
 
 def _existing_versions(week_id: str) -> list[int]:
@@ -146,13 +256,50 @@ def make_snapshot(
     news = _dedupe_news(news)
     news_text = _build_news_text(news, tickers, cfg)
 
-    # Reference data, rates, earnings flag.
-    reference = providers.reference.get_reference(tickers, cutoff)
-    reference = reference.set_index("ticker").reindex(tickers).reset_index()
+    # DECISION(C8): name and sector come from the frozen universe file for every ticker; the
+    # reference provider is used only for market_cap and next_earnings_date.
+    uni = universe.copy()
+    uni["ticker"] = uni["ticker"].astype(str)
+    uni = uni.set_index("ticker")
+    universe_issues: list[Issue] = []
+    for tk in tickers:
+        name = uni.at[tk, "name"] if tk in uni.index and "name" in uni.columns else None
+        sector = uni.at[tk, "sector"] if tk in uni.index and "sector" in uni.columns else None
+        if not (isinstance(name, str) and name.strip()) or not (
+            isinstance(sector, str) and sector.strip()
+        ):
+            universe_issues.append(
+                Issue(
+                    "error",
+                    tk,
+                    "universe_missing_field",
+                    "universe file has no name or sector for this ticker",
+                    "halt",
+                )
+            )
+    try:
+        fetched = providers.reference.get_reference(tickers, cutoff)
+    except Exception:
+        log.exception("reference_call_failed", extra={"extra_fields": {"week_id": week_id}})
+        fetched = pd.DataFrame(columns=REFERENCE_COLUMNS)
+    reference = fetched.set_index("ticker").reindex(tickers).reset_index()
+    for col in REFERENCE_COLUMNS:
+        if col not in reference.columns:
+            reference[col] = pd.NA
+    names = uni["name"] if "name" in uni.columns else pd.Series(dtype=object)
+    sectors = uni["sector"] if "sector" in uni.columns else pd.Series(dtype=object)
+    reference["name"] = reference["ticker"].map(names)
+    reference["sector"] = reference["ticker"].map(sectors)
     nxt = pd.to_datetime(reference["next_earnings_date"], errors="coerce").dt.date
     reference["earnings_in_window"] = [
         bool(d is not None and not pd.isna(d) and trade_date <= d < window_end) for d in nxt
     ]
+    earlier_cap, earlier_cap_week = _earlier_cap_lookup(week_id)
+    reference, cap_issues = carry_market_caps(reference, earlier_cap, earlier_cap_week)
+    # J2 still fails when every cap is missing and no earlier snapshot exists (risk/prior.py
+    # raises on a zero market-cap sum); the carry only smooths over single-week outages.
+    n_cap_carried = sum(1 for i in cap_issues if i.code == "market_cap_carried")
+    n_cap_missing = sum(1 for i in cap_issues if i.code == "market_cap_missing")
     rates = providers.rates.get_rates(start, cutoff)
 
     # Checks and rules.
@@ -163,7 +310,7 @@ def make_snapshot(
         actions,
         min_history_days=cfg.universe.min_history_days,
     )
-    issues: list[Issue] = price_issues + news_issues
+    issues: list[Issue] = price_issues + news_issues + universe_issues + cap_issues
     for issue in issues:
         log.log(
             logging.WARNING if issue.severity != "info" else logging.INFO,
@@ -231,6 +378,8 @@ def make_snapshot(
         "retrieved_at": now_et().isoformat(),
         "n_tickers": len(tickers),
         "n_included": int(universe_out["included"].sum()),
+        "n_market_cap_carried": n_cap_carried,
+        "n_market_cap_missing": n_cap_missing,
         "skipped": sorted(skipped),
         "files": {name: sha256_file(folder / name) for name in SNAPSHOT_FILES},
     }

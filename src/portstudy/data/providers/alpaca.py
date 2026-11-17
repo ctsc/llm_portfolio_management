@@ -8,7 +8,9 @@ Keys: ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -23,6 +25,7 @@ from portstudy.data.providers.base import (
 from portstudy.data.providers.http import HttpClient, env_key
 
 DATA_URL = "https://data.alpaca.markets"
+ET = ZoneInfo("America/New_York")
 
 
 def _headers(key_id: str | None, secret: str | None) -> dict[str, str]:
@@ -47,13 +50,27 @@ class AlpacaPriceProvider(PriceProvider):
         http: HttpClient,
         key_id: str | None = None,
         secret: str | None = None,
-        feed: str = "iex",
+        feed: str = "sip",
         symbols_per_call: int = 100,
+        clock: Callable[[], dt.datetime] | None = None,
     ) -> None:
         self.http = http
         self.headers = _headers(key_id, secret)
         self.feed = feed
         self.symbols_per_call = symbols_per_call
+        self.clock = clock or (lambda: dt.datetime.now(dt.UTC))
+
+    def _end_param(self, end: dt.date) -> str:
+        # UNVERIFIED: free-plan recency rule and end-timestamp handling. Alpaca's free plan
+        # refuses queries that include the most recent 15 minutes of SIP data, so `end` is sent
+        # as an RFC 3339 timestamp (the day at 23:59:59 ET) but never later than 16 minutes
+        # before now.
+        end_dt = dt.datetime.combine(end, dt.time(23, 59, 59), tzinfo=ET)
+        now = self.clock()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt.UTC)
+        latest = now.astimezone(dt.UTC) - dt.timedelta(minutes=16)
+        return min(end_dt, latest.astimezone(ET)).isoformat()
 
     def _bars(
         self, tickers: list[str], start: dt.date, end: dt.date, adjustment: str
@@ -66,7 +83,7 @@ class AlpacaPriceProvider(PriceProvider):
                     "symbols": ",".join(chunk),
                     "timeframe": "1Day",
                     "start": start.isoformat(),
-                    "end": end.isoformat(),
+                    "end": self._end_param(end),
                     "adjustment": adjustment,
                     "feed": self.feed,
                     "limit": 10000,

@@ -143,7 +143,7 @@ No failure is silent and every fallback is labeled in the data.
 
 | Work | Where | Measured or estimated time per weekend (300 / 100 stocks) |
 |---|---|---|
-| J2 Kronos | desktop GPU (RTX 3050, 6 GB) | 56 min / 3 min measured 2026-11-10 (300 stocks likely slowed by GPU memory spill; about 10 min expected with chunking, PLAN4 Phase 3) |
+| J2 Kronos | desktop GPU (RTX 3050, 6 GB) | 56 min / 3 min measured 2026-11-10 (300 stocks likely slowed by GPU memory spill; about 10 min expected with chunking, `baseline.kronos.batch_size`; to be measured on the desktop) |
 | J4 gateway ratings, 2 models | ARCTIC LiteLLM gateway | about 4 to 9 h / proportionally less (estimate: 30 to 60 s per request, 4 at a time per model; MiniMax reasoning could add to it; to be measured, `manualwork.md` E) |
 | J3 / J5 API models | Anthropic and OpenAI batch endpoints | providers allow up to 24 h; usually back during J4 |
 | J7 all strategies | desktop CPU (Ryzen 5 8400F) | about 63 min at 28 sources (estimated from the measured per-source slope), 112 min at 51 / 20 min at 51 |
@@ -248,7 +248,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs lint, unit tests and the reposi
 ## Project status
 
 - **Built and tested.** v1, v2 phases 1 to 14, the review fixes from `plans/results.md`, and PLAN3 phases 1 to 6, each recorded in `plans/PROGRESS.md`.
-- **In progress: `plans/PLAN4.md` Phases 1 to 11** (Phases 1 and 2 are done: the retired G6 test, the ARCTIC job scripts, the fallback server path and the small-model entries are removed; see `plans/PROGRESS.md`). Still to build: desktop runtime (Kronos chunking, live-readiness checks, lock file), the new evaluation and report, docs recheck, and end-to-end verification.
+- **In progress: `plans/PLAN4.md` Phases 1 to 11** (Phases 1 to 3 are done; Phase 3 added Kronos chunking, the gateway output and error handling, the consolidated price feed and the live-readiness preflight. Phases 1 and 2: the retired G6 test, the ARCTIC job scripts, the fallback server path and the small-model entries are removed; see `plans/PROGRESS.md`). Still to build: desktop runtime (Kronos chunking, live-readiness checks, lock file), the new evaluation and report, docs recheck, and end-to-end verification.
 - **Manual work: `manualwork.md`** (Carter, the only manual list): emails to Parag and Andalib, gateway key and VPN, desktop setup, API keys and budget, skills and placebo texts, stock list, preregistration, smoke tests, the pilot, the `frozen-v4` tag.
 - **Not yet verified against live services** (`UNVERIFIED` in config and code): gateway JSON mode, seed support, rate limits and real seconds per request; whether MiniMax needs an output-token override; Kronos per-path sampling and its chunked GPU time.
 

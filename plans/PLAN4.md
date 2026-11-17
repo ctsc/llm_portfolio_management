@@ -57,6 +57,10 @@ this plan has no manual phase. Since then the research changed in three ways tha
    is a headline portfolio metric. The scope is fixed: 100 stocks, the two gateway models plus both
    API models (Claude Haiku 5.5 and GPT-6 Luna, D1), four skills files, five strategies. RQ1's main
    test becomes the pooled LLM-minus-baseline rank IC gap, matching the proposal (G7).
+9. **Gateway dollar limit (Andalib, 2026-11-17).** Besides the 1,000 GPU service units in Elpis,
+   the gateway itself gives each project a dollar budget, about $10 to start, raised on request.
+   The VPN is required for every model call. N7 now tracks gateway dollars too, and a week that
+   would run past the limit is caught before J4, not halfway through it.
 
 PLAN4 updates the code, config and tests to match. Every manual step is in `manualwork.md`, not
 in this plan. The docs and README were already rewritten on 2026-11-11 to the target
@@ -199,7 +203,7 @@ must show only `ctsc`, with no AI or co-author lines (rule 3 above).
 | G21 (new, 2026-11-12; revised 2026-11-16) | weekly model checks and canaries | Free checks on every response and every weekend (what ARCTIC's gateway exposes, per Andalib): the response's `model` field (already saved as `model_version`), the `x-litellm-model-id` header (the gateway's deployment ID) and the `x-litellm-version` header (the gateway's software version) are saved in every record; before J4 the run saves `/v1/models` and `/v1/model/info` (with each model's `updated_at`). The gateway returns no model version or `system_fingerprint`. Canaries: before J4, each gateway model answers 10 fixed canary prompts (bare prompt, 10 fixed stocks, inputs from one frozen past snapshot saved in the repository), bypassing the cache. A model's week is flagged `model_change` when its `model` field or `x-litellm-model-id` differs from the pilot's, or when its canary answers match the pilot canary answers on fewer stocks than the lower 1% binomial bound given that model's G20 exact-agreement share (for example 5 or fewer of 10 when agreement is 0.9). A change in `x-litellm-version` or in a model's `updated_at` is logged as `gateway_changed` (information only, because it can come from changes such as pricing that do not affect answers) and does not flag the week by itself. Flagged weeks stay in the main results; a secondary analysis repeats the main comparisons without them. A flag never stops the run. |
 | G22 (new, 2026-11-17) | measure everything | Every metric in Phases 5 to 8 is computed for every unit the study has: each source (per model and prompt), each steered portfolio (per model, prompt and strategy), each Q0, each confidence-only portfolio, HRP and equal weight, and pooled over models, prompts and strategies where a pooled estimator exists. Metrics include rank IC, residual IC, ICIR, IC hit rate, top-minus-bottom spread, view shift, steered tilt IC, annualized Sharpe net of the T-bill rate, probabilistic and deflated Sharpe, Sortino, Calmar, max drawdown, CVaR (95%), volatility, active return, information ratio, tracking error, certainty-equivalent return, turnover, costs, break-even cost, share of active weeks, factor alpha and loadings, and usage counts. Phase 9 writes them in long form to `results/eval/all_metrics.csv` (one row per unit and metric, with estimate, CI, p, `p_adj`, family, T and a `reason` when the value is NaN). The scope does not grow: no new models, prompts, strategies or stocks are added after the freeze. Every non-main test is in the Benjamini-Hochberg secondary family (H4 stays exploratory). Null results are reported, never dropped. |
 | N6 (new, 2026-11-12) | logging, fallbacks and durable progress | (1) Each `run_weekend.py` invocation gets a `run_id` (timestamp plus short random suffix) that is attached to every log line, status file, record and study-log row it writes. (2) An append-only event timeline `data/logs/runs/<run_id>.jsonl` records every run start and end, job start, end, skip and failure (with duration and input hash), preflight result, retry, fallback, warning, flag and resume. (3) Every caught exception is logged with its full traceback (status files keep a `traceback` field; J4 model crashes, solver failures and provider errors keep theirs). (4) Python warnings and the `cvxpy`, `httpx` and `urllib3` loggers are routed into the JSON-lines logs. (5) A weekly fallback ledger `data/outputs/<week>/fallbacks.csv` lists every degradation with portfolio or source, stock if any, kind, reason and job: Q0 fallbacks, `no_rebalance`, Kronos fallback, `provider_error`, invalid outputs, solver fallback to the next solver, `optimal_inaccurate`, carried market caps, forward-filled prices, skipped and removed stocks, no-price liquidations, disabled gateway features, `model_change` flags. (6) Durable writes: atomic file writes `fsync` the temporary file before the rename and the folder after it; JSON-lines appends (LLM records, logs, the event timeline) are flushed and `fsync`ed after each line. (7) A free-disk check (at least 2 GB) runs before every job, not only at preflight. (8) Each run writes `data/outputs/<week>/run_summary.md`: every job with state and duration, counts of records, invalid outputs, fallbacks, warnings and errors, and the list of anything needing attention. (9) `portstudy audit --week W` verifies a week end to end: every expected file exists, hashes match the status files, every planned LLM request has a record, every portfolio has weights, and the fallback ledger matches the weight metadata. (10) Logs are never deleted during the study and are included in every backup. |
-| N7 (new, 2026-11-16) | ARCTIC usage budget | Every gateway request's tokens and seconds are already logged (G15). Each week the study log adds `arctic_gpu_hours_est` (the week's requests times the per-request estimate in config, `arctic.gpu_seconds_per_request` per model: Gemma 40, MiniMax 90, replaced by measured values after the timing run), a running total, and a projection to the end of the study (total so far plus remaining weeks times the mean weekly use). `arctic.gpu_hours_allocated: 1000`. The weekend summary warns when the projection passes 75% of the allocation and prints a clear alert above 90%; the run never stops on its own. Carter checks the real usage in Elpis each month and records it in the study log notes (`manualwork.md`). |
+| N7 (new, 2026-11-16) | ARCTIC usage budget | Every gateway request's tokens and seconds are already logged (G15). Each week the study log adds `arctic_gpu_hours_est` (the week's requests times the per-request estimate in config, `arctic.gpu_seconds_per_request` per model: Gemma 40, MiniMax 90, replaced by measured values after the timing run), a running total, and a projection to the end of the study (total so far plus remaining weeks times the mean weekly use). `arctic.gpu_hours_allocated: 1000`. The weekend summary warns when the projection passes 75% of the allocation and prints a clear alert above 90%; the run never stops on its own. Carter checks the real usage in Elpis each month and records it in the study log notes (`manualwork.md`). Gateway dollars (revised 2026-11-17): the gateway also enforces its own dollar budget (`arctic.litellm_budget_usd`, default 10, Andalib). Each week the study log adds `litellm_cost_usd` (the sum of every gateway response's `x-litellm-response-cost`, canaries and the repeat check included), a running total and a projection. Before J4 the run estimates the week's gateway cost from the previous week's mean cost per request (the timing run's for the first week) and, if the running total plus that estimate exceeds the budget, stops before sending any gateway request and prints "ask ARCTIC to raise the LiteLLM limit", so a budget error cannot cut a week in half. `--allow-over-budget` overrides. A missing or zero cost header is logged once and the dollar check is skipped with a warning. Warnings at 75% and 90% as for GPU-hours. |
 | G5 (unchanged) | factor frequency | daily |
 | G3, G3b, G4 (extended) | H3, H3b, H4 | H3 adds portfolio-level skills minus placebo and a pooled regression across models; H3b adds a confidence interaction and a calibration check; H4 adds strategy-vs-strategy active-return differences and regime interaction regressions. |
 
@@ -811,7 +815,12 @@ window, and apply the new large-move and crash-removal rules (decisions N4 and U
   compute the week's estimated GPU-hours from the logged request counts (and, once measured values
   replace the estimates, from them), the running total and the end-of-study projection; write them to
   the study log and the weekend summary; warn above 75% projected and alert above 90%. Test: a
-  synthetic study whose projection crosses 75% prints the warning and keeps running.
+  synthetic study whose projection crosses 75% prints the warning and keeps running. Add
+  `arctic.litellm_budget_usd` (10) and the gateway-dollar tracking in N7: sum
+  `x-litellm-response-cost` per week into the study log, and add the pre-J4 check that stops
+  before any gateway request when the running total plus the week's estimate exceeds the budget.
+  Tests: a stub transport that returns a cost header; a study near the limit stops before J4 with
+  the message and no partial week; `--allow-over-budget` proceeds; a missing header warns and skips.
 - **Study log.** New `pipeline/study_log.py` upserts one row per week into
   `data/outputs/study_log.csv`: start and finish times, each job's state and duration, git commit,
   config hash, preregistration hash, universe size, removals, large-move flags, per-source fallback
@@ -1809,6 +1818,7 @@ requires Carter.
   `strategies.resampled.draw_scale`, per-model `request_timeout_seconds`,
   `llm.gateway.features_frozen`, `llm.network_outage_tolerance_minutes`,
   `on_kronos_failure`, `views.ic_mode`, `views.fixed_ic`, `strategies.conf_only_controls`,
+  `arctic.gpu_hours_allocated`, `arctic.gpu_seconds_per_request`, `arctic.litellm_budget_usd`,
   all `eval` keys, `preregistration.yaml`); `open_questions.md` current and
   retired tables; `runbook.md` gains a "where to look" section (event timeline, job logs,
   library logs, `fallbacks.csv`, `run_summary.md`, `portstudy audit`); `build_decisions.md` v4 entries; PROGRESS entries per phase; no "pending PLAN4"
@@ -1883,6 +1893,10 @@ Migration required: Yes (config and outputs only; no real data exists yet).
   N7 tracks the estimate weekly and Carter checks real usage in Elpis monthly.
 - **Both open-weight model cards recommend temperature 1.0.** The study uses 0 (D4) to keep
   variation as small as the shared gateway allows; the paper states the reason.
+- **Gateway dollar limit.** The gateway starts the project at about $10 (Andalib, 2026-11-17), and
+  the cost per request in gateway dollars is unknown until the timing run. If the study's projected
+  spend is above the limit, Carter asks ARCTIC to raise it before the pilot. A raise that comes late
+  costs weeks, so N7 stops a week before J4 rather than letting a budget error split it.
 - **Gateway limits are unknown** (rate, concurrency, tokens per key) until the key exists, and the
   VPN session limit is unknown (Carter is asking GSU IT). Saving each rating as it completes and
   resuming after a drop (N4, N5) is the protection either way.
@@ -1909,8 +1923,9 @@ Unknowns:
 - Whether the `powershell.exe` keep-awake helper works from WSL on Carter's desktop, and how often
   WSL2's clock drifts after sleep.
 - Real gateway throughput and whether 4 concurrent requests per model is allowed.
-- How gateway requests convert into GPU service units, and each key's limits (access approved
-  2026-11-16; Carter is waiting to be added to the project's team to create keys). How many reasoning tokens a rating needs (2,000 is a starting
+- How gateway requests convert into GPU service units and gateway dollars (about $10 to start),
+  and the rate and concurrency limits. Keys wait on Parag creating the LiteLLM project and a Hydra
+  ticket (Andalib, 2026-11-17). How many reasoning tokens a rating needs (2,000 is a starting
   guess; `reasoning_tokens` in each response's `usage` will show it).
 - Whether a user key can read `/v1/model/info` (G21 continues without it).
 - How often repeated gateway answers agree (G20 measures it in the pilot).

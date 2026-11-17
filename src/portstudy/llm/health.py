@@ -15,8 +15,8 @@ from portstudy.llm.runner import (
     RUN_STATUS_LOCK,
     RunStatus,
     WeekRunner,
-    _settings_for,
     read_run_status,
+    settings_for_model,
 )
 from portstudy.paths import week_output_dir
 from portstudy.pipeline.context import RunContext
@@ -92,7 +92,7 @@ def gateway_health_check(ctx: RunContext, week_id: str, runner: WeekRunner) -> H
         try:
             provider = runner.provider(model_id, config_id)
             result = provider.complete(
-                _tiny_item(ctx, week_id, model_id, config_id), _settings_for(ctx.cfg, spec)
+                _tiny_item(ctx, week_id, model_id, config_id), settings_for_model(ctx.cfg, spec)
             )
             if result.error:
                 raise RuntimeError(result.error)

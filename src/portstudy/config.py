@@ -79,6 +79,7 @@ class CheckRules(StrictModel):
 class DataConfig(StrictModel):
     price_provider: str = "alpaca"
     news_provider: str = "alpaca"
+    alpaca_feed: Literal["sip", "iex"] = "sip"
     reference_provider: str = "yfinance"
     rate_provider: str = "fred"
     earnings_provider: str = "finnhub"
@@ -119,10 +120,13 @@ class KronosConfig(StrictModel):
     top_p: float = 0.9
     seed: int = 7
     input_prices: Literal["adjusted", "raw"] = "adjusted"
+    batch_size: int = Field(default=100, ge=1)
+    device: Literal["cuda", "cpu"] = "cuda"
 
 
 class BaselineConfig(StrictModel):
     forecaster: Literal["stub", "kronos"] = "stub"
+    on_kronos_failure: Literal["hold", "momentum_only"] = "momentum_only"
     momentum_lookbacks: MomentumLookbacks = MomentumLookbacks()
     kronos: KronosConfig = KronosConfig()
     stub_seed: int = 11
@@ -143,10 +147,12 @@ class LlmSettings(StrictModel):
     reasoning: str = "none"
     send_seed: bool = True
     json_mode: bool = True
+    request_timeout_seconds: float = 180.0
 
 
 class GatewayConfig(StrictModel):
     base_url: str = ""
+    features_frozen: bool = False
 
 
 class LlmConfig(StrictModel):
@@ -347,6 +353,7 @@ class ModelPrice(StrictModel):
     cached_input_per_m: float = 0.0
     output_per_m: float = 0.0
     batch_discount: float = 0.0
+    confirmed: bool = False
 
 
 class ModelSpec(StrictModel):

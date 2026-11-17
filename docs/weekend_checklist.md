@@ -26,8 +26,11 @@ gateway model; a model that fails is marked failed for the week and its portfoli
 strategy's Q0 (decision D2). If the script stops, it prints what failed, the fallback that will
 apply, and the exact rerun command; rerunning `run_weekend.py` resumes where it stopped.
 
-A pre-run check that refuses a live run while prompts, Kronos, prices or keys are still
-placeholders is pending in PLAN4 Phase 3 (`scripts/check_live_ready.py`).
+Every live run starts with the readiness check (`python scripts/check_live_ready.py` runs it
+alone). It lists every problem and stops the run with exit code 2 while prompts, the Kronos
+commit, model versions, prices, dates or keys are still placeholders, the gateway does not answer,
+the data folder holds a week before the pilot, or the config changed since the pilot.
+`--skip-preflight` overrides it; `--synthetic` never runs it.
 
 ## After
 

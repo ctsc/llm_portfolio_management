@@ -30,4 +30,9 @@ def run(inputs: StrategyInputs, cfg: StudyConfig) -> StrategyResult:
         check_weights(result.weights, cfg.optimizer)
     except (OptimizerError, np.linalg.LinAlgError) as exc:
         return fallback_chain(inputs, cfg, {"solver_error": str(exc)})
-    return StrategyResult(result.weights, result.solver, result.objective)
+    return StrategyResult(
+        result.weights,
+        result.solver,
+        result.objective,
+        diagnostics={"solver_status": result.solver_status},
+    )

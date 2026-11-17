@@ -40,6 +40,12 @@ class RawResult:
     endpoint: str = ""
     send_seed: bool | None = None
     json_mode: bool | None = None
+    tokens_reasoning: int = 0
+    finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
+    deployment_id: str = ""
+    gateway_version: str = ""
+    gateway_headers: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +62,12 @@ class RawResult:
             "endpoint": self.endpoint,
             "send_seed": self.send_seed,
             "json_mode": self.json_mode,
+            "tokens_reasoning": self.tokens_reasoning,
+            "finish_reason": self.finish_reason,
+            "usage": self.usage,
+            "deployment_id": self.deployment_id,
+            "gateway_version": self.gateway_version,
+            "gateway_headers": dict(self.gateway_headers),
         }
 
     @classmethod
@@ -74,6 +86,12 @@ class RawResult:
             endpoint=str(d.get("endpoint", "")),
             send_seed=d.get("send_seed"),
             json_mode=d.get("json_mode"),
+            tokens_reasoning=int(d.get("tokens_reasoning", 0)),
+            finish_reason=d.get("finish_reason"),
+            usage=d.get("usage"),
+            deployment_id=str(d.get("deployment_id", "")),
+            gateway_version=str(d.get("gateway_version", "")),
+            gateway_headers=dict(d.get("gateway_headers", {})),
         )
 
 
@@ -121,7 +139,20 @@ class BatchStatus:
 
 
 class LlmProviderError(RuntimeError):
-    """Raised for transport failures, timeouts, and provider-side errors."""
+    """Raised for transport failures, timeouts, and provider-side errors.
+
+    `retryable`: the runner may queue the task again. `model_wide`: the failure applies to the
+    whole model (authentication, budget), so the runner stops submitting its requests.
+    """
+
+    retryable = True
+    model_wide = False
+
+
+class LlmCallCutoff(LlmProviderError):
+    """The lock cutoff passed before the request was sent; the request stays unrecorded."""
+
+    retryable = False
 
 
 class LlmProvider(abc.ABC):

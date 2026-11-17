@@ -5,6 +5,7 @@ from __future__ import annotations
 import email.utils
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -15,13 +16,78 @@ import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from portstudy.config import LlmSettings
-from portstudy.llm.providers.base import BatchItem, LlmProvider, LlmProviderError, RawResult
+from portstudy.llm.providers.base import (
+    BatchItem,
+    LlmCallCutoff,
+    LlmProvider,
+    LlmProviderError,
+    RawResult,
+)
 
 logger = logging.getLogger(__name__)
+
+_GATEWAY_HEADERS = (
+    "x-litellm-model-id",
+    "x-litellm-version",
+    "x-litellm-model-group",
+    "x-litellm-attempted-fallbacks",
+    "x-litellm-attempted-retries",
+    "x-litellm-response-duration-ms",
+    "x-litellm-response-cost",
+    "x-litellm-call-id",
+)
+_BUDGET_MARKERS = ("ExceededBudget", "ExceededTokenBudget", "budget_exceeded")
+# UNVERIFIED: real ARCTIC error text. The rejection must name the parameter as unsupported or
+# unknown next to its name; an echo of the request JSON does not match.
+_UNSUPPORTED_PARAMETER = re.compile(
+    r"(unsupported|unknown|unrecognized|unexpected|not supported|does not support)"
+    r"[^.\n]{0,80}\b(seed|response_format)\b"
+    r"|\b(seed|response_format)\b[^.\n]{0,80}"
+    r"(unsupported|unknown|unrecognized|not supported|not allowed|not permitted)",
+    re.IGNORECASE,
+)
+
+
+def _gateway_headers(headers: httpx.Headers) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for name, value in headers.items():
+        key = name.lower()
+        if key in _GATEWAY_HEADERS or key.startswith("x-ratelimit-"):
+            out[key] = value
+    return out
 
 
 class LlmAuthenticationError(LlmProviderError):
     retryable = False
+    model_wide = True
+
+
+class LlmBudgetError(LlmProviderError):
+    """ARCTIC key or team budget is spent; retrying does not help, it needs ARCTIC."""
+
+    retryable = False
+    model_wide = True
+
+
+class LlmRequestRejected(LlmProviderError):
+    """A 4xx the gateway will keep rejecting; the request is written as provider_error."""
+
+    retryable = False
+
+
+def _ratelimit_wait(headers: httpx.Headers) -> float | None:
+    # UNVERIFIED: header format on ARCTIC; use the smaller numeric reset when both parse as
+    # seconds, capped at 60 s by the retry wait.
+    waits = []
+    for name in ("x-ratelimit-reset-requests", "x-ratelimit-reset-tokens"):
+        value = headers.get(name)
+        if value is None:
+            continue
+        try:
+            waits.append(max(0.0, float(value)))
+        except ValueError:
+            continue
+    return min(waits) if waits else None
 
 
 class _RetryableResponse(RuntimeError):
@@ -70,6 +136,7 @@ class LiteLLMProvider(LlmProvider):
         transport: httpx.BaseTransport | None = None,
         timeout: float = 180,
         endpoint_name: str = "gateway",
+        features_frozen: bool = False,
     ) -> None:
         self.model_id = model_id
         self.provider_model = provider_model
@@ -77,6 +144,7 @@ class LiteLLMProvider(LlmProvider):
         self.api_key_env = api_key_env
         self.endpoint_name = endpoint_name
         self.timeout = timeout
+        self.features_frozen = features_frozen
         self._client = httpx.Client(transport=transport, timeout=timeout)
         self._feature_lock = threading.Lock()
         self._feature_state: tuple[bool, bool] | None = None
@@ -133,7 +201,7 @@ class LiteLLMProvider(LlmProvider):
             )
         return {"Authorization": f"Bearer {key}"} if key else {}
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(self, payload: dict[str, Any]) -> tuple[dict[str, Any], httpx.Headers]:
         url = f"{self.base_url}/chat/completions"
         headers = self._headers()
 
@@ -151,30 +219,56 @@ class LiteLLMProvider(LlmProvider):
                 and self._call_clock is not None
                 and self._call_clock() >= self._call_cutoff
             ):
-                raise LlmProviderError("J6 cutoff reached before LiteLLM request")
+                raise LlmCallCutoff("J6 cutoff reached before LiteLLM request")
             response = self._client.post(url, json=payload, headers=headers)
-            if response.status_code in (429,) or response.status_code >= 500:
-                raise _RetryableResponse(
-                    response.status_code, _retry_after(response.headers.get("Retry-After"))
+            body = response.text
+            if response.status_code >= 400 and any(marker in body for marker in _BUDGET_MARKERS):
+                raise LlmBudgetError(
+                    f"LiteLLM budget error (HTTP {response.status_code}): {body[:500]}"
                 )
             if response.status_code in (401, 403):
                 raise LlmAuthenticationError(
                     f"LiteLLM returned HTTP {response.status_code}; connect to the GSU VPN "
                     "and verify the configured API key"
                 )
+            if response.status_code == 429:
+                raise _RetryableResponse(
+                    response.status_code,
+                    _retry_after(response.headers.get("Retry-After"))
+                    if response.headers.get("Retry-After") is not None
+                    else _ratelimit_wait(response.headers),
+                )
+            if response.status_code >= 500:
+                raise _RetryableResponse(response.status_code, None)
             if response.status_code == 400:
-                body = response.text.lower()
-                for field in ("response_format", "seed"):
-                    if field in body:
-                        raise _UnsupportedParameter(field)
+                logger.warning(
+                    "LiteLLM returned HTTP 400 for %s; body: %s",
+                    self.provider_model,
+                    body[:2000],
+                )
+                match = _UNSUPPORTED_PARAMETER.search(body)
+                if match is not None:
+                    field = next(
+                        g.lower()
+                        for g in match.groups()
+                        if g and g.lower() in ("seed", "response_format")
+                    )
+                    if self.features_frozen:
+                        raise LlmRequestRejected(f"gateway rejected frozen feature {field}")
+                    raise _UnsupportedParameter(field)
+            if 400 <= response.status_code < 500:
+                raise LlmRequestRejected(
+                    f"LiteLLM request failed with HTTP {response.status_code}: {body[:500]}"
+                )
             response.raise_for_status()
             return response
 
         try:
-            data = request().json()
+            response = request()
+            data = response.json()
             if not isinstance(data, dict):
                 raise LlmProviderError("LiteLLM response must be a JSON object")
-            return {str(key): value for key, value in data.items()}
+            return {str(key): value for key, value in data.items()}, response.headers
         except (LlmProviderError, _UnsupportedParameter):
             raise
         except (_RetryableResponse, httpx.TimeoutException, httpx.TransportError) as exc:
@@ -197,7 +291,7 @@ class LiteLLMProvider(LlmProvider):
             )
             started = time.perf_counter()
             try:
-                data = self._post(payload)
+                data, headers = self._post(payload)
             except _UnsupportedParameter as exc:
                 index = 1 if exc.field == "response_format" else 0
                 with self._feature_lock:
@@ -216,12 +310,21 @@ class LiteLLMProvider(LlmProvider):
                 logger.warning("LiteLLM endpoint rejected %s; disabling it for this run", exc.field)
                 continue
             elapsed = time.perf_counter() - started
-            return self._result(item, data, elapsed)
+            return self._result(item, data, headers, elapsed)
 
     def complete(self, item: BatchItem, settings: LlmSettings) -> RawResult:
         return self._complete_with_current_features(item, settings)
 
-    def _result(self, item: BatchItem, data: dict[str, Any], elapsed: float) -> RawResult:
+    def _result(
+        self,
+        item: BatchItem,
+        data: dict[str, Any],
+        headers: httpx.Headers,
+        elapsed: float,
+    ) -> RawResult:
+        gateway_headers = _gateway_headers(headers)
+        deployment_id = gateway_headers.get("x-litellm-model-id", "")
+        gateway_version = gateway_headers.get("x-litellm-version", "")
         choices = data.get("choices") or []
         if not choices:
             return RawResult(
@@ -233,6 +336,10 @@ class LiteLLMProvider(LlmProvider):
                 endpoint=self.endpoint_name,
                 send_seed=self.send_seed,
                 json_mode=self.json_mode,
+                usage=data.get("usage") if isinstance(data.get("usage"), dict) else None,
+                deployment_id=deployment_id,
+                gateway_version=gateway_version,
+                gateway_headers=gateway_headers,
             )
         choice = choices[0]
         message = choice.get("message") or {}
@@ -240,13 +347,35 @@ class LiteLLMProvider(LlmProvider):
         reasoning = message.get("reasoning_content")
         usage = data.get("usage") or {}
         returned_model = str(data.get("model") or self.provider_model)
-        if returned_model != self.provider_model:
+        # UNVERIFIED: header values on ARCTIC. A served-by identity that does not match the
+        # requested model, or any gateway fallback attempt, is an invalid answer.
+        error = None
+        if returned_model != self.provider_model and not returned_model.endswith(
+            "/" + self.provider_model
+        ):
+            error = "model_mismatch"
             logger.warning(
                 "LiteLLM returned model %s for requested model %s",
                 returned_model,
                 self.provider_model,
             )
+        attempted_fallbacks = gateway_headers.get("x-litellm-attempted-fallbacks", "")
+        model_group = gateway_headers.get("x-litellm-model-group", "")
+        try:
+            fallback_attempts = int(attempted_fallbacks) if attempted_fallbacks else 0
+        except ValueError:
+            fallback_attempts = 0
+        if error is None and (
+            fallback_attempts > 0 or (model_group and model_group != self.provider_model)
+        ):
+            error = "gateway_fallback"
         finish_reason = choice.get("finish_reason")
+        details = usage.get("completion_tokens_details") or {}
+        tokens_reasoning = (
+            int(details.get("reasoning_tokens") or 0)
+            if isinstance(details, dict) and details.get("reasoning_tokens") is not None
+            else int(usage.get("reasoning_tokens") or 0)
+        )
         return RawResult(
             custom_id=item.custom_id,
             text=content if isinstance(content, str) else "",
@@ -255,11 +384,18 @@ class LiteLLMProvider(LlmProvider):
             tokens_cached=int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0),
             latency_s=elapsed,
             model_version=returned_model,
+            error=error,
             stop_reason="max_tokens" if finish_reason == "length" else finish_reason,
             reasoning_text=reasoning if isinstance(reasoning, str) else None,
             endpoint=self.endpoint_name,
             send_seed=self.send_seed,
             json_mode=self.json_mode,
+            tokens_reasoning=tokens_reasoning,
+            finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+            usage=usage if isinstance(usage, dict) else None,
+            deployment_id=deployment_id,
+            gateway_version=gateway_version,
+            gateway_headers=gateway_headers,
         )
 
     def close(self) -> None:

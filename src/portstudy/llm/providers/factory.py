@@ -14,6 +14,8 @@ def make_provider(
     stub_failures: StubFailures | None = None,
     stub_noise: dict[str, float] | None = None,
     gateway: GatewayConfig | None = None,
+    timeout: float = 180.0,
+    features_frozen: bool | None = None,
 ) -> LlmProvider:
     if spec.provider == "stub":
         return StubLlmProvider(
@@ -36,6 +38,10 @@ def make_provider(
             base_url,
             api_key_env,
             endpoint_name=endpoint,
+            timeout=timeout,
+            features_frozen=(
+                gateway_config.features_frozen if features_frozen is None else features_frozen
+            ),
         )
     if spec.provider == "anthropic_batch":
         from portstudy.llm.providers.anthropic_batch import AnthropicBatchProvider

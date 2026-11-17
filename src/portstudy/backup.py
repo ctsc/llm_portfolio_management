@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -103,6 +105,17 @@ def run_backup(
     week_id: str, cfg: StudyConfig, dry_run: bool = False, logger: logging.Logger | None = None
 ) -> Path:
     log = logger or logging.getLogger("portstudy.backup")
+    if cfg.backup.rsync_target:
+        ok, reason = probe_rsync_target(cfg.backup.rsync_target)
+        if not ok:
+            print(
+                f"backup rsync target not writable ({cfg.backup.rsync_target}): {reason}; "
+                "the local backup continues anyway"
+            )
+            log.warning(
+                "backup_rsync_target_unwritable",
+                extra={"extra_fields": {"target": cfg.backup.rsync_target, "reason": reason}},
+            )
     stamp = now_et().strftime("%Y%m%dT%H%M%S")
     target = backups_dir() / f"{week_id}_{stamp}"
     while target.exists():  # never overwrite an earlier backup
@@ -142,6 +155,30 @@ def run_backup(
     else:
         print(f"dry run: backup folder would be {target}")
     return target
+
+
+def _is_remote_target(target: str) -> bool:
+    # `C:\...` and `C:/...` are local paths despite the colon; `host:path` and
+    # `user@host:path` are rsync remotes.
+    if re.match(r"^[A-Za-z]:[\\/]", target):
+        return False
+    return ":" in target.split("/", 1)[0]
+
+
+def probe_rsync_target(target: str) -> tuple[bool, str]:
+    """Check the rsync target is writable before J9 runs the copy: create the folder if needed,
+    write and delete a probe file. Remote targets are not probed."""
+    if _is_remote_target(target):
+        return True, "remote target not probed"
+    try:
+        folder = Path(target)
+        folder.mkdir(parents=True, exist_ok=True)
+        probe = folder / f".portstudy_probe_{os.getpid()}"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        return False, str(exc)
+    return True, ""
 
 
 def rsync_command(target: Path, zip_path: Path | None, destination: str) -> list[str]:

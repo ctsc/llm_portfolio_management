@@ -77,6 +77,7 @@ class Weights:
     strategy_diagnostics: dict[str, Any] = field(default_factory=dict)
     cov_mu_sha256: str = ""
     fallback: bool = False
+    solver_status: str = ""
 
     def meta(self) -> dict[str, Any]:
         d = asdict(self)
@@ -251,6 +252,18 @@ def _optimize(
                 }
             },
         )
+    solver_status = str(result.diagnostics.get("solver_status", ""))
+    if solver_status == "optimal_inaccurate":
+        logger.warning(
+            "solver_inaccurate",
+            extra={
+                "extra_fields": {
+                    "week_id": inputs.week_id,
+                    "portfolio": portfolio,
+                    "solver_status": solver_status,
+                }
+            },
+        )
     shift = _shift_from_q0(result.weights, q0_weights, q0_only=q0_only, is_control=is_control)
     out = Weights(
         portfolio=portfolio,
@@ -273,6 +286,7 @@ def _optimize(
         strategy_diagnostics=result.diagnostics,
         cov_mu_sha256=_cov_mu_sha256(post) if not is_control else "",
         fallback=result.fallback_flag is not None,
+        solver_status=solver_status,
     )
     for k, v in extra.items():
         setattr(out, k, v)

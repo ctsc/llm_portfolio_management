@@ -30,13 +30,15 @@ from portstudy.llm.prompts import PromptManifest, assemble_prompt, load_manifest
 from portstudy.llm.providers.base import (
     BatchHandle,
     BatchItem,
+    LlmCallCutoff,
     LlmProvider,
     LlmProviderError,
     RawResult,
     make_custom_id,
 )
 from portstudy.llm.providers.factory import make_provider
-from portstudy.llm.schema import INVALID_OUTPUT, fallback_response
+from portstudy.llm.providers.litellm import LlmBudgetError
+from portstudy.llm.schema import INVALID_OUTPUT, INVALID_TRUNCATED, fallback_response
 from portstudy.llm.validate import parse_response
 from portstudy.paths import week_output_dir
 
@@ -64,6 +66,11 @@ SCORE_COLUMNS = [
     "model_version",
     "prompt_hash",
     "prompt_file_sha256",
+    "reasoning_chars",
+    "tokens_reasoning",
+    "finish_reason",
+    "deployment_id",
+    "gateway_version",
 ]
 
 RunState = Literal["ok", "failed", "incomplete"]
@@ -112,7 +119,7 @@ class RunSummary:
     n_invalid: int = 0
     n_retries: int = 0
     n_provider_retries: int = 0
-    n_dropped: int = 0
+    n_provider_error: int = 0
     aborted: str | None = None
     cost_usd: float = 0.0
     per_config: dict[str, int] = field(default_factory=dict)
@@ -133,7 +140,9 @@ def lock_deadline(week_id: str, cfg: StudyConfig) -> dt.datetime:
     return dt.datetime.combine(cal.monday_open_day(week_id), dt.time(hh, mm), tzinfo=ET)
 
 
-def _settings_for(cfg: StudyConfig, spec: ModelSpec) -> LlmSettings:
+def settings_for_model(cfg: StudyConfig, spec: ModelSpec) -> LlmSettings:
+    """Per-model settings: `llm.settings.<model>` in study.yaml first, then the model's own
+    `settings` in config/models.yaml. Every caller that picks settings for a model uses this."""
     return cfg.llm.settings.get(spec.id, spec.settings)
 
 
@@ -178,10 +187,13 @@ class WeekRunner:
 
     def provider(self, model_id: str, config_id: str | None = None) -> LlmProvider:
         if model_id not in self._providers:
+            spec = self.registry.get(model_id)
             self._providers[model_id] = make_provider(
-                self.registry.get(model_id),
+                spec,
                 self.stub_seed,
                 gateway=self.cfg.llm.gateway,
+                timeout=settings_for_model(self.cfg, spec).request_timeout_seconds,
+                features_frozen=self.cfg.llm.gateway.features_frozen,
             )
         return self._providers[model_id]
 
@@ -285,6 +297,18 @@ class WeekRunner:
         )
         if raw.error:
             resp = fallback_response(raw.text, raw.error, INVALID_OUTPUT)
+        if resp.fallback_flag == INVALID_TRUNCATED and not raw.text.strip():
+            self.log.warning(
+                "truncated_empty_answer",
+                extra={
+                    "extra_fields": {
+                        "model": spec.id,
+                        "config_id": task.config_id,
+                        "ticker": task.ticker,
+                        "max_output_tokens": settings.max_output_tokens,
+                    }
+                },
+            )
         cost = (
             0.0
             if raw.from_cache
@@ -321,8 +345,84 @@ class WeekRunner:
             "retries": retries,
             "send_seed": settings.send_seed if raw.send_seed is None else raw.send_seed,
             "json_mode": settings.json_mode if raw.json_mode is None else raw.json_mode,
+            "reasoning_text": raw.reasoning_text or "",
+            "reasoning_chars": len(raw.reasoning_text or ""),
+            "tokens_reasoning": raw.tokens_reasoning,
+            "finish_reason": raw.finish_reason,
+            "usage": raw.usage,
+            "deployment_id": raw.deployment_id,
+            "gateway_version": raw.gateway_version,
+            "gateway_headers": raw.gateway_headers,
         }
         return rec
+
+    def _provider_error_record(
+        self,
+        task: Task,
+        spec: ModelSpec,
+        settings: LlmSettings,
+        exc: LlmProviderError,
+    ) -> dict[str, Any]:
+        """N5: an unrequeued provider failure as an invalid record (zero tokens, not cached)."""
+        raw = RawResult(custom_id=task.item.custom_id, text="", error=str(exc)[:500])
+        rec = self._finish(task, spec, settings, raw, 0, is_batch=False)
+        rec["fallback_flag"] = "provider_error"
+        rec["error"] = str(exc)[:500]
+        return rec
+
+    def n_unrecorded(self, model: str) -> int:
+        """Planned tasks for `model` that have no record yet; J4 fails while any remain."""
+        missing = 0
+        for task in self.plan_week(model):
+            if task.item.custom_id not in self._read_records(model, task.config_id):
+                missing += 1
+        return missing
+
+    def rate_adhoc(
+        self,
+        model: str,
+        items: list[BatchItem],
+        bypass_cache: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Send each item once through the model's provider at its configured concurrency.
+
+        Records are returned in input order with the same fields as normal records; provider
+        failures come back as provider_error records. Nothing is appended to the source record
+        files or run_status, and the response cache is neither read nor written when
+        `bypass_cache` is set (G20 repeat check and G21 canaries).
+        """
+        spec = self.registry.get(model)
+        settings = settings_for_model(self.cfg, spec)
+        provider = self.provider(model)
+        workers = max(1, self.cfg.llm.concurrency.get(model, 4))
+        records: list[dict[str, Any] | None] = [None] * len(items)
+
+        def call(indexed: tuple[int, BatchItem]) -> None:
+            index, item = indexed
+            task = Task(model, item.config_id, item.ticker, item)
+            try:
+                raw = provider.complete(item, settings)
+            except LlmProviderError as exc:
+                records[index] = self._provider_error_record(task, spec, settings, exc)
+                return
+            if not bypass_cache:
+                self.cache.put(
+                    cache_key(
+                        spec.snapshot_id or spec.provider_model,
+                        item.prompt.prompt_hash,
+                        item.ticker,
+                        self.week_id,
+                        settings,
+                        model_id=spec.id,
+                        endpoint=spec.serving,
+                    ),
+                    raw,
+                )
+            records[index] = self._finish(task, spec, settings, raw, 0, is_batch=False)
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            list(executor.map(call, list(enumerate(items))))
+        return [r for r in records if r is not None]
 
     # Open-weight run ----------------------------------------------------------------------
 
@@ -460,7 +560,7 @@ class WeekRunner:
             raise ValueError(f"{model} is not an open-weight model")
         tasks = self.plan_week(model)
         summary = RunSummary(model=model, n_tasks=len(tasks))
-        settings = _settings_for(self.cfg, spec)
+        settings = settings_for_model(self.cfg, spec)
         first_config = tasks[0].config_id if tasks else None
         provider = self.provider(model, first_config)
         prior_statuses = read_run_status(self.week_id)
@@ -551,7 +651,7 @@ class WeekRunner:
                     task, key, retries, first = pending.pop(future)
                     try:
                         raw = future.result()
-                    except _CallCutoff:
+                    except (_CallCutoff, LlmCallCutoff):
                         continue
                     except LlmProviderError as exc:
                         features = (
@@ -564,21 +664,36 @@ class WeekRunner:
                             )
                         n_errors = provider_errors.get(task.item.custom_id, 0) + 1
                         provider_errors[task.item.custom_id] = n_errors
-                        retryable = getattr(exc, "retryable", True)
-                        if not retryable and summary.aborted is None:
-                            # Review fix M2: an authentication failure is model-wide; stop
-                            # submitting and let J4 mark the model's sources failed.
-                            summary.aborted = "authentication_failed"
-                            self.log.error(
-                                "provider_auth_failed",
-                                extra={
-                                    "extra_fields": {
-                                        "week_id": self.week_id,
-                                        "model": model,
-                                        "error": str(exc),
-                                    }
-                                },
-                            )
+                        retryable = exc.retryable
+                        if exc.model_wide and summary.aborted is None:
+                            # Review fix M2: authentication and ARCTIC budget failures are
+                            # model-wide; stop submitting and let J4 mark the model's sources
+                            # failed.
+                            if isinstance(exc, LlmBudgetError):
+                                summary.aborted = "budget_exceeded"
+                                self.log.error(
+                                    "gateway_budget_exceeded",
+                                    extra={
+                                        "extra_fields": {
+                                            "week_id": self.week_id,
+                                            "model": model,
+                                            "error": str(exc),
+                                            "note": "ARCTIC key or team allocation problem",
+                                        }
+                                    },
+                                )
+                            else:
+                                summary.aborted = "authentication_failed"
+                                self.log.error(
+                                    "provider_auth_failed",
+                                    extra={
+                                        "extra_fields": {
+                                            "week_id": self.week_id,
+                                            "model": model,
+                                            "error": str(exc),
+                                        }
+                                    },
+                                )
                         requeue = (
                             retryable
                             and n_errors <= MAX_PROVIDER_ERRORS
@@ -601,8 +716,17 @@ class WeekRunner:
                         if requeue:
                             submit(task, key, retries, first)
                             summary.n_provider_retries += 1
-                        else:
-                            summary.n_dropped += 1
+                        elif summary.aborted is None or not exc.model_wide:
+                            # N5: an unrequeued request becomes an invalid record (never cached),
+                            # so it counts toward the 15% rule and the source can complete.
+                            record = self._provider_error_record(task, spec, settings, exc)
+                            self._append_record(model, task.config_id, record)
+                            self._update_open_weight_status(task, record)
+                            summary.n_provider_error += 1
+                            summary.n_invalid += 1
+                            summary.per_config[task.config_id] = (
+                                summary.per_config.get(task.config_id, 0) + 1
+                            )
                         continue
                     except Exception as exc:
                         fatal = exc
@@ -685,7 +809,7 @@ class WeekRunner:
     def submit_api(self, model: str, allow_over_budget: bool = False) -> list[BatchHandle]:
         """Cost guard first, then one batch per configuration for the not-yet-answered items."""
         spec = self.registry.get(model)
-        settings = _settings_for(self.cfg, spec)
+        settings = settings_for_model(self.cfg, spec)
         provider = self.provider(model)
         # Cache hits are answered now and never submitted.
         to_submit: dict[str, list[Task]] = {}
@@ -761,7 +885,7 @@ class WeekRunner:
     def collect_api(self, model: str, resubmit_failed: bool = True) -> RunSummary:
         """Collect finished batches, write records, resubmit failed items up to the retry count."""
         spec = self.registry.get(model)
-        settings = _settings_for(self.cfg, spec)
+        settings = settings_for_model(self.cfg, spec)
         provider = self.provider(model)
         summary = RunSummary(model=model, n_tasks=len(self.plan_week(model)))
         seen_versions: set[str] = set()
@@ -874,17 +998,21 @@ class WeekRunner:
         )
 
     def write_scores(self) -> pd.DataFrame:
-        rows: list[dict[str, Any]] = []
-        for spec in self.models():
-            for conf in self.manifest.enabled():
-                rows.extend(self._read_records(spec.id, conf.id).values())
-        if rows:
-            df = pd.DataFrame(rows).loc[:, SCORE_COLUMNS]
-            df = df.sort_values(["model", "config_id", "ticker"]).reset_index(drop=True)
-        else:
-            df = pd.DataFrame(columns=SCORE_COLUMNS)
-        write_csv_atomic(df, week_output_dir(self.week_id) / "llm_scores.csv")
-        return df
+        # Parallel J4 workers each call this when their model is done; reading the records and
+        # writing the file under one lock means the last writer always holds every record.
+        with RUN_STATUS_LOCK:
+            rows: list[dict[str, Any]] = []
+            for spec in self.models():
+                for conf in self.manifest.enabled():
+                    rows.extend(self._read_records(spec.id, conf.id).values())
+            if rows:
+                # Older record files lack the gateway fields; missing keys become empty cells.
+                df = pd.DataFrame(rows).reindex(columns=SCORE_COLUMNS)
+                df = df.sort_values(["model", "config_id", "ticker"]).reset_index(drop=True)
+            else:
+                df = pd.DataFrame(columns=SCORE_COLUMNS)
+            write_csv_atomic(df, week_output_dir(self.week_id) / "llm_scores.csv")
+            return df
 
     # Assessment ---------------------------------------------------------------------------
 

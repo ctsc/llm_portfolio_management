@@ -54,7 +54,8 @@ portstudy run-job J7 --week 2026-W46 --force      # rerun even if done with the 
 | J4 open-weight inference (crash or gateway unavailable) | Partial records are saved as calls complete. A model that fails the pre-J4 health check is marked failed for the week (decision D2) and its portfolios trade their strategy's Q0 (`fallback_q0`). If a source is not finished by the lock margin, it does the same. | Check the GSU VPN and `ARCTIC_LITELLM_API_KEY`, then rerun J4 to resume from the cache. There is no fallback server; a model that stays down misses the week and that week is left out of its statistics. |
 | J5 API collect (`pending`) | Batches not back yet. `run_weekend.py` polls until the lock margin (Monday 8:30 am ET by default). | Wait, or rerun J5 later. After the margin J6 labels the batch failed and the portfolios trade their strategy's Q0. |
 | J6 validate (`runs still incomplete before the lock margin`) | Nothing written yet. | Finish J4 or J5 first, or wait for the margin. |
-| J6 says runs are incomplete although J4 finished | Until PLAN4 Phase 3 (decision N5) a gateway request that fails after its retries leaves no record, J4 still shows done, and J6 waits until the lock margin and then sends the source to Q0. | Rerun J4 with `--force` to retry the missing requests. After Phase 3 such a request is recorded as an invalid `provider_error` answer and J4 stays failed until every request has a record. |
+| J4 fails with "left requests without records" | Requests were cut off before they could be sent or recorded (crash, lock cutoff). A request that fails after its retries is not in this group: it is recorded as an invalid `provider_error` answer and counts toward the 15% rule (N5). | Rerun `python scripts/run_weekend.py --from J4`; it resumes from the saved records and cache. At the lock margin the run continues to J6, which sends unfinished sources to Q0. |
+| J4 reports `budget_exceeded` for a model | The gateway refused requests for budget reasons. The model's sources are marked failed for the week and trade Q0. | Ask ARCTIC to raise the limit, then rerun `--from J4` before the lock. |
 | J6 marks `invalid_rate` failures | That rating source trades its strategy's Q0 weights for the week (decision N1). | Nothing to do for the week; investigate the model's raw answers in the jsonl records. If `invalid_truncated` dominates, raise `max_output_tokens` for that model in `llm.settings`. This is expected for MiniMax M2.7 at the default 300 tokens: it always thinks, the thinking counts toward the limit, and the answer comes back empty with `finish_reason: length` (ARCTIC suggests about 2,000). |
 | J7 weights (`LockViolation`) | Weights not written because the clock is past Monday 9:00 am ET. | Too late for the week: the simulator holds positions (`no_rebalance`). Record what happened. Never backdate the clock. |
 | J7 `solver_failed` | The portfolio keeps last week's weights with the flag. | Check `sigma_matrix.csv` for a bad stock; rerun J7 with `--force` after fixing the data. |
@@ -145,3 +146,24 @@ with full tracebacks, `data/outputs/<week>/fallbacks.csv` (every degradation and
 `data/outputs/<week>/run_summary.md` (what happened and what needs attention), and the result of
 `portstudy audit --week <week>`. Until then, the job logs and status files are the record.
 
+## Checks before a live run (PLAN4 Phase 3)
+
+```
+python scripts/check_live_ready.py                 # every blocker, warnings, marker counts; exit 1 on any blocker
+python scripts/check_live_ready.py --skip-network  # same without the gateway probe (VPN off)
+python scripts/smoke_real_services.py --time-gateway 20   # 20 timed requests per gateway model
+```
+
+`run_weekend.py` runs the readiness check itself before any job of a live run and exits with code 2
+when it fails (`--skip-preflight` overrides). `--time-gateway` writes
+`data/outputs/gateway_timing.csv` (seconds, tokens including reasoning tokens, `finish_reason`,
+deployment ID, gateway version and rate-limit headers per request) and prints the per-model summary
+used to set `max_output_tokens`, `request_timeout_seconds` and the ARCTIC usage estimates. The
+Alpaca line of `smoke_real_services.py` prints the feed, the bar count and the last bar's volume,
+and fails when the last bar is not the last trading day requested.
+
+On the pilot week's first live run the three config files (`study.yaml`, `models.yaml`,
+`prompts_manifest.yaml`) are copied to `data/frozen/`. From then on the readiness check fails when
+one of them differs from that copy. After an intended change run
+`python scripts/check_live_ready.py --accept-config-change "<what changed and why>"`; the note is
+appended to `data/frozen/changes.jsonl`.

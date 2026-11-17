@@ -17,26 +17,26 @@ date and reason and flagged in the analysis. Code never changes a decision value
 | K2 | Kronos batching | forecast in chunks of `baseline.kronos.batch_size` (default 100) to fit 6 GB | confirmed (2026-11-11) |
 | D3 | paid API budget | goal 50 USD; gateway models cost 0 USD; recompute with real prices | provisional |
 | D4 | temperature | 0 for every model with a fixed seed; the gateway passes the seed through but outputs are not guaranteed identical (ARCTIC, 2026-11-12) | confirmed (2026-11-12) |
-| G15 | gateway output handling | per-model `max_output_tokens` (Gemma 300, MiniMax about 2,000 until measured), per-model timeout, reasoning text saved, tokens and `finish_reason` logged, features frozen after the pilot | confirmed (2026-11-11), pending PLAN4 Phase 3 |
-| G16 | price feed | Alpaca `sip` by default (not `iex`), yfinance fallback | confirmed (2026-11-11), pending PLAN4 Phase 3 |
+| G15 | gateway output handling | per-model `max_output_tokens` (Gemma 300, MiniMax about 2,000 until measured), per-model timeout, reasoning text saved, tokens and `finish_reason` logged, features frozen after the pilot | confirmed (2026-11-11), built in PLAN4 Phase 3 |
+| G16 | price feed | Alpaca `sip` by default (not `iex`), yfinance fallback | confirmed (2026-11-11), built in PLAN4 Phase 3 |
 | G17 | ARCTIC sizing basis | 300 to 8,000 input tokens; output about 300 (Gemma) and 2,000 (MiniMax); estimated 40 and 90 GPU-seconds per request; 2,730 / 910 GPU-hours requested; corrected after the timing run | confirmed (2026-11-12) |
 | E7 | neutral LLM view | `q_L = mu_Q0 + IC_L sigma z_L` (centered on the Q0 posterior mean, not `pi`) | confirmed (2026-11-11), pending PLAN4 Phase 3B |
 | G18 | confidence-only counterfactual | posterior with the same LLM view uncertainty and `z_L = 0`; its uncertainty ratio is recorded per source-week | confirmed (2026-11-11), pending PLAN4 Phase 3B |
 | S8 | strategy sensitivity calibration | Mean-CVaR `lam` and Resampled `draw_scale` set on synthetic data by a fixed rule before the freeze | confirmed (2026-11-11), pending PLAN4 Phase 3B |
 | G1b | stop on a rebalance day | a stop merged into the rebalance resets the position's reference price to the rebalance open | confirmed (2026-11-11), pending PLAN4 Phase 3A |
-| N5 | gateway request failures | recorded as invalid `provider_error`; J4 not done while a request has no record | confirmed (2026-11-11), pending PLAN4 Phase 3 |
-| C8 | prompt name and sector | from the frozen universe file; yfinance for market cap only, last good value reused | confirmed (2026-11-11), pending PLAN4 Phase 3 |
+| N5 | gateway request failures | recorded as invalid `provider_error`; J4 not done while a request has no record | confirmed (2026-11-11), built in PLAN4 Phase 3 |
+| C8 | prompt name and sector | from the frozen universe file; yfinance for market cap only, last good value reused | confirmed (2026-11-11), built in PLAN4 Phase 3 |
 | A7 | data-folder hygiene | scratch data folder for dry runs; no pre-pilot weeks in the live folder; pilot excluded and every portfolio starts from cash at the first live week | confirmed (2026-11-12), pending PLAN4 Phase 3A |
 | U2 | no-price liquidation | sold at the last close after 5 trading days without a price | confirmed (2026-11-12), pending PLAN4 Phase 3A |
-| D5 | API model versions | dated `snapshot_id` required for a live run | confirmed (2026-11-11), pending PLAN4 Phase 3 |
+| D5 | API model versions | dated `snapshot_id` required for a live run | confirmed (2026-11-11), built in PLAN4 Phase 3 |
 | A8 | view scale | IC_b and IC_L fixed at 0.02 every week (`views.ic_mode: fixed`); trailing-IC gating kept only for tests | confirmed (2026-11-12), pending PLAN4 Phase 3A |
 | A9 | news cutoff | Friday 16:00 ET, unchanged | confirmed (2026-11-12) |
-| K3 | Kronos failure | `momentum_only` for every portfolio that week, flagged | confirmed (2026-11-12), pending PLAN4 Phase 3 |
+| K3 | Kronos failure | `momentum_only` for every portfolio that week, flagged | confirmed (2026-11-12), built in PLAN4 Phase 3 |
 | G19 | confidence-only control portfolios | Robust and Resampled MVO, rating 0 with the same view uncertainty | confirmed (2026-11-12), pending PLAN4 Phase 3B |
 | G20 | pilot repeat check | 50 fixed stocks re-rated under all prompt types per gateway model, cache bypassed; agreement reported | confirmed (2026-11-12), pending PLAN4 Phase 3A |
 | G21 | weekly model checks | `model` field, `x-litellm-model-id` and `x-litellm-version` headers, `reasoning_tokens`, `/v1/model/info` `updated_at`; 10 canaries per model before J4; model or deployment change or canary drop flags the week | confirmed (2026-11-16), pending PLAN4 Phase 3A |
 | N6 | logging and durable progress | run_id, event timeline, tracebacks, captured warnings, `fallbacks.csv`, fsync on every write, disk check per job, `run_summary.md`, `portstudy audit`, random-kill resume test | confirmed (2026-11-12), pending PLAN4 Phase 3A |
-| N7 | ARCTIC usage budget | estimated GPU-hours per week, running total and projection against 1,000; warn at 75%, alert at 90% | confirmed (2026-11-16), pending PLAN4 Phase 3A |
+| N7 | ARCTIC usage budget | estimated GPU-hours per week against 1,000, and gateway dollars from `x-litellm-response-cost` against `arctic.litellm_budget_usd` (about $10 to start); warn at 75%, alert at 90%; stop before J4 if the week would pass the dollar limit | confirmed (2026-11-16), pending PLAN4 Phase 3A |
 | G22 | measure everything | every metric for every source, portfolio, model, prompt and strategy, per cell and pooled, in `results/eval/all_metrics.csv`; Sharpe net of the T-bill rate leads the portfolio table; null results reported; scope fixed at the freeze | confirmed (2026-11-17), pending PLAN4 Phase 9 |
 | B1 | prompt types | bare, placebo, and 4 similar-length specialized skills files (`skills_5` off); one placebo matched to mean skills length | confirmed (2026-11-12) |
 | B4 | universe size | 100 stocks; ARCTIC granted the 1,000 GPU-hour startup allocation (2026-11-16) | confirmed (2026-11-16) |

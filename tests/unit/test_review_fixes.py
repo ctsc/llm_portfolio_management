@@ -222,12 +222,13 @@ def test_m1_m2_provider_errors_are_requeued_and_auth_failures_abort_the_model(
         concurrency=2,
     )
     summary = runner.run_open_weight("stub-ow-a")
-    assert summary.n_provider_retries == 3 * MAX_PROVIDER_ERRORS and summary.n_dropped == 0
+    assert summary.n_provider_retries == 3 * MAX_PROVIDER_ERRORS and summary.n_provider_error == 0
     assert summary.aborted is None
     assert read_run_status("2026-W20")["stub-ow-a__bare"].n_done == 3
     assert all(n == MAX_PROVIDER_ERRORS + 1 for n in flaky.attempts.values())
 
-    # Persistent failure: each task is dropped after MAX_PROVIDER_ERRORS requeues.
+    # Persistent failure: each task exhausts MAX_PROVIDER_ERRORS requeues and becomes an invalid
+    # provider_error record, so the source still completes (N5).
     broken = Flaky(10**6, LlmProviderError)
     runner = _runner(
         week="2026-W21",
@@ -239,11 +240,9 @@ def test_m1_m2_provider_errors_are_requeued_and_auth_failures_abort_the_model(
         concurrency=2,
     )
     summary = runner.run_open_weight("stub-ow-a")
-    assert summary.n_dropped == 3 and summary.n_provider_retries == 3 * MAX_PROVIDER_ERRORS
+    assert summary.n_provider_error == 3 and summary.n_provider_retries == 3 * MAX_PROVIDER_ERRORS
     assert all(n == MAX_PROVIDER_ERRORS + 1 for n in broken.attempts.values())
-    assert "stub-ow-a__bare" not in read_run_status("2026-W21") or (
-        read_run_status("2026-W21")["stub-ow-a__bare"].n_done == 0
-    )
+    assert read_run_status("2026-W21")["stub-ow-a__bare"].n_done == 3
 
     # Authentication failure: no requeue, no further submissions, summary.aborted is set.
     unauth = Flaky(10**6, LlmAuthenticationError)

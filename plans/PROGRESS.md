@@ -1051,3 +1051,122 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
 - The J4 input-hash change above is not in the plan text; it is needed for the D2 retry the
   outage message promises.
 - Negative tests build the removed names by string concatenation so the completion grep stays empty.
+
+## v4 phase 3: desktop runtime (WSL2, Kronos batching, live-readiness checks)
+
+### What changed
+
+- **Kronos batching (K2).** `baseline.kronos.batch_size` (100) and `device` (`cuda` or `cpu`).
+  `KronosForecaster.forecast` works through the sorted tickers in chunks, seeds every
+  (sample, chunk) from `chunk_seed(seed, sample, chunk)` (SHA-256 based), frees GPU memory between
+  chunks and logs `kronos_chunk` with seconds and peak GPU memory. Chunking changes the sampled
+  paths of the real model, so `batch_size` is frozen with the config.
+- **Kronos failure (K3).** `baseline.on_kronos_failure: momentum_only` (default). When the
+  forecaster raises, the baseline is the momentum rank alone, `k` and `k_sd` are empty (the K1
+  ratio is then 1.0 for every stock), and `baseline_meta.json` carries `kronos_fallback: true`
+  (also in the J2 result). `hold` keeps the old behavior. Covariance and prior failures still fail J2.
+- **Dependencies.** `einops` and `safetensors` in the `ml` extra; new `stats` extra with `arch`
+  (resolved 7.2.0); `uv.lock` committed (141 packages; torch 2.15.0, einops 0.8.2, safetensors 0.8.0).
+- **`scripts/kronos_smoke.py`.** `--batch-size`, `--device`, per-chunk timing and peak memory;
+  exits 0 with a message when torch or CUDA is missing.
+- **Backup probe.** `probe_rsync_target` writes and deletes a probe file at the start of J9 and
+  prints a warning naming the target when it is not writable; the local backup continues.
+- **Gateway output handling (G15).** Per-model settings in `config/models.yaml`: Gemma
+  `max_output_tokens` 300 and timeout 180 s, MiniMax 2,000 and 600 s (starting values).
+  `settings_for_model` is the one resolver used by the runner, health check, cost estimate and
+  scripts. Records and `llm_scores.csv` gain `reasoning_chars`, `tokens_reasoning`, `finish_reason`,
+  `deployment_id`, `gateway_version`; records also keep `reasoning_text`, the full `usage` and the
+  gateway headers (`x-litellm-*`, `x-ratelimit-*`). Empty content with `finish_reason: length` is
+  `invalid_truncated` and logs the model's limit. No strip rule for Gemma's thought marker (a test
+  pins that the first JSON object wins).
+- **Gateway errors (N5).** Budget errors (non-2xx body with `ExceededBudget`,
+  `ExceededTokenBudget` or `budget_exceeded`) are never retried and stop the model for the week
+  (`budget_exceeded`); 401 and 403 stop the model as before; 429 waits (`Retry-After`, else the
+  rate-limit reset headers) and retries; 5xx and timeouts retry; other 4xx are not retried. A
+  request that is not requeued becomes an invalid `provider_error` record, so it counts toward the
+  15% rule. J4 fails while any planned request of a healthy model has no record, and a rerun
+  resumes it; at the lock margin `run_weekend.py` continues to J6 so unfinished sources trade Q0.
+- **Frozen gateway features.** The unsupported-parameter match now needs a rejection phrase next
+  to the parameter name; every 400 body is logged; `llm.gateway.features_frozen` (false) turns a
+  rejected `seed` or `response_format` into a failed request instead of disabling the feature.
+- **Response identity (G21 groundwork).** A response naming another model is invalid
+  (`model_mismatch`); a response with attempted gateway fallbacks or another model group is invalid
+  (`gateway_fallback`). `WeekRunner.rate_adhoc(..., bypass_cache=True)` sends one-off requests that
+  never touch the response cache or the record files (for the Phase 3A canaries and repeat check).
+- **`--time-gateway N`** in `scripts/smoke_real_services.py`: N requests per gateway model at the
+  configured concurrency, cycling the enabled prompt types; prints seconds (client and gateway),
+  rate limits, invalid rate, `finish_reason: length` share and token statistics; writes
+  `data/outputs/gateway_timing.csv`.
+- **Price feed (G16).** `data.alpaca_feed: sip`; no hard-coded `iex` in `src/`. Bars are requested
+  with `end` as the cutoff day 23:59:59 ET (review C11), capped at 16 minutes before now. The
+  Alpaca smoke check prints feed, bar count and last volume and asserts the last bar is the last
+  trading day requested.
+- **Prompt name and sector (C8).** `make_snapshot` takes name and sector from the frozen universe
+  file; a blank one halts the snapshot. The reference call supplies market cap and earnings date
+  only; a failed call or missing cap reuses the most recent earlier snapshot's cap
+  (`market_cap_carried`), and more than 10% carried or missing adds `market_caps_degraded`.
+- **API models (D5).** `price.confirmed` (false for the two API models until Carter enters real
+  prices) and the `snapshot_id` requirement are checked by the preflight.
+- **Preflight.** `scripts/check_live_ready.py` and `pipeline/preflight.py` list every blocker;
+  `run_weekend.py` runs it before any job of a live run (exit code 2), `--skip-preflight`
+  overrides, `--synthetic` never runs it. On this repository today it reports 22 blockers:
+  5 placeholder prompt files, `UNPINNED`, `stub`, 2 unconfirmed prices, 2 missing snapshot IDs,
+  2 null dates, 7 missing keys, missing `vendor/kronos`, missing `config/universe.csv`; marker
+  counts TBD 5, UNPINNED 6, UNVERIFIED 20.
+- **Frozen-config check.** `pipeline/frozen.py` copies `study.yaml`, `models.yaml` and
+  `prompts_manifest.yaml` to `data/frozen/` on the pilot week's first live run; the preflight
+  fails when one differs afterwards; `--accept-config-change "<note>"` records an intended change.
+- **Small fixes.** `current_week` rolls forward at the cutoff day's close also when the cutoff is
+  not a Friday (Thursday 2026-12-24 after 13:00 ET gives 2026-W52). `solver_status` is in every
+  MVO weight meta and `optimal_inaccurate` logs a warning. HRP reports the configured linkage.
+- **Docs.** README, `docs/config_reference.md`, `design.md`, `desktop_setup.md`, `runbook.md`
+  (new section on the checks before a live run), `weekend_checklist.md`, `open_questions.md`: the
+  "pending PLAN4 Phase 3" notes are replaced by what was built. `manualwork.md` C2 mentions
+  `confirmed: true`.
+- Carter's 2026-11-17 edits made during this phase (gateway dollar budget in N7: `plans/PLAN4.md`,
+  `manualwork.md`, `docs/open_questions.md`, `llm_research/09_arctic_process_and_model_facts.md`)
+  are included in this commit unchanged; the code for them belongs to Phase 3A.
+
+### UNVERIFIED items added (need a real service)
+
+- `llm/providers/litellm.py`: the wording ARCTIC uses when it rejects a parameter; the format of
+  the `x-ratelimit-reset-*` headers; the values of the `model` field, `x-litellm-model-group` and
+  `x-litellm-attempted-fallbacks` on ARCTIC (a wrong assumption would mark every answer invalid,
+  which `--time-gateway` shows at once).
+- `data/providers/alpaca.py`: how Alpaca reads the `end` timestamp and the free plan's rule about
+  the most recent 15 minutes of SIP data.
+
+### Tests
+
+- New: `tests/unit/test_v4_phase3_desktop.py` (21, one of them `slow` and skipped without CUDA),
+  `test_v4_phase3_gateway.py` (21), `test_v4_phase3_preflight.py` (20).
+- Changed on purpose: `test_v2_phase5_kronos.py` (seed expectations follow `chunk_seed`),
+  `test_review_fixes.py` and `test_v2_phase4_litellm.py` (`n_dropped` is now `n_provider_error`, and
+  a permanently failing request leaves a `provider_error` record instead of an incomplete source).
+- Run after the last change: the three new files plus the Phase 2 gateway file, the LLM, data,
+  prompt, risk, optimizer, strategy and review-fix unit files, and the pipeline, jobs, backup and
+  30-week snapshot integration files; all pass. `tests/e2e` collects (16 tests, not run).
+  `ruff check`, `ruff format --check`, `mypy` clean.
+
+### Choices made while unattended
+
+- Phase 3 was built in three parts (Kronos and runtime, gateway, data and preflight) and committed
+  once.
+- K3: `k_sd` is left empty instead of being set to the median; the K1 ratio is 1.0 either way.
+- Config hash scope: the frozen-config check was chosen over narrowing each job's input hash.
+- API prices get an explicit `confirmed` flag, because placeholder values cannot be told apart
+  from real ones.
+- The bar request's `end` is capped at 16 minutes before now so a Friday-evening run does not ask
+  the free plan for the most recent SIP data.
+- A response whose `model` field ends with "/" plus the requested name is accepted (a provider
+  prefix), anything else is a mismatch.
+- The lock cutoff inside the gateway provider raises its own error type and leaves the request
+  unrecorded, so a source cut off at the lock stays "not finished" and trades Q0 instead of being
+  completed with `provider_error` records.
+- The `market_caps_degraded` warning is recorded in the snapshot issues and the log; printing it
+  in the weekend summary comes with the run summary in Phase 3A.
+- The preflight's calibration and preregistration checks are added in Phases 3B and 4.
+
+- Found while testing on Windows: two parallel J4 workers both rewrote `cost_log.csv` and
+  `llm_scores.csv` without a lock (a lost update on any system, and a `PermissionError` on
+  Windows). Both writes now take a lock, and the atomic replace retries briefly on Windows.

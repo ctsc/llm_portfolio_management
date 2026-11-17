@@ -11,7 +11,7 @@ import pytest
 
 from portstudy.baseline.combine import combine
 from portstudy.baseline.common import rank_u
-from portstudy.baseline.kronos import KronosForecaster, StubForecaster
+from portstudy.baseline.kronos import KronosForecaster, StubForecaster, chunk_seed
 from portstudy.config import KronosConfig
 from portstudy.optimize import WeekInputs
 from portstudy.risk.covariance import RiskModel
@@ -155,7 +155,7 @@ def test_kronos_path_samples_and_repeated_calls_match(
         path_result = _forecaster(_PathPredictor(samples)).forecast(
             _ohlcv(), horizon=2, n_samples=3, seed=13
         )
-    assert path_seeds == [13] and path_numpy_seeds == [13]
+    assert path_seeds == path_numpy_seeds == [chunk_seed(13, 0, 0)]
     path_logs = [record for record in caplog.records if record.message == "kronos_sampling_path"]
     assert len(path_logs) == 1
     assert path_logs[0].extra_fields["verification"] == "UNVERIFIED"
@@ -168,7 +168,8 @@ def test_kronos_path_samples_and_repeated_calls_match(
             _ohlcv(), horizon=2, n_samples=3, seed=13
         )
     assert repeated_predictor.calls == 3
-    assert repeated_seeds == repeated_numpy_seeds == [13, 14, 15]
+    expected = [chunk_seed(13, s, 0) for s in range(3)]
+    assert repeated_seeds == repeated_numpy_seeds == expected
     assert (
         len([record for record in caplog.records if record.message == "kronos_sampling_path"]) == 1
     )
@@ -182,7 +183,7 @@ def test_kronos_path_samples_and_repeated_calls_match(
             _ohlcv(), horizon=2, n_samples=3, seed=13
         )
     assert batch_predictor.calls == 3
-    assert batch_seeds == batch_numpy_seeds == [13, 14, 15]
+    assert batch_seeds == batch_numpy_seeds == expected
     assert (
         len([record for record in caplog.records if record.message == "kronos_sampling_path"]) == 1
     )

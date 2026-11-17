@@ -10,8 +10,9 @@ NVIDIA RTX 3050 with 6 GB, WSL2 Ubuntu, CUDA visible inside WSL.
 
 ## Why WSL2
 
-- `scripts/benchmark_pipeline.py` imports Python's `resource` module, which exists only on Linux
-  (a Windows-safe guard is pending in PLAN4 Phase 3), and the pipeline assumes Linux paths.
+- The weekly run is built and timed for Linux paths and tools (`rsync`, the keep-awake helper).
+  The code and offline tests also run on native Windows (peak memory in the benchmark prints `n/a`
+  there unless `psutil` is installed).
 - The NVIDIA GPU is usable from WSL2.
 - Do not run from a OneDrive folder through `/mnt/c/...`. OneDrive-synced folders refuse WSL
   `chmod` and editable installs ("Operation not permitted"), so `pip install -e` and `git clone`
@@ -43,8 +44,9 @@ nvidia-smi
 Notes:
 - `uv pip install` downloads PyTorch with CUDA (a few GB) and can print nothing for minutes. Do not
   press Ctrl+C.
-- `einops` and `safetensors` are needed by Kronos; PLAN4 Phase 3 adds them to the `ml` extra and
-  adds a `uv.lock` to install from.
+- `einops` and `safetensors` (needed by Kronos) are in the `ml` extra, and `arch` is in the
+  `stats` extra. `uv.lock` pins every version; `uv sync --extra ml --extra solvers --extra data
+  --extra api --extra stats --extra dev` installs exactly the locked set.
 - The setuptools warning about `project.license` as a TOML table is harmless.
 - To update the checkout later: `cd ~/pm && git pull`. Edits made in the Windows copy reach WSL only
   through git.
@@ -71,8 +73,10 @@ python scripts/kronos_smoke.py --n-stocks 300
 
 Measured 2026-11-10: 100 stocks in 195 s at 1.79 GB peak; 300 stocks in 3,373 s at 4.49 GB peak
 with other apps holding about 1.2 GB of GPU memory, which likely spilled into shared memory. Close
-GPU-heavy apps before J2. Chunked forecasting (`baseline.kronos.batch_size`, default 100) is
-pending in PLAN4 Phase 3.
+GPU-heavy apps before J2. Kronos forecasts in chunks of `baseline.kronos.batch_size` (default 100) and
+frees GPU memory between chunks; `python scripts/kronos_smoke.py --n-stocks 300 --batch-size 100`
+prints per-chunk seconds and peak GPU memory. The chunked timing has not been measured on the
+desktop yet (`manualwork.md` B3).
 
 ## Keys and network
 
@@ -111,7 +115,8 @@ model.
 J9 writes `data/backups/<week>_<timestamp>/` and a zip. Set `backup.rsync_target` to a folder
 outside the WSL home so the backup survives a WSL problem, for example
 `/mnt/c/Users/carte/portstudy_backups`, and copy it to cloud storage. Whether WSL can write into a
-OneDrive-synced folder is unverified; a writability probe at J9 is pending in PLAN4 Phase 3.
+OneDrive-synced folder is unverified; J9 probes the target first (it writes and deletes a small file) and prints a
+warning naming the target when it is not writable. The local backup is written either way.
 
 ## Benchmarks
 

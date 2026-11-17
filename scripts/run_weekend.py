@@ -11,7 +11,7 @@ command to rerun that one job. Rerunning the script resumes where it stopped.
 
 Usage: python scripts/run_weekend.py [--week 2026-W46] [--dry-run] [--synthetic]
                                      [--allow-over-budget] [--now ISO]
-                                     [--poll-seconds N] [--from J3] [--until J5]
+                                     [--poll-seconds N] [--from J3] [--until J5] [--skip-preflight]
 
 `--from <job>` resumes at that job (earlier jobs are left as they are) and `--until` stops after
 a job. Before J4 a health check sends one tiny call per gateway model; on a failure the D2 lines
@@ -23,17 +23,21 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
 from portstudy import calendar as cal
+from portstudy.config import repo_root
 from portstudy.llm import health
 from portstudy.llm.runner import lock_deadline
 from portstudy.pipeline import fallback as fb
 from portstudy.pipeline.context import RunContext, default_context, synthetic_clock
+from portstudy.pipeline.frozen import save_frozen_config
 from portstudy.pipeline.jobs import current_week, read_weights_lock, run_named, weeks_with_weights
+from portstudy.pipeline.preflight import live_ready
 from portstudy.pipeline.status import JobFailed, read_status
 from portstudy.types import PortfolioId
 
@@ -42,11 +46,14 @@ FALLBACK_HINTS = {
     "J2": "baseline failure: every portfolio holds last week's positions (no_rebalance)",
     "J3": "batch not submitted: the API portfolios trade the Q0 weights (fallback_q0)",
     "J4": (
-        "open-weight run incomplete: those portfolios trade the Q0 weights "
-        "(fallback_q0) at the lock"
+        "open-weight run incomplete: rerun `python scripts/run_weekend.py --from J4` to resume "
+        "from the saved records; at the lock margin unfinished sources trade Q0"
     ),
     "J5": "batch not collected: those portfolios trade the Q0 weights (fallback_q0) at the lock",
-    "J6": "validation did not finish: rerun J6 before the lock margin",
+    "J6": (
+        "fallback plan not written: rerun J6; it marks unfinished or failed sources as fallback "
+        "and the week holds if J2 never ran"
+    ),
     "J7": "weights not written: fix and rerun J7 before the lock deadline",
     "J8": "replay or scoring not done: results lag until J8 runs",
     "J9": "backup not written: run J9 or `portstudy backup`",
@@ -95,7 +102,7 @@ def _summarize(job: str, result: dict[str, Any]) -> str:
             else:
                 parts.append(
                     f"{m}: calls={v.get('n_calls')} cached={v.get('n_cached')} "
-                    f"invalid={v.get('n_invalid')}"
+                    f"invalid={v.get('n_invalid')} provider_error={v.get('n_provider_error')}"
                 )
         return "; ".join(parts)
     if job == "J6":
@@ -170,6 +177,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--poll-seconds", type=int, default=None)
     parser.add_argument("--from", dest="from_job", default="J1", help="resume at this job")
     parser.add_argument("--until", dest="until_job", default="J9", help="stop after this job")
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="skip the live-readiness checks (check_live_ready.py is the standalone run)",
+    )
     args = parser.parse_args(argv)
     if args.from_job not in STEP_ORDER or args.until_job not in STEP_ORDER:
         parser.error(f"--from/--until must be one of {STEP_ORDER}")
@@ -212,6 +224,32 @@ def main(argv: list[str] | None = None) -> int:
         for job in ctx.cfg.pipeline.jobs:
             print(f"  {job}: {read_status(week, job).state}")
         return 0
+    if not args.synthetic:
+        if not args.skip_preflight:
+            report = live_ready(
+                ctx.cfg,
+                ctx.registry,
+                ctx.manifest,
+                root=repo_root(),
+                env=os.environ,
+                now=ctx.now(),
+                week_id=week,
+            )
+            for line in report.failures:
+                say(f"preflight FAIL: {line}")
+            for line in report.warnings:
+                say(f"preflight WARN: {line}")
+            if report.failures:
+                say(
+                    "preflight failed; fix the failures or rerun with --skip-preflight "
+                    "(see scripts/check_live_ready.py)"
+                )
+                return 2
+        if week == ctx.cfg.timing.pilot_week:
+            # Phase 3C frozen-config: the pilot run snapshots the configuration every later
+            # week is diffed against.
+            save_frozen_config(repo_root())
+            say("pilot week: configuration frozen under data/frozen/")
     jobs = jobs_between(args.from_job, args.until_job)
     say(f"jobs this run: {' '.join(jobs)}")
     explicit_j8 = "J8" in (args.from_job, args.until_job)
@@ -236,6 +274,22 @@ def main(argv: list[str] | None = None) -> int:
                     for hold_job in ("J6", "J7"):
                         run(ctx, hold_job, week, args.synthetic)
                     return 1
+            elif job == "J4":
+                try:
+                    run(ctx, job, week, args.synthetic)
+                except JobFailed:
+                    margin = lock_deadline(week, ctx.cfg) - dt.timedelta(
+                        minutes=ctx.cfg.pipeline.lock_margin_minutes
+                    )
+                    if ctx.now() >= margin:
+                        # N1: no time left to finish J4; J6 marks the unfinished sources as
+                        # fallbacks and the week continues on their strategy's Q0.
+                        say(
+                            "J4 failed at the lock margin; continuing to J6 "
+                            "(unfinished sources trade their strategy's Q0, N1)"
+                        )
+                        continue
+                    raise
             else:
                 run(ctx, job, week, args.synthetic)
     except JobFailed:

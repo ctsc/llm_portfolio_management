@@ -53,7 +53,7 @@ Keys go in a `.env` file outside the repository (`~/.env` inside WSL, mode 600; 
 | Key | Default | Meaning |
 |---|---|---|
 | `price_provider`, `news_provider`, `reference_provider`, `rate_provider`, `earnings_provider` | alpaca, alpaca, yfinance, fred, finnhub | Real adapters (`synthetic` in tests) |
-| `alpaca_feed` (pending PLAN4 Phase 3, G16) | sip | Alpaca bar feed. The code currently hard-codes `iex` (one small exchange, not consolidated prices); the new key defaults to the consolidated `sip` feed and falls back to yfinance if the free plan refuses it |
+| `alpaca_feed` (G16) | sip | Alpaca bar feed: `sip` (consolidated) or `iex` (one small exchange). If the free plan refuses `sip`, set `price_provider: yfinance`. Bars are requested up to the cutoff day 23:59:59 ET, never later than 16 minutes before now |
 | `price_history_days` | 300 | Trading days pulled into each snapshot |
 | `first_snapshot_news_days` | 7 | News window for the very first snapshot |
 | `news_token_budget_per_stock` | 1500 | Newest-first cap per stock (len/4 estimate unless `news_tokenizer`) |
@@ -79,8 +79,8 @@ Keys go in a `.env` file outside the repository (`~/.env` inside WSL, mode 600; 
 | `kronos.model_id`, `kronos.tokenizer_id` | NeoQuasar/Kronos-base, NeoQuasar/Kronos-Tokenizer-base | Hugging Face ids | |
 | `kronos.context_candles`, `horizon`, `n_samples`, `temperature`, `top_p`, `seed` | 252, 5, 20, 1.0, 0.9, 7 | Sampling settings | |
 | `kronos.input_prices` | adjusted | Adjusted OHLCV in | E4 |
-| `kronos.batch_size`, `kronos.device` | 100, cuda | Stocks per Kronos chunk so the universe fits in 6 GB (100 stocks is one chunk); device (pending PLAN4 Phase 3) | K2 |
-| `on_kronos_failure` | hold (PLAN4 changes the default to `momentum_only`, decision K3) | `hold` or `momentum_only` when J2 fails (pending PLAN4 Phase 3) | |
+| `kronos.batch_size`, `kronos.device` | 100, cuda | Stocks per Kronos chunk so the universe fits in 6 GB (100 stocks is one chunk); device. Each (sample, chunk) has its own seed, so `batch_size` changes the sampled paths and is frozen with the config | K2 |
+| `on_kronos_failure` | momentum_only | When the forecaster raises: `momentum_only` builds the baseline from the momentum rank alone (neutral K1 spread, `kronos_fallback: true` in `baseline_meta.json`); `hold` fails J2 | K3 |
 | `stub_seed` | 11 | Seed of the stub forecaster | |
 
 ### risk
@@ -196,10 +196,15 @@ zero prices; API prices follow D3.
 and ARCTIC confirmed on 2026-11-12 that `seed` is passed to the model server (outputs are still not
 guaranteed identical, because requests are batched with other users'). `json_mode` stays
 `UNVERIFIED` until a real run. MiniMax M2.7 always thinks
-and its thinking counts toward the output limit, so the 300-token default will return empty answers
-for it; PLAN4 Phase 3 (G15) adds per-model limits (Gemma 300, MiniMax about 2,000 until measured).
-Until that phase is built, set MiniMax's `max_output_tokens` through `llm.settings.<model>`. The `llm.gateway` section contains the gateway `base_url`
-(`https://litellm.rs.gsu.edu/v1`, the ARCTIC LiteLLM gateway; GSU network or VPN required). The enabled study
+and its thinking counts toward the output limit, so each gateway model has its own limits in
+`config/models.yaml` `settings` (G15): `max_output_tokens` 300 for Gemma and 2,000 for MiniMax,
+`request_timeout_seconds` 180 and 600, both starting values until `--time-gateway` measures them.
+`llm.settings.<model>` in `study.yaml` overrides a model's settings. The `llm.gateway` section contains the gateway `base_url`
+(`https://litellm.rs.gsu.edu/v1`, the ARCTIC LiteLLM gateway; GSU network or VPN required) and
+`features_frozen` (default false; set true after the pilot, after which a rejected `seed` or
+`response_format` is a failed request instead of a silently disabled feature). API model prices
+carry `confirmed` (false until Carter enters real prices) and each API model needs a dated
+`snapshot_id` (D5); the preflight checks both. The enabled study
 models are Gemma 4 31B and MiniMax M2.7 on the gateway plus Claude Haiku 5.5 and GPT-6 Luna.
 
 ## prompts_manifest.yaml

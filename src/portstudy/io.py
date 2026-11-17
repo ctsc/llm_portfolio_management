@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +19,16 @@ FLOAT_FORMAT = "%.12g"
 
 
 def _atomic_replace(tmp_path: Path, final_path: Path) -> None:
-    # os.replace is atomic on POSIX and on Windows for same-volume paths.
-    os.replace(tmp_path, final_path)
+    # os.replace is atomic on POSIX and on Windows for same-volume paths. Windows refuses the
+    # replace while another thread or process has the target open, so retry briefly there.
+    for attempt in range(20):
+        try:
+            os.replace(tmp_path, final_path)
+            return
+        except PermissionError:
+            if os.name != "nt" or attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def _tmp_for(path: Path) -> Path:

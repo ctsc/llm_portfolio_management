@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import threading
 from dataclasses import dataclass
 
 import pandas as pd
@@ -34,6 +35,10 @@ COST_LOG_COLUMNS = [
     "projected_study_usd",
     "over_budget_allowed",
 ]
+
+
+# J4 runs one thread per open-weight model; the cost log is read, changed and rewritten.
+_COST_LOG_LOCK = threading.Lock()
 
 
 class CostCapExceeded(RuntimeError):
@@ -160,14 +165,19 @@ class RunningCost:
         return read_csv(self.path)
 
     def record(self, row: dict[str, object]) -> None:
-        df = self.read()
-        row = {"week_id": self.week_id, **row}
-        mask = (df["model"] == row["model"]) & (df["config_id"] == row["config_id"])
-        df = df[~mask] if len(df) else df
-        new = pd.DataFrame([row])
-        df = pd.concat([df, new], ignore_index=True) if len(df) else new
-        df = df.loc[:, COST_LOG_COLUMNS].sort_values(["model", "config_id"]).reset_index(drop=True)
-        write_csv_atomic(df, self.path)
+        with _COST_LOG_LOCK:
+            df = self.read()
+            row = {"week_id": self.week_id, **row}
+            mask = (df["model"] == row["model"]) & (df["config_id"] == row["config_id"])
+            df = df[~mask] if len(df) else df
+            new = pd.DataFrame([row])
+            df = pd.concat([df, new], ignore_index=True) if len(df) else new
+            df = (
+                df.loc[:, COST_LOG_COLUMNS]
+                .sort_values(["model", "config_id"])
+                .reset_index(drop=True)
+            )
+            write_csv_atomic(df, self.path)
 
     def total(self) -> float:
         df = self.read()
