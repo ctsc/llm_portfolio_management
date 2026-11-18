@@ -220,11 +220,21 @@ active return, the weekly return minus the same strategy's Q0.
 Formulas and reasoning: `llm_research/05_evaluation_methodology.md` and
 `06_evaluation_research_findings.md`.
 
-**What the code does today (until PLAN4).** H1 and H2 IC gaps with Holm across sources; H2
-portfolio gaps vs Q0 on clean weeks with Holm within each strategy; H3 on IC only, Holm per model;
-H3b narrow minus wide; H4 ranking and splits; ETF-proxy factor regressions of total returns; and
-Sharpe without risk-free subtraction. The retired G6 test (`docs/open_questions.md`) was deleted
-in PLAN4 Phase 1.
+**Module map (`src/portstudy/eval/`).**
+
+| Module | Implements |
+|---|---|
+| `data.py` | `EvalData`: open-to-open weekly returns, daily values, trades, statuses, the stock-week panel with characteristics, active-view, expected-TE and uncertainty-ratio tables, model-change weeks, factors |
+| `tests.py` | `mean_test` (Newey-West and t(T-1)), `sign_flip_p` (exact up to T = 24), `block_bootstrap_ci` (stationary, percentile-t), `paired_summary`, Ledoit-Wolf, Jobson-Korkie-Memmel, PSR, DSR |
+| `multiple.py` | `fdr_bh`, `assign_families` (Holm primary, BH secondary, H4 exploratory) |
+| `metrics.py` | Sharpe net of the T-bill rate, Lo Sharpe, Sortino, drawdown, Calmar, CVaR, IR, TE, CER, hit rate, break-even cost, `arch` SPA, StepM, MCS |
+| `factors.py` | French daily FF5 plus momentum loader, coverage check, ETF proxies, synthetic French files |
+| `characteristics.py` | stock-week controls as of each cutoff (G9) |
+| `signal_tests.py` | H1, H2 signal, H3 signal, model comparisons, H3b interaction and calibration, pooled regressions, the four primary rows |
+| `portfolio_tests.py` | H2 portfolio (ITT and active weeks), G19 split, H3 portfolio and the placebo control, model comparisons, controls, H4, H5, SPA and StepM, view sensitivity, model-change sensitivity |
+| `hypotheses.py` | portfolio metrics table, H3b narrow minus wide, H4 ranking and splits, earnings exposure |
+| `all_metrics.py` | long-form `all_metrics.csv` and the completeness check (G22) |
+| `report.py` | `report.md`, every CSV, figures; `portstudy eval` |
 
 ## Weekly run on the desktop (`scripts/run_weekend.py`)
 

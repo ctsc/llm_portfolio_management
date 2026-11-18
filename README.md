@@ -26,7 +26,7 @@ The proposal ends with a stated hypothesis for each research question. Code, con
 | H4 | strategies ranked by mean active return, strategy-vs-strategy differences, market, volatility and earnings-week splits (exploratory) |
 | H5 | daily active return regressed on Fama-French five factors plus momentum; the placebo prompt as the content control |
 
-Four pooled main comparisons (LLM-minus-baseline rank IC gap, steered-minus-Q0 tilt IC gap, skills minus bare, skills minus placebo) are fixed in `config/preregistration.yaml` before the live run and corrected with Holm; every other comparison uses Benjamini-Hochberg. Every metric is computed for every source, portfolio, model, prompt and strategy and saved to `results/eval/all_metrics.csv`, and null results are reported (G22). The shuffled-ratings test of earlier plans is dropped. The code still implements the older evaluation until `plans/PLAN4.md` Phases 1 to 9 are built.
+Four pooled main comparisons (LLM-minus-baseline rank IC gap, steered-minus-Q0 tilt IC gap, skills minus bare, skills minus placebo) are fixed in `config/preregistration.yaml` before the live run and corrected with Holm; every other comparison uses Benjamini-Hochberg. Every metric is computed for every source, portfolio, model, prompt and strategy and saved to `data/outputs/report/all_metrics.csv`, and null results are reported (G22). `portstudy eval` writes the report in that order (main results first) with every table as CSV.
 
 ## Study design
 
@@ -150,7 +150,7 @@ No failure is silent and every fallback is labeled in the data.
 | J1, J6, J8, J9 | desktop | minutes |
 | Final evaluation | desktop | minutes |
 
-ARCTIC allocation (granted 2026-11-16): the default startup allocation of 1,000 GPU and 10,000 CPU service units, so the study uses 100 stocks. ARCTIC request (revised 2026-11-12): GPU hours for the gateway LLM calls only (2,730 for 300 stocks, 910 for 100), no CPU hours or storage. The per-request figures behind it (about 40 V100-equivalent GPU-seconds per Gemma request and 90 per MiniMax request, whose reasoning counts as output) are estimates, and how gateway requests convert into GPU service units is not yet known (`llm_research/09_arctic_process_and_model_facts.md`). Desktop benchmark details: `docs/desktop_setup.md` and `llm_research/04_models_compute_arctic.md`.
+ARCTIC allocation (granted 2026-11-16): the default startup allocation of 1,000 GPU service units (plus CPU units the study does not use), so the study uses 100 stocks. ARCTIC request (revised 2026-11-12): GPU time for the gateway LLM calls only (2,730 GPU-hours for 300 stocks, 910 for 100), no ARCTIC compute jobs or storage. The per-request figures behind it (about 40 V100-equivalent GPU-seconds per Gemma request and 90 per MiniMax request, whose reasoning counts as output) are estimates, and how gateway requests convert into GPU service units is not yet known (`llm_research/09_arctic_process_and_model_facts.md`). Desktop benchmark details: `docs/desktop_setup.md` and `llm_research/04_models_compute_arctic.md`.
 
 ## Quick start
 
@@ -283,6 +283,6 @@ The five study design choices, with value, config key, and reason (they match `c
 - **G3b, median width split** (`eval.h3b`): splitting at each week's median gives two groups of similar size, so neither group's rank IC is much noisier than the other; weeks with a group under 10 stocks are skipped.
 - **P1, skills length tolerance 5%** (`llm.skills_length_tolerance`): keeps the skills files close enough in length that length cannot explain differences between them; the placebo stays within 2% of their mean.
 
-The PLAN4 decisions (`docs/open_questions.md`): everything except LLM calls runs on the desktop (L1); Kronos runs in chunks (K2); a gateway outage fails that model's week (D2); the shuffle test, Slurm walltime and memory rules are retired (G6, W1, M1); and the evaluation uses pre-registered main comparisons, intention-to-treat and active-week reporting, residual IC, risk-free-adjusted and daily downside metrics, French factors and small-sample inference (G7 to G12).
+The PLAN4 decisions (`docs/open_questions.md`): everything except LLM calls runs on the desktop (L1); Kronos runs in chunks (K2); a gateway outage fails that model's week (D2); three earlier rules are retired (G6, W1, M1; see the retired table); and the evaluation uses pre-registered main comparisons, intention-to-treat and active-week reporting, residual IC, risk-free-adjusted and daily downside metrics, French factors and small-sample inference (G7 to G12).
 
 D3, the paid API budget, is the only provisional decision; see `docs/open_questions.md`. Every other build-time choice is in `docs/build_decisions.md`.

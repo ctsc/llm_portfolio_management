@@ -37,16 +37,15 @@ uv venv ~/pm311 --python 3.11
 source ~/pm311/bin/activate
 git clone https://github.com/ctsc/llm_portfolio_management.git ~/pm
 cd ~/pm
-uv pip install -e ".[dev,ml,solvers,data,api]" einops safetensors
+uv sync --extra ml --extra solvers --extra data --extra api --extra stats --extra dev
 nvidia-smi
 ```
 
 Notes:
-- `uv pip install` downloads PyTorch with CUDA (a few GB) and can print nothing for minutes. Do not
-  press Ctrl+C.
-- `einops` and `safetensors` (needed by Kronos) are in the `ml` extra, and `arch` is in the
-  `stats` extra. `uv.lock` pins every version; `uv sync --extra ml --extra solvers --extra data
-  --extra api --extra stats --extra dev` installs exactly the locked set.
+- `uv sync` installs exactly the versions pinned in `uv.lock`. It downloads PyTorch with CUDA (a
+  few GB) and can print nothing for minutes. Do not press Ctrl+C.
+- `einops` and `safetensors` (needed by Kronos) are in the `ml` extra; `arch` (SPA, StepM, MCS in
+  the report) is in the `stats` extra. `python scripts/kronos_smoke.py` checks Kronos on the GPU.
 - The setuptools warning about `project.license` as a TOML table is harmless.
 - To update the checkout later: `cd ~/pm && git pull`. Edits made in the Windows copy reach WSL only
   through git.

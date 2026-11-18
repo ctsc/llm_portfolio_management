@@ -1633,3 +1633,36 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
   `tests/unit/test_v2_phase10_eval.py` (tests of the retired functions removed; H3b checks raw p).
 - Report runtime on the shared synthetic study (3 weeks, 54 portfolios): 6.0 s on Windows.
 - `ruff`, `mypy` clean.
+
+## v4 phase 10: documentation recheck and cleanup
+
+### What changed
+
+- No "pending PLAN4", "removed in PLAN4" or "until PLAN4" note remains in README or `docs/`
+  (`grep -rniE "pending PLAN4|removed in PLAN4|until PLAN4" README.md docs/` returns nothing).
+- `grep -rniE "slurm|sbatch|shuffle|walltime|cpu.hour|e4b|phi-4|llama 3.2|login mode"` over README,
+  `docs/*.md`, `src`, `scripts` and `config` matches only the retired-decision rows in
+  `docs/open_questions.md` and the retired history in `docs/build_decisions.md` (the synthetic
+  provider's `rng.shuffle` became `rng.permutation`, same draws).
+- Every relative link in README and `docs/` resolves (checked by a script).
+- README: the evaluation paragraph describes the built report; ARCTIC allocation wording;
+  retired rules referenced by id.
+- `docs/design.md`: the "what the code does today" paragraph is replaced by the `eval/` module
+  map (which module implements which test).
+- `docs/runbook.md`: end-of-study commands (`portstudy closeout`, `fetch_french_factors.py`,
+  `portstudy eval --factor-source`, `--out`) and the report section order.
+- `docs/desktop_setup.md`: the install line is `uv sync` with every extra (locked set); notes on
+  the `ml` and `stats` extras and `kronos_smoke.py`.
+- `docs/config_reference.md`, `docs/open_questions.md`: stale notes removed; G22 marked built.
+- `docs/build_decisions.md`: v4 entries added, newest first.
+- `llm_research/03` and `10`: status lines updated (E7 and A8 built; phase status).
+
+### Differences from PLAN4 recorded here
+
+- PLAN4's G22 text names `results/eval/all_metrics.csv`; the report and every CSV, including
+  `all_metrics.csv`, are written to `data/outputs/report/` (the existing report folder, so backups
+  include them). README, `docs/open_questions.md`, the CLI help and the module docstring say so.
+
+### Tests
+
+- Checklist, CI, shuffle-removed and gateway tests pass. `ruff`, `mypy` clean.

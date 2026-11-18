@@ -192,7 +192,9 @@ def eval_cmd(
     factor_source: str | None = typer.Option(
         None, "--factor-source", help="french or etf_proxy (overrides eval.factor_source)"
     ),
-    out: str | None = typer.Option(None, "--out", help="report folder (default results/eval)"),
+    out: str | None = typer.Option(
+        None, "--out", help="report folder (default data/outputs/report)"
+    ),
 ) -> None:
     """Write the evaluation report, every table as CSV and all_metrics.csv (PLAN4 Phase 9)."""
     from pathlib import Path

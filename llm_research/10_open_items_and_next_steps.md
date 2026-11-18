@@ -4,8 +4,8 @@ Last updated: 2026-11-17.
 
 Remaining work lives in two files at the repository root:
 
-- **`plans/PLAN4.md` Phases 1 to 11 (Devin; build status in `plans/PROGRESS.md`, Phases 1 and 2
-  done 2026-11-17):** remove the shuffle test and the ARCTIC Slurm layer and small models;
+- **`plans/PLAN4.md` Phases 1 to 11 (Devin; build status in `plans/PROGRESS.md`, Phases 1 to 10
+  done 2026-11-18, Phase 11 end-to-end verification in progress):** remove the shuffle test and the ARCTIC Slurm layer and small models;
   desktop runtime (Kronos chunking, live-readiness checks, lock file, gateway timing, backup check);
   decisions, evaluation config and `config/preregistration.yaml`; statistics primitives and metrics;
   French factors and stock characteristics; signal-level and portfolio-level hypothesis tests; the

@@ -1,4 +1,4 @@
-"""Every metric for every unit in long form (DECISION(G22)): `results/eval/all_metrics.csv`.
+"""Every metric for every unit in long form (DECISION(G22)): `data/outputs/report/all_metrics.csv`.
 
 One row per (unit, metric) with estimate, CI, p, `p_adj`, family, T and a `reason` whenever the
 value is NaN. Units: each source, steered portfolio, Q0, confidence-only portfolio, HRP and equal

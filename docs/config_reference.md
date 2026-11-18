@@ -3,8 +3,7 @@
 All settings live in `config/study.yaml` (typed by `src/portstudy/config.py`, unknown keys
 rejected), `config/models.yaml`, and `config/prompts_manifest.yaml`. The `decision` column
 gives the decision id (see `docs/open_questions.md`) where one applies; code tags each use with
-`DECISION(<id>)`. Keys marked "removed in PLAN4" still load today but belong to retired designs;
-keys marked "pending PLAN4" are added by `plans/PLAN4.md`.
+`DECISION(<id>)`. Unknown keys fail validation, so a key from a retired design cannot linger.
 
 ## Environment variables
 

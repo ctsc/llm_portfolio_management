@@ -81,11 +81,11 @@ the first JSON object in the text.
 2. Build views: the residualized likely score, the source's trailing rank IC and stock volatility
    set each view's expected return. The LLM view is centered on the Q0 forecast (decision E7,
    2026-11-11): `q_L = mu_Q0 + IC_L * sigma * z_L`, so a rating of 0 changes nothing for MVO and
-   Top-K. The code still uses the old `pi`-centered formula until PLAN4 Phase 3B. Range width sets view uncertainty: c = clip(1 - width/10, 0.1,
+   Top-K (built in PLAN4 Phase 3B). Range width sets view uncertainty: c = clip(1 - width/10, 0.1,
    1), so a narrow range (3 to 5) counts more than a wide one (1 to 5).
 3. View scale: fixed at 0.02 for the LLM and baseline views every week (decision A8, 2026-11-12;
-   pending PLAN4 Phase 3A). The code still uses the old trailing-IC gating (cold start 0.02, then
-   an 8-week trailing IC floored at 0) until then.
+   built in PLAN4 Phase 3A; the older trailing-IC gating remains only as `ic_mode: trailing` for
+   tests).
 4. Black-Litterman blends market-implied returns (study-only market-cap weights, delta 2.5) with
    the baseline view and the LLM view, using a Ledoit-Wolf covariance (252 days, tau 0.05). The
    same posterior and covariance go to every strategy. Any LLM view also lowers the posterior

@@ -3,6 +3,26 @@
 Every non-obvious choice made while building the system, newest first; "chosen during build" marks
 the ones the plan left open. The study decisions are in `docs/open_questions.md`.
 
+- **v4 phase 9 report folder**: the report and `all_metrics.csv` stay under
+  `data/outputs/report/` (where every earlier report went) rather than the `results/eval/` path in
+  PLAN4's G22 text, so backups and the data folder keep holding every output.
+- **v4 phase 8 model-change sensitivity**: the H2 intention-to-treat rows are repeated without each
+  model's flagged weeks; the flagged weeks are listed in the report.
+- **v4 phase 7 pooled coding**: H1 and H2 pooled gaps use effect-coded model fixed effects, so the
+  intercept is the mean gap over models; Fama-MacBeth targets are standardized return ranks.
+- **v4 phase 6 factors in synthetic runs**: seeded French-format files are generated from the
+  synthetic world's ETF proxies so the French path runs end to end without a download.
+- **v4 phase 5 Lo Sharpe**: AR(1) autocorrelations (rho^k), because about 23 weekly points cannot
+  estimate higher lags.
+- **v4 phase 3B calibration inputs**: skilled ratings come from the synthetic next-week returns (2
+  times the z-score plus unit noise); tracking error is measured at the optimizer level.
+- **v4 phase 3A kill points**: the random-kill test ends the process without cleanup right after
+  its N-th event (`PORTSTUDY_TEST_KILL_AT_EVENT`), which is reproducible on Windows and Linux.
+- **v4 phase 3A fallbacks.csv columns**: no run id or timestamp, so the file stays byte-identical
+  on reruns; both are in the event timeline.
+- **v4 phase 3 lock cutoff**: a request reached after the lock cutoff stays unrecorded so J6 falls
+  back to Q0 for that source.
+
 **Retired by PLAN4 (2026-11-11).** Entries below that describe the shuffled-ratings test (v2 phase
 11, v2 phase 14 e2e shuffle, the shuffle projection in v2 phase 9), the ARCTIC Slurm scripts and
 walltime flags (v2 phase 12), the gateway fallback server and `--gateway-fallback` (v2 phase 13 D2
@@ -30,7 +50,7 @@ model's week (D2). `plans/PLAN4.md` Phases 1 and 2 remove that code.
 - **v2 phase 10 header values (chosen during build)**: the report prints the K1, S4, S5, G3b, and P1 values in force from the config objects beside the `decisions` text, and says "not listed" when a config has no decisions block (the test config).
 - **v2 phase 9 compiled-problem cache (chosen during build)**: cvxpy problems are keyed by their constant data (tickers, SHA-256 of Sigma, and for robust and CVaR the SHA-256 of M plus week and seed) with `mu` as a parameter, so resampled draws, every source in a week, and the shuffle test reuse one canonicalization; `warm_start=False` keeps cached and fresh solves identical.
 - **v2 phase 9 benchmark on synthetic matrices (chosen during build)**: `scripts/benchmark_pipeline.py` times the optimizers on a seeded 3-factor covariance instead of a full pipeline week, so the 300-stock numbers isolate solver cost; the v1 job timing stays behind `--jobs`.
-- **v2 phase 9 shuffle projection (chosen during build)**: CPU hours = weeks x shuffles x (projected sources x strategies) x mean strategy solve time, with 51 projected sources (7 models x 7 prompt types + Q0) as PLAN2 states; the CPU-hour comparison against the ARCTIC request is obsolete, since the request now asks for no CPU hours (removed in PLAN4 Phase 1).
+- **v2 phase 9 shuffle projection (chosen during build)**: CPU hours = weeks x shuffles x (projected sources x strategies) x mean strategy solve time, with 51 projected sources (7 models x 7 prompt types + Q0) as PLAN2 states; the CPU-hour comparison against the ARCTIC request is obsolete, since the request now asks for no CPU hours (the projection was deleted with the retired test).
 - **v2 phase 9 slow tests (chosen during build)**: pytest `addopts` deselects `-m slow` by default, so the 300-stock benchmark test runs only on request (`pytest -m slow`).
 - **DECISION(G1), portfolio guardrails** (`optimizer.max_weight`): all strategies and controls use a 5 percent cap with no short positions, matching the same investability limits.
 - **DECISION(S2), forecast-free controls**: HRP and equal weight do not use LLM views or Q0 weights, so they provide strategy-independent comparators.

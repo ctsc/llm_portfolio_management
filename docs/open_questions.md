@@ -1,8 +1,8 @@
 # Open questions and study decisions
 
 The current decision table. Source of truth: `plans/PLAN4.md` section 0.3 (approved 2026-11-10
-and 2026-11-11) on top of the unchanged `plans/PLAN2.md` section 0.3 values. `config/study.yaml`
-still holds the older text for D1, D2, N2, G6, W1 and M1 until PLAN4 Phases 2 and 4 update it.
+and 2026-11-11) on top of the unchanged `plans/PLAN2.md` section 0.3 values. `config/study.yaml` holds the
+same values in its `decisions` block (PLAN4 Phase 4).
 
 Rule: changing any default after the live run starts must be logged in `plans/PROGRESS.md` with the
 date and reason and flagged in the analysis. Code never changes a decision value.
@@ -12,7 +12,7 @@ date and reason and flagged in the analysis. Code never changes a decision value
 | ID | Setting | Value | Status |
 |---|---|---|---|
 | D1 | models | ARCTIC LiteLLM gateway: Gemma 4 31B and MiniMax M2.7 only, no deployment requests; API: both Claude Haiku 5.5 and GPT-6 Luna; no Qwen or DeepSeek | confirmed (2026-11-10; API models 2026-11-17) |
-| D2 | gateway outage | the failing model's week is marked failed and left out of its statistics; no Slurm or vLLM fallback | confirmed (2026-11-10) |
+| D2 | gateway outage | the failing model's week is marked failed and left out of its statistics; no fallback model server | confirmed (2026-11-10) |
 | L1 | where it runs | everything except LLM calls on Carter's desktop in WSL2; Kronos on the local RTX 3050; ARCTIC request is gateway GPU hours only | confirmed (2026-11-10) |
 | K2 | Kronos batching | forecast in chunks of `baseline.kronos.batch_size` (default 100) to fit 6 GB | confirmed (2026-11-11) |
 | D3 | paid API budget | goal 50 USD; gateway models cost 0 USD; recompute with real prices | provisional |
@@ -41,7 +41,7 @@ date and reason and flagged in the analysis. Code never changes a decision value
 | G21 | weekly model checks | `model` field, `x-litellm-model-id` and `x-litellm-version` headers, `reasoning_tokens`, `/v1/model/info` `updated_at`; 10 canaries per model before J4; model or deployment change or canary drop flags the week | confirmed (2026-11-16), built in PLAN4 Phase 3A |
 | N6 | logging and durable progress | run_id, event timeline, tracebacks, captured warnings, `fallbacks.csv`, fsync on every write, disk check per job, `run_summary.md`, `portstudy audit`, random-kill resume test | confirmed (2026-11-12), built in PLAN4 Phase 3A |
 | N7 | ARCTIC usage budget | estimated GPU-hours per week against 1,000, and gateway dollars from `x-litellm-response-cost` against `arctic.litellm_budget_usd` (about $10 to start); warn at 75%, alert at 90%; stop before J4 if the week would pass the dollar limit | confirmed (2026-11-16), built in PLAN4 Phase 3A |
-| G22 | measure everything | every metric for every source, portfolio, model, prompt and strategy, per cell and pooled, in `results/eval/all_metrics.csv`; Sharpe net of the T-bill rate leads the portfolio table; null results reported; scope fixed at the freeze | confirmed (2026-11-17), pending PLAN4 Phase 9 |
+| G22 | measure everything | every metric for every source, portfolio, model, prompt and strategy, per cell and pooled, in `data/outputs/report/all_metrics.csv`; Sharpe net of the T-bill rate leads the portfolio table; null results reported; scope fixed at the freeze | confirmed (2026-11-17), built in PLAN4 Phase 9 |
 | B1 | prompt types | bare, placebo, and 4 similar-length specialized skills files (`skills_5` off); one placebo matched to mean skills length | confirmed (2026-11-12) |
 | B4 | universe size | 100 stocks; ARCTIC granted the 1,000 GPU-hour startup allocation (2026-11-16) | confirmed (2026-11-16) |
 | C3 | output schema | JSON low, likely, high integers in [-5, 5], rationale; low <= likely <= high; no separate certainty field | confirmed |
@@ -68,7 +68,7 @@ date and reason and flagged in the analysis. Code never changes a decision value
 | G10 | portfolio metrics | Sharpe net of the T-bill rate; Sortino, max drawdown, CVaR from daily returns; IR and tracking error vs Q0; probabilistic Sharpe; certainty-equivalent return; break-even cost | confirmed (2026-11-11) |
 | G11 | factor model | Kenneth French daily FF5 plus momentum on daily active returns; ETF proxies for live monitoring only | confirmed (2026-11-11) |
 | G12 | small-sample inference | Student-t with T - 1 df; Newey-West lags floor(4 (T/100)^(2/9)); block bootstrap percentile-t; exact sign-flip when T <= 24; Ledoit-Wolf Sharpe test; tie band 0.001 with sensitivity | confirmed (2026-11-11) |
-| N2 | weekly trigger | Carter runs `scripts/run_weekend.py` by hand on the desktop; no scheduler, no Slurm | confirmed (changed 2026-11-10) |
+| N2 | weekly trigger | Carter runs `scripts/run_weekend.py` by hand on the desktop; no scheduler or ARCTIC jobs | confirmed (changed 2026-11-10) |
 | A2, A3, A6, B2, C1, C2, C4, C7, E3, E4, E5, N1, N3 | unchanged decisions | retain the v1 values listed below | confirmed |
 
 ## Retired and superseded decisions

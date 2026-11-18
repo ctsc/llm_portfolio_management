@@ -488,7 +488,7 @@ def _article_text(rng: np.random.Generator, name: str, s: int) -> tuple[str, str
         + list(rng.choice(NEGATIVE_WORDS, n_neg))
         + list(rng.choice(NEUTRAL_WORDS, 1))
     )
-    rng.shuffle(words)
+    words = list(rng.permutation(words))
     headline = f"{name} {' '.join(words)} in quarterly update"
     summary = f"{name} {' and '.join(words)} according to the company statement."
     return headline, summary

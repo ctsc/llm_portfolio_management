@@ -130,12 +130,26 @@ Restore as in section 5.
 ## 9. After the last live week
 
 ```
-portstudy eval            # report under data/outputs/report/
+portstudy closeout                     # refuses until the Monday open after the last week is in
+python scripts/fetch_french_factors.py # Kenneth French daily FF5 and momentum into data/factors/
+portstudy eval                         # report under data/outputs/report/
+portstudy eval --factor-source etf_proxy --out data/outputs/report_etf   # monitoring view
 ```
 
-The final evaluation (residual IC, active-return factor regressions on
-Kenneth French daily factors, Ledoit-Wolf Sharpe tests, pre-registered main comparisons) is
-specified in `plans/PLAN4.md` Phases 5 to 9 and `llm_research/05_evaluation_methodology.md`.
+`fetch_french_factors.py` refuses to overwrite a file that covers a later date and records the
+last date covered; `portstudy eval` with `factor_source: french` fails clearly if the files end
+before the study's last week (the French library updates monthly, so wait for it).
+
+`data/outputs/report/report.md` sections, in order: Header (weeks, models, prompts, strategies,
+factor source, pre-registration freeze date, fallback and active-view shares, decision values),
+Main results (the four preregistered comparisons with effect, CI, p, Holm p and minimum
+detectable effect), H1, H2 (intention-to-treat and active weeks side by side, the information vs
+confidence split), H3, model comparisons, H3b, H4 (exploratory), H5 (factor alpha and loadings,
+placebo control, deflated Sharpe), controls vs HRP and equal weight, portfolio metrics,
+tie-band sensitivity, view sensitivity (G13), model-change sensitivity and repeat agreement,
+data integrity, study log summary, and how to read a null. Every table is also a CSV;
+`all_metrics.csv` holds every metric for every unit, and the run fails if a pair is missing.
+Formulas: `llm_research/05_evaluation_methodology.md`.
 
 ## Where to look (decision N6)
 
