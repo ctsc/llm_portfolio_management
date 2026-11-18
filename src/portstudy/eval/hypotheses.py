@@ -86,9 +86,24 @@ def h2_combined_vs_baseline(data: EvalData) -> pd.DataFrame:
     return df
 
 
+def _rf_inputs(data: EvalData) -> tuple[pd.Series, pd.Series]:
+    """Daily FRED T-bill rate from the snapshots and its weekly compounding per week id."""
+    from portstudy import calendar as cal
+    from portstudy.eval.factors import daily_rf_from_snapshots
+    from portstudy.eval.metrics import weekly_rf
+
+    rf_daily = daily_rf_from_snapshots(data.weeks)
+    windows = {w: (cal.monday_open_day(w), cal.window_end_date(w)) for w in data.weeks}
+    return rf_daily, weekly_rf(rf_daily, windows) if len(rf_daily) else pd.Series(dtype=float)
+
+
 def portfolio_metrics(data: EvalData, clean_only: bool) -> pd.DataFrame:
     """Return, Sharpe, drawdown, turnover, cost, stops, mean view shift, fallback and
-    solver-failed weeks for every portfolio, controls included."""
+    solver-failed weeks for every portfolio, controls included, plus the G10 metrics net of the
+    T-bill rate (Sharpe, Lo Sharpe, PSR, Sortino, Calmar, CVaR, volatility, hit rate, CER)."""
+    from portstudy.eval.metrics import return_metrics
+
+    rf_daily, rf_weekly = _rf_inputs(data)
     rows = []
     for key in data.portfolio_keys:
         weekly = data.weekly_returns[key] if key in data.weekly_returns else pd.Series(dtype=float)
@@ -124,9 +139,24 @@ def portfolio_metrics(data: EvalData, clean_only: bool) -> pd.DataFrame:
                 "mean_view_shift": float(shift.mean()) if shift.notna().any() else float("nan"),
                 "fallback_weeks": int((statuses == "fallback").sum()),
                 "solver_failed_weeks": int(failed.sum()) if len(failed) else 0,
+                **return_metrics(
+                    weekly,
+                    rf_weekly if len(rf_weekly) else 0.0,
+                    _daily_returns(daily),
+                    rf_daily if len(rf_daily) else 0.0,
+                    values,
+                    list(data.cfg.eval.cer_gamma),
+                ),
             }
         )
     return pd.DataFrame(rows)
+
+
+def _daily_returns(daily: pd.DataFrame) -> pd.Series:
+    if not len(daily):
+        return pd.Series(dtype=float)
+    values = daily.set_index("date")["value"].astype(float).sort_index()
+    return values.pct_change().dropna()
 
 
 def h2_portfolio_vs_q0(data: EvalData, clean_only: bool = True) -> pd.DataFrame:

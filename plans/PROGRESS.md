@@ -1411,3 +1411,44 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
 - Selectors are lists (`models`, `prompts`, `strategies`, empty meaning every enabled one) plus
   `control_prompt` for prompt comparisons; the skills prompts are listed explicitly in each file.
 - The test config gets its own pre-registration file through `eval.preregistration_file`.
+
+## v4 phase 5: statistics primitives and portfolio metrics
+
+### What changed
+
+- `eval/tests.py`: `mean_test` (Newey-West and plain SE, the larger one for the t-statistic,
+  Student-t p with T - 1 df), `t_critical`, `sign_flip_p` (exact enumeration of all 2^T patterns
+  up to `eval.signflip_exact_max_t`, in chunks of 65,536, Monte Carlo above, with the method
+  reported), the Politis-Romano stationary block bootstrap with percentile-t intervals (block mean
+  T^(1/3) by default), and `paired_summary` extended with `n`, `t`, `p`, `se_plain`, `p_signflip`,
+  `signflip_method`, `mdg` (old column names kept). Sharpe tests: Ledoit-Wolf (2008) studentized
+  circular block bootstrap test of the Sharpe difference with HAC standard errors, Jobson-Korkie
+  with Memmel's correction, probabilistic Sharpe, expected maximum Sharpe and deflated Sharpe.
+- New `eval/multiple.py`: `fdr_bh` and `assign_families` (Holm on the preregistered primary ids,
+  BH on every other row, raw p for exploratory hypotheses; fills `family`, `p_adj`, `significant`).
+- New `eval/metrics.py`: weekly risk-free compounding from the FRED daily rate, excess returns,
+  annualized Sharpe, lag-1 autocorrelation and Lo (2002) Sharpe (AR(1) autocorrelations), Sortino,
+  max drawdown, Calmar, realized CVaR 95%, tracking error, information ratio, certainty-equivalent
+  return per `cer_gamma`, hit rate with binomial p, break-even cost (NaN with a reason), and
+  wrappers for `arch` SPA, StepM and MCS that return None without the `stats` extra.
+- `hypotheses.portfolio_metrics` keeps every old column and adds `sharpe_excess`, `sharpe_lo`,
+  `autocorr_lag1`, `psr`, `volatility`, `sortino`, `max_drawdown_daily`, `calmar`, `cvar_95`,
+  `hit_rate`, `hit_rate_p`, `cer_gamma_2`, `cer_gamma_5`.
+
+### Tests
+
+- New: `tests/unit/test_v4_phase5_stats.py` (10): exact sign flip against a hand count, exact and
+  Monte Carlo within 0.01 at T = 20, Student-t p-values, Holm and BH against statsmodels, family
+  assignment, Ledoit-Wolf (identical series p = 1, clearly better Sharpe p < 0.05, deterministic),
+  PSR and DSR against the published formulas, Sortino, CVaR, drawdown, IR, tracking error, CER, hit
+  rate and break-even cost on hand-made series, the block bootstrap and summary columns, and the
+  `arch` wrappers.
+- The existing evaluation unit tests and the report integration test pass unchanged.
+- `ruff check`, `ruff format --check`, `mypy` clean.
+
+### Choices made while unattended
+
+- Lo's adjustment uses AR(1) autocorrelations (rho^k from the lag-1 estimate), because about 23
+  weekly points cannot estimate higher lags.
+- The Ledoit-Wolf test uses a circular block bootstrap with block length T^(1/3) and reports a
+  symmetric percentile-t interval.
