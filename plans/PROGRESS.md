@@ -1535,3 +1535,59 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
   units; numeric controls use the Phase 6 z-scored columns.
 - Pooled source-week regressions use effect (sum) coding for model fixed effects in H1 and H2 so
   the intercept is the average gap over models.
+
+## v4 phase 8: portfolio-level hypothesis tests and multiple testing
+
+### What changed
+
+- `eval/data.py`: `_meta_tables` now returns weeks-by-portfolio tables of `solver_failed`,
+  `active_view` (G8, from `use_llm_view`), `view_shift`, `expected_te_vs_q0` (G13) and
+  `conf_only_uncertainty_ratio` (G18); `EvalData` gains `active_view`, `expected_te`,
+  `uncertainty_ratio` and `model_change` (G21 weeks per model from `model_checks.csv`).
+- New `eval/portfolio_tests.py`:
+  - `compare`: paired weekly comparison (G12 summary on open-to-open returns), information
+    ratio, tracking error and the Ledoit-Wolf Sharpe test.
+  - H2 portfolio per steered portfolio vs its own Q0, intention-to-treat on clean weeks (realized
+    gap every week, inactive weeks not zeroed) and active weeks only, with share of active weeks,
+    mean absolute inactive-week gap (path effects from stops and costs), turnover gap, break-even
+    cost with its reason, and the daily active-return factor regression (`active_*` columns).
+  - Information vs confidence split (G19) for Robust and Resampled; Mean-CVaR gets a note with
+    its uncertainty ratio.
+  - H3 portfolio: each skills portfolio minus placebo (labeled H5, the content control, with the
+    placebo wording) and minus bare, per model and strategy; pooled active return on a skills
+    indicator with model and week fixed effects per strategy, clustered by week.
+  - Model comparisons on `main_model_comparison_prompt` per strategy; every steered portfolio and
+    Q0 against equal weight and HRP (secondary).
+  - H4 (exploratory): strategy-vs-strategy active-return differences and regime regressions
+    (market up, high volatility) with t(T-1) intervals; the existing ranking and splits stay in
+    `hypotheses.py`.
+  - H5: each portfolio's daily excess return on MKT_RF, SMB, HML, RMW, CMA, MOM with Newey-West
+    SEs (lags floor(4 (T/100)^(2/9))), alpha daily and annualized, t, p, loadings, factor source;
+    the headline (largest Sharpe) portfolio gets the deflated Sharpe ratio (trials = steered
+    portfolios) and a |t| > 3 flag.
+  - Optional `arch` SPA and StepM per strategy ("any source beats Q0"), skipped with a note
+    without `arch`.
+  - View sensitivity (G13): median expected tracking error per strategy on clean weeks against
+    `view_sensitivity_min_tracking_error`; strategies below it are labeled "insensitive to views
+    by construction" in every row (`view_sensitivity` column); mean uncertainty ratio, view shift
+    and the G18 note for Robust, Resampled and Mean-CVaR.
+  - Model-change sensitivity (G21): the H2 intention-to-treat tests repeated without each model's
+    flagged weeks, and the flagged weeks listed (`model_change_weeks`).
+  - All rows go through `assign_families`.
+
+### Tests
+
+- New: `tests/unit/test_v4_phase8_portfolio.py` (5): the ITT dilution property (both estimates
+  positive, active-week effect larger, t-stats similar), a source whose views are off every week
+  (tracking error 0, active return 0, NaN break-even with reason), a planted momentum tilt (MOM
+  loading near 0.6, alpha near zero), families (H4 exploratory with `p_adj = p`, H2 secondary)
+  and the view-sensitivity label, and a run on the shared synthetic pipeline files.
+- `ruff`, `mypy` clean.
+
+### Choices made while unattended
+
+- The old per-strategy Holm helper `_holm_within` is still used by the old `hypotheses.py`
+  functions that `report.py` calls; it is removed in Phase 9 when the report switches to the
+  Phase 7 and 8 tables.
+- The H2 model-change sensitivity rows are intention-to-treat only; the signal-level main
+  comparisons without flagged weeks are added with the report in Phase 9.

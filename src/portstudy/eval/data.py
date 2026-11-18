@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -12,6 +13,7 @@ from portstudy.config import StudyConfig
 from portstudy.data import ledger
 from portstudy.data.snapshot import read_snapshot, snapshot_exists
 from portstudy.eval.rank_ic import ic_tables
+from portstudy.io import read_csv
 from portstudy.llm.runner import read_scores
 from portstudy.optimize import read_weights_meta, weights_dir
 from portstudy.pipeline import fallback as fb
@@ -95,6 +97,10 @@ class EvalData:
     factor_source: str = ""
     solver_failed: pd.DataFrame = field(default_factory=pd.DataFrame)  # weeks by portfolios
     view_shift: pd.DataFrame = field(default_factory=pd.DataFrame)  # weeks by portfolios
+    active_view: pd.DataFrame = field(default_factory=pd.DataFrame)  # G8, weeks by portfolios
+    expected_te: pd.DataFrame = field(default_factory=pd.DataFrame)  # G13, weeks by portfolios
+    uncertainty_ratio: pd.DataFrame = field(default_factory=pd.DataFrame)  # G18
+    model_change: dict[str, list[str]] = field(default_factory=dict)  # G21, model -> weeks
 
     def __post_init__(self) -> None:
         for key in self.portfolio_keys:
@@ -226,22 +232,48 @@ def _stock_week_table(weeks: list[str], sources: list[str]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def _meta_tables(weeks: list[str], keys: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Weeks by portfolios: solver-failed flag and view shift, from the weight meta files."""
-    failed: dict[str, dict[str, bool]] = {}
-    shift: dict[str, dict[str, float]] = {}
+META_FLOATS = ("view_shift", "expected_te_vs_q0", "conf_only_uncertainty_ratio")
+
+
+def _meta_tables(weeks: list[str], keys: list[str]) -> dict[str, pd.DataFrame]:
+    """Weeks by portfolios from the weight meta files: `solver_failed`, `active_view`
+    (G8: `use_llm_view`), and the float fields in META_FLOATS."""
+    tables: dict[str, dict[str, dict[str, Any]]] = {
+        name: {} for name in ("solver_failed", "active_view", *META_FLOATS)
+    }
     for key in keys:
-        failed[key], shift[key] = {}, {}
+        for table in tables.values():
+            table[key] = {}
         for w in weeks:
             if not (weights_dir(w) / f"{key}.meta.json").exists():
                 continue
             meta = read_weights_meta(w, key)
-            failed[key][w] = bool(meta.get("fallback_flag"))
-            value = meta.get("view_shift")
-            shift[key][w] = float(value) if value is not None else float("nan")
-    failed_df = pd.DataFrame(failed).reindex(weeks).fillna(False).astype(bool)
-    shift_df = pd.DataFrame(shift).reindex(weeks).astype(float)
-    return failed_df, shift_df
+            tables["solver_failed"][key][w] = bool(meta.get("fallback_flag"))
+            tables["active_view"][key][w] = bool(meta.get("use_llm_view"))
+            for name in META_FLOATS:
+                value = meta.get(name)
+                tables[name][key][w] = float(value) if value is not None else float("nan")
+    out = {}
+    for name, table in tables.items():
+        df = pd.DataFrame(table).reindex(weeks)
+        out[name] = (
+            df.fillna(False).astype(bool)
+            if name in ("solver_failed", "active_view")
+            else (df.astype(float))
+        )
+    return out
+
+
+def model_change_weeks() -> dict[str, list[str]]:
+    """G21: weeks flagged `model_change` per model, from data/outputs/model_checks.csv."""
+    from portstudy.llm.canary import checks_path
+
+    path = checks_path()
+    if not path.exists():
+        return {}
+    df = read_csv(path, keep_default_na=False, dtype=str)
+    flagged = df[df["model_change"].str.lower() == "true"]
+    return {str(m): sorted(g["week_id"]) for m, g in flagged.groupby("model")}
 
 
 def load_eval_data(
@@ -289,7 +321,7 @@ def load_eval_data(
     weekly = weekly.reindex(weeks_used)
     statuses = pd.DataFrame({k: {w: fb.week_status_for(w, k) for w in weeks_used} for k in keys})
     spy_weekly, spy_vol = _spy_series(weeks_used)
-    solver_failed, view_shift = _meta_tables(weeks_used, keys)
+    metas = _meta_tables(weeks_used, keys)
     from portstudy.eval.characteristics import characteristics_panel
     from portstudy.eval.factors import load_factors
 
@@ -314,8 +346,12 @@ def load_eval_data(
         spy_weekly=spy_weekly,
         spy_vol20=spy_vol,
         stock_week=stock_week,
-        solver_failed=solver_failed,
-        view_shift=view_shift,
+        solver_failed=metas["solver_failed"],
+        view_shift=metas["view_shift"],
+        active_view=metas["active_view"],
+        expected_te=metas["expected_te_vs_q0"],
+        uncertainty_ratio=metas["conf_only_uncertainty_ratio"],
+        model_change=model_change_weeks(),
         factors=factors,
         factor_source=factor_source,
     )
