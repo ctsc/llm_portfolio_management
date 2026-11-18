@@ -183,9 +183,10 @@ def test_stop_on_friday_close_before_rebalance_yields_one_net_trade() -> None:
     t = a_trades[0]
     assert t.reason == "rebalance" and t.stop_trigger == "stop_loss" and t.side == "sell"
     assert t.date == days[0] and t.cost_usd == pytest.approx(0.001 * t.trade_value)
-    # The average cost is unchanged by the partial sale, so Monday's close at 91 is a new stop.
+    # G1b: the stop pending on the rebalance day resets avg_cost to Monday's open, so the
+    # flat close at 91 does not fire it again and nothing is sold on Tuesday.
     later = [x for x in trades if x.ticker == "A" and x.date > days[0]]
-    assert len(later) == 1 and later[0].reason == "stop_loss" and later[0].date == days[1]
+    assert later == []
     # If the optimizer drops A entirely, the single trade is a full sale.
     sim_b = PortfolioSim("P", CFG)
     simulate_week(sim_b, WeekPlan(W10, pd.Series({"A": 0.5, "B": 0.4}), "llm", "normal"), book)
@@ -217,7 +218,7 @@ def test_reconciliation_and_replay_determinism(data_dir: Path) -> None:
     plans = [WeekPlan(W10, HAND_WEIGHTS, "llm", "normal")]
     h1 = replay_all(StudyConfig(simulator=CFG), {"P": plans}, book)
     h2 = replay_all(StudyConfig(simulator=CFG), {"P": plans}, book)
-    assert h1 == h2 and set(h1["P"]) == {"trades.csv", "daily.csv"}
+    assert h1 == h2 and set(h1["P"]) == {"trades.csv", "daily.csv", "week_opens.csv"}
     trades, daily = read_trades("P"), read_daily("P")
     buys = trades[trades["side"] == "buy"]["trade_value"].sum()
     sells = trades[trades["side"] == "sell"]["trade_value"].sum()

@@ -19,6 +19,7 @@ from portstudy.config import LlmSettings
 from portstudy.llm.providers.base import (
     BatchItem,
     LlmCallCutoff,
+    LlmConnectionError,
     LlmProvider,
     LlmProviderError,
     RawResult,
@@ -271,6 +272,8 @@ class LiteLLMProvider(LlmProvider):
             return {str(key): value for key, value in data.items()}, response.headers
         except (LlmProviderError, _UnsupportedParameter):
             raise
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            raise LlmConnectionError(f"LiteLLM endpoint unreachable: {exc}") from exc
         except (_RetryableResponse, httpx.TimeoutException, httpx.TransportError) as exc:
             raise LlmProviderError(f"LiteLLM request failed after retries: {exc}") from exc
         except httpx.HTTPStatusError as exc:

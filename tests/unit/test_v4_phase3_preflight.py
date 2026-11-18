@@ -318,6 +318,7 @@ def _probes() -> dict[str, object]:
         "gateway_probe": lambda _url: None,
         "disk_free_gb": lambda _p: 100.0,
         "gpu_free_gb": lambda: 8.0,
+        "clock_skew_s": lambda _url: 3.0,
     }
 
 
@@ -335,6 +336,7 @@ def test_live_ready_real_repo_lists_every_known_failure(data_dir: Path) -> None:
         gateway_probe=lambda _u: "timed out",
         disk_free_gb=lambda _p: 100.0,
         gpu_free_gb=lambda: 8.0,
+        clock_skew_s=lambda _u: None,
     )
     text = "\n".join(report.failures)
     assert "PLACEHOLDER" in text
@@ -502,6 +504,13 @@ def _stub_weekend(rw, monkeypatch: pytest.MonkeyPatch, synthetic: bool) -> list[
     monkeypatch.setattr(rw, "gateway_health", lambda ctx, w: calls.append("health"))
     monkeypatch.setattr(rw, "wait_for_batches", lambda ctx, w, s, p: calls.append("J5"))
     monkeypatch.setattr(rw, "print_summary", lambda w: None)
+    # Phase 3A steps that read real run files: the stub context has none.
+    monkeypatch.setattr(rw, "dollar_budget_check", lambda ctx, w: None)
+    monkeypatch.setattr(rw, "model_checks", lambda ctx, w: [])
+    monkeypatch.setattr(rw, "report_progress", lambda ctx, w: [])
+    monkeypatch.setattr(rw, "audit_week", lambda ctx, w: [])
+    monkeypatch.setattr(rw, "finish_run", lambda *a, **k: None)
+    monkeypatch.setattr(rw, "start_keep_awake", lambda: None)
     return calls
 
 
@@ -543,3 +552,9 @@ def test_run_weekend_skip_preflight_proceeds(
     monkeypatch.setattr(rw, "live_ready", _boom)
     assert rw.main(["--week", "2026-W05", "--from", "J3", "--skip-preflight"]) == 0
     assert calls[0] == "catch_up" and "J3" in calls
+
+
+def test_clock_skew_beyond_two_minutes_fails(ready_setup: dict[str, object]) -> None:
+    assert not any("hwclock" in f for f in _call_ready(ready_setup).failures)
+    report = _call_ready(ready_setup, clock_skew_s=lambda _u: 300.0)
+    assert any("sudo hwclock -s" in f and "+300 s" in f for f in report.failures)

@@ -58,6 +58,30 @@ def _gateway_probe(base_url: str) -> str | None:
     return None
 
 
+MAX_CLOCK_SKEW_S = 120.0
+
+
+def _clock_skew_s(base_url: str) -> float | None:
+    """Local clock minus the `Date` header of an HTTPS response from the gateway, in seconds.
+    None when no response or no header is available (the check is then skipped)."""
+    import email.utils
+
+    import httpx
+
+    url = base_url.rstrip("/")
+    if url.endswith("/v1"):
+        url = url[: -len("/v1")]
+    try:
+        response = httpx.get(f"{url}/health/liveliness", timeout=10.0)
+    except Exception:
+        return None  # the gateway probe reports the connection failure itself
+    header = response.headers.get("date")
+    if not header:
+        return None
+    remote = email.utils.parsedate_to_datetime(header)
+    return (dt.datetime.now(dt.UTC) - remote).total_seconds()
+
+
 def _disk_free_gb(path: Path) -> float:
     return shutil.disk_usage(path).free / 1e9
 
@@ -136,11 +160,13 @@ def live_ready(
     gateway_probe: Callable[[str], str | None] | None = None,
     disk_free_gb: Callable[[Path], float] | None = None,
     gpu_free_gb: Callable[[], float | None] | None = None,
+    clock_skew_s: Callable[[str], float | None] | None = None,
 ) -> PreflightReport:
     """Collect every reason a live run must not start; never stops at the first failure."""
     probe = gateway_probe or _gateway_probe
     disk = disk_free_gb or _disk_free_gb
     gpu = gpu_free_gb or _gpu_free_gb
+    skew_probe = clock_skew_s or _clock_skew_s
     report = PreflightReport()
     failures = report.failures
     warnings = report.warnings
@@ -227,6 +253,14 @@ def live_ready(
     error = probe(cfg.llm.gateway.base_url)
     if error:
         failures.append(f"gateway URL does not answer; is the GSU VPN on? ({error})")
+
+    # Clock check: WSL2's clock can drift after sleep, and the lock deadline depends on it.
+    skew = skew_probe(cfg.llm.gateway.base_url)
+    if skew is not None and abs(skew) > MAX_CLOCK_SKEW_S:
+        failures.append(
+            f"local clock differs from the gateway's Date header by {skew:+.0f} s "
+            f"(limit {MAX_CLOCK_SKEW_S:.0f} s); fix it in WSL with `sudo hwclock -s`"
+        )
 
     # Universe file (C8).
     u_path = root / cfg.universe.universe_file

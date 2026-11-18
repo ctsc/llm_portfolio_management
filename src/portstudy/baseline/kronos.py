@@ -8,14 +8,17 @@ from __future__ import annotations
 import abc
 import gc
 import hashlib
+import json
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from portstudy.config import BaselineConfig, KronosConfig
+from portstudy.io import write_csv_atomic
 
 OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
 
@@ -108,6 +111,33 @@ class KronosForecaster(ForecastProvider):
         self.device = device
         self._predictor: object | None = None
         self.last_chunk_stats: list[dict[str, object]] = []
+        # Phase 3A checkpoints: J2 sets a folder; a finished chunk's (k, k_sd) is saved there and
+        # a rerun skips it. Seeds are per (sample, chunk), so skipping a chunk changes nothing else.
+        self.checkpoint_dir: Path | None = None
+        self.progress: Callable[[int, int], None] | None = None
+
+    def _checkpoint_path(
+        self,
+        chunk_index: int,
+        chunk: list[str],
+        frames: list[pd.DataFrame],
+        seed: int,
+        horizon: int,
+        n_samples: int,
+    ) -> Path | None:
+        if self.checkpoint_dir is None:
+            return None
+        digest = hashlib.sha256()
+        digest.update(
+            json.dumps(
+                [self.cfg.model_dump(), seed, horizon, n_samples, chunk_index, chunk],
+                sort_keys=True,
+                default=str,
+            ).encode()
+        )
+        for frame in frames:
+            digest.update(frame.to_csv(index=False, float_format="%.12g").encode())
+        return self.checkpoint_dir / f"chunk_{chunk_index:04d}_{digest.hexdigest()[:16]}.csv"
 
     def _load(self) -> object:
         if self._predictor is not None:
@@ -202,6 +232,7 @@ class KronosForecaster(ForecastProvider):
         batch = self.cfg.batch_size
         n_chunks = -(-len(tickers) // batch)
         self.last_chunk_stats = []
+        resumed: dict[str, tuple[float, float]] = {}
         try:
             # UNVERIFIED: the pinned predictor may expose individual paths through this adapter.
             path_method = getattr(predictor, "predict_paths", None)
@@ -228,6 +259,32 @@ class KronosForecaster(ForecastProvider):
                 chunk_frames = frames[start : start + batch]
                 chunk_x = x_stamps[start : start + batch]
                 chunk_y = y_stamps[start : start + batch]
+                ck = self._checkpoint_path(
+                    chunk_index, chunk, chunk_frames, seed, horizon, n_samples
+                )
+                if ck is not None and ck.exists():
+                    saved = pd.read_csv(ck).set_index("ticker")
+                    k_saved = saved["k"].astype(float)
+                    sd_saved = saved["k_sd"].astype(float)
+                    for ticker in chunk:
+                        resumed[ticker] = (float(k_saved[ticker]), float(sd_saved[ticker]))
+                    self.last_chunk_stats.append(
+                        {
+                            "chunk_index": chunk_index,
+                            "n_chunks": n_chunks,
+                            "n_tickers": len(chunk),
+                            "seconds": 0.0,
+                            "peak_gpu_mb": None,
+                            "resumed": True,
+                        }
+                    )
+                    self.logger.info(
+                        "kronos_chunk_resumed",
+                        extra={"extra_fields": {"chunk_index": chunk_index, "file": ck.name}},
+                    )
+                    if self.progress is not None:
+                        self.progress(chunk_index + 1, n_chunks)
+                    continue
                 if callable(path_method):
                     chunk_rng = chunk_seed(seed, 0, chunk_index)
                     torch.manual_seed(chunk_rng)
@@ -297,10 +354,24 @@ class KronosForecaster(ForecastProvider):
                 }
                 self.last_chunk_stats.append(stats)
                 self.logger.info("kronos_chunk", extra={"extra_fields": dict(stats)})
+                if ck is not None:
+                    rows = []
+                    for ticker, frame in zip(chunk, chunk_frames):
+                        k_val, sd_val = self._summarize_paths(
+                            paths_by_ticker[ticker], ticker, float(frame["close"].iloc[-1])
+                        )
+                        rows.append({"ticker": ticker, "k": k_val, "k_sd": sd_val})
+                    ck.parent.mkdir(parents=True, exist_ok=True)
+                    write_csv_atomic(pd.DataFrame(rows, columns=["ticker", "k", "k_sd"]), ck)
+                if self.progress is not None:
+                    self.progress(chunk_index + 1, n_chunks)
                 if cuda:
                     torch.cuda.empty_cache()
             out: dict[str, tuple[float, float]] = {}
             for ticker, frame in zip(tickers, frames):
+                if ticker in resumed:
+                    out[ticker] = resumed[ticker]
+                    continue
                 last_close = float(frame["close"].iloc[-1])
                 out[ticker] = self._summarize_paths(paths_by_ticker[ticker], ticker, last_close)
         finally:

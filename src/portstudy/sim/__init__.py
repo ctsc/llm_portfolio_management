@@ -30,6 +30,6 @@ def replay_all(
     hashes: dict[str, dict[str, str]] = {}
     for portfolio_id, plans in plans_by_portfolio.items():
         sim = replay(portfolio_id, plans, book, cfg.simulator)
-        write_records(portfolio_id, sim.trades, sim.daily)
+        write_records(portfolio_id, sim.trades, sim.daily, sim.week_opens)
         hashes[portfolio_id] = records_hash(portfolio_id)
     return hashes

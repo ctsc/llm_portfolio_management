@@ -12,7 +12,9 @@ from portstudy.types import Issue
 CHECK_CODES = [
     "missing_days",
     "nonpositive_price",
-    "extreme_move",
+    "large_move",
+    "crash_removal",
+    "unexplained_split",
     "duplicate_rows",
     "stale_price",
     "no_news",
@@ -22,12 +24,90 @@ CHECK_CODES = [
 ]
 
 
+def _week_move_issues(
+    tk: str,
+    g: pd.DataFrame,
+    since: dt.date | None,
+    cutoff: dt.date,
+    rules: CheckRules,
+    split_days: set[tuple[str, dt.date]],
+) -> list[Issue]:
+    """U1: large-move flag, crash removal and unexplained-split checks, looking only
+    at the days in (since, cutoff] with the last row at or before `since` as the base."""
+    if since is None:
+        return []
+    issues: list[Issue] = []
+    win = g[(g["date"] > since) & (g["date"] <= cutoff)].sort_values("date", kind="stable")
+    base_rows = g[g["date"] <= since]
+    if len(win) == 0 or len(base_rows) == 0:
+        return issues
+    base = base_rows.iloc[-1]
+    last = win.iloc[-1]
+    week_move = float(last["adj_close"]) / float(base["adj_close"]) - 1.0
+
+    if abs(week_move) >= rules.large_move_flag:
+        issues.append(
+            Issue(
+                "info",
+                tk,
+                "large_move",
+                f"week move {week_move:+.1%} since {since.isoformat()}",
+                "flag",
+                {"return": week_move},
+            )
+        )
+
+    # Single-day returns inside the window (raw and adjusted); the first window day is
+    # measured against the base row at `since`.
+    adj_vals = [float(base["adj_close"])] + [float(v) for v in win["adj_close"]]
+    raw_vals = [float(base["close"])] + [float(v) for v in win["close"]]
+    win_days = [d for d in win["date"]]
+    adj_rets = [adj_vals[i] / adj_vals[i - 1] - 1.0 for i in range(1, len(adj_vals))]
+    raw_rets = [raw_vals[i] / raw_vals[i - 1] - 1.0 for i in range(1, len(raw_vals))]
+
+    worst = week_move
+    worst_day = cutoff
+    for day, r in zip(win_days, adj_rets):
+        if r <= rules.crash_removal and r < worst:
+            worst, worst_day = r, day
+    if worst <= rules.crash_removal:
+        issues.append(
+            Issue(
+                "error",
+                tk,
+                "crash_removal",
+                f"adjusted return {worst:+.1%} at or below the crash limit",
+                "remove",
+                {"return": worst, "date": worst_day.isoformat()},
+            )
+        )
+        return issues
+
+    # Raw jump without an adjusted move and without a split action: a data error, skipped for
+    # this week only (the stock is not removed from the study).
+    for day, raw_r, adj_r in zip(win_days, raw_rets, adj_rets):
+        if abs(raw_r) >= abs(rules.crash_removal) and (tk, day) not in split_days:
+            if abs(adj_r) < abs(rules.crash_removal) / 2:
+                issues.append(
+                    Issue(
+                        "error",
+                        tk,
+                        "unexplained_split",
+                        f"raw move {raw_r:+.1%} without an adjusted move or a split action",
+                        rules.unexplained_split,
+                        {"return": raw_r, "date": day.isoformat()},
+                    )
+                )
+    return issues
+
+
 def check_prices(
     prices: pd.DataFrame,
     expected_days: list[dt.date],
     rules: CheckRules,
     actions: pd.DataFrame | None = None,
     min_history_days: int = 300,
+    since: dt.date | None = None,
 ) -> list[Issue]:
     """Run every price check on a long prices frame (date, ticker, open, ..., adj_close)."""
     issues: list[Issue] = []
@@ -112,24 +192,10 @@ def check_prices(
                 )
             )
 
-        # Extreme daily move on the raw close without a split flag on that day.
+        # U1: week move, crash removal and unexplained splits inside (since, cutoff].
         good = g[~bad]
-        if len(good) > 1:
-            ret = good["close"].pct_change().abs()
-            hit_dates = good.loc[ret > rules.extreme_move_threshold, "date"]
-            hits = [d for d in hit_dates if (tk, d) not in split_days]
-            if hits:
-                issues.append(
-                    Issue(
-                        "error",
-                        tk,
-                        "extreme_move",
-                        f"{len(hits)} daily moves above {rules.extreme_move_threshold:.0%} "
-                        "without a split",
-                        rules.rule_for("extreme_move"),
-                        {"dates": [d.isoformat() for d in hits[:10]]},
-                    )
-                )
+        if len(good) > 1 and expected_days:
+            issues.extend(_week_move_issues(tk, good, since, expected_days[-1], rules, split_days))
 
         # Stale prices: close unchanged for stale_days consecutive days.
         if len(good) >= rules.stale_days:
@@ -183,7 +249,9 @@ def check_news(
 
 
 def tickers_to_skip(issues: list[Issue]) -> set[str]:
-    return {i.ticker for i in issues if i.rule == "skip_stock"}
+    # "remove" also excludes the ticker from this week's snapshot (weight 0 at the Monday
+    # rebalance, position sold at the open); it never comes back once recorded.
+    return {i.ticker for i in issues if i.rule in ("skip_stock", "remove")}
 
 
 def has_halt(issues: list[Issue]) -> bool:

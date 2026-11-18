@@ -23,6 +23,7 @@ from portstudy.baseline.combine import read_baseline
 from portstudy.config import StudyConfig
 from portstudy.io import read_csv, write_csv_atomic, write_json_atomic
 from portstudy.llm.runner import read_scores
+from portstudy.logging_setup import current_run_id
 from portstudy.optimize.black_litterman import (
     Posterior,
     black_litterman,
@@ -78,6 +79,8 @@ class Weights:
     cov_mu_sha256: str = ""
     fallback: bool = False
     solver_status: str = ""
+    ic_mode: str = ""
+    run_id: str = field(default_factory=current_run_id)
 
     def meta(self) -> dict[str, Any]:
         d = asdict(self)
@@ -149,7 +152,15 @@ def portfolio_ics(
     config_id: str | None = None,
     fallback_weeks: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[float, float]:
-    """(IC_b, IC_L) for the week: trailing baseline IC and the portfolio's residual-signal IC."""
+    """(IC_b, IC_L) for the week: trailing baseline IC and the portfolio's residual-signal IC.
+
+    DECISION(A8): in `fixed` mode every week and source gets the configured `fixed_ic` so the
+    view scale does not depend on the short scored history."""
+    if cfg.views.ic_mode == "fixed":
+        return (
+            cfg.views.fixed_ic,
+            cfg.views.fixed_ic if model is not None and config_id is not None else 0.0,
+        )
     ic_b = trailing_ic(store, "baseline", week_id, cfg.views, live_start_week)
     ic_l = 0.0
     if model is not None and config_id is not None:
@@ -287,6 +298,7 @@ def _optimize(
         cov_mu_sha256=_cov_mu_sha256(post) if not is_control else "",
         fallback=result.fallback_flag is not None,
         solver_status=solver_status,
+        ic_mode=cfg.views.ic_mode,
     )
     for k, v in extra.items():
         setattr(out, k, v)
@@ -562,6 +574,7 @@ def build_weights(
             strategy_diagnostics=dict(q0.strategy_diagnostics),
             cov_mu_sha256=q0.cov_mu_sha256,
             fallback=q0.fallback,
+            ic_mode=cfg.views.ic_mode,
         )
         write_json_atomic(out.meta(), weights_dir(week_id) / f"{key}.meta.json")
         _save_posterior(

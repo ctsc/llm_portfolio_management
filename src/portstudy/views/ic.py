@@ -151,6 +151,9 @@ def trailing_ic(
         return cfg.cold_start_ic
     cutoff = cal.cutoff_day(as_of_week)
     hist = store.series(signal, model, config_id)
+    if cfg.ic_history_start == "live_start_week":
+        # DECISION(A7): pilot and dry-run weeks never feed the trailing IC.
+        hist = hist[hist["week_id"] >= live_start_week]
     if len(hist) == 0:
         return cfg.cold_start_ic
     closed = pd.to_datetime(hist["window_end_date"]).dt.date <= cutoff

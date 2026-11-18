@@ -13,6 +13,7 @@ builds the same parametrized problem fresh, so both paths share one canonicaliza
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -22,6 +23,8 @@ import pandas as pd
 
 from portstudy.config import OptimizerConfig
 from portstudy.optimize.problem_cache import CachedProblem, cached_problem, matrix_sha256
+
+_LOG = logging.getLogger("portstudy.optimize.mean_variance")
 
 
 class OptimizerError(RuntimeError):
@@ -54,6 +57,7 @@ def _cholesky_factor(sigma: np.ndarray) -> np.ndarray:
         return np.linalg.cholesky(sym)
     except np.linalg.LinAlgError:
         jitter = 1e-10 * np.trace(sym) / len(sym)
+        _LOG.warning("covariance_cholesky_jitter", extra={"extra_fields": {"jitter": jitter}})
         return np.linalg.cholesky(sym + jitter * np.eye(len(sym)))
 
 
@@ -94,6 +98,11 @@ def solve_mean_variance(
             problem.solve(solver=name, verbose=False, warm_start=False)
         except Exception as exc:  # solver missing or numerical failure: try the next one
             last_error = f"{name}: {exc}"
+            _LOG.warning(
+                "solver_error_next_solver",
+                exc_info=True,
+                extra={"extra_fields": {"solver": name, "error": str(exc)}},
+            )
             continue
         if problem.status in ("optimal", "optimal_inaccurate") and w.value is not None:
             raw = np.asarray(w.value, dtype=float)

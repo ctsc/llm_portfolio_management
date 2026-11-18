@@ -10,7 +10,9 @@ from typing import Any, Literal
 WeekId = str
 Ticker = str
 
-TradeReason = Literal["rebalance", "stop_loss", "take_profit", "forced_exit"]
+TradeReason = Literal[
+    "rebalance", "stop_loss", "take_profit", "forced_exit", "no_price_liquidation"
+]
 DecisionSource = Literal["llm", "fallback_q0", "hold", "q0", "control"]
 WeekStatus = Literal["normal", "fallback", "no_rebalance"]
 StrategyName = Literal["mvo", "cvar", "robust", "resampled", "topk"]
@@ -162,6 +164,7 @@ class DailyRecord:
     week_status: WeekStatus
     week_id: WeekId = ""
     flags: str = ""
+    value_open: float | None = None  # set on the week's trade-day record only (N4)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

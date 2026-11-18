@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -14,6 +15,8 @@ import pandas as pd
 
 from portstudy.config import OptimizerConfig, StudyConfig
 from portstudy.optimize.mean_variance import OptimizerError
+
+_LOG = logging.getLogger("portstudy.optimize.strategies")
 
 
 @dataclass
@@ -165,6 +168,11 @@ def solve_with(problem: cp.Problem, solvers: Sequence[str]) -> str:
             problem.solve(solver=solver, verbose=False, warm_start=False)
         except Exception as exc:
             errors.append(f"{solver}: {exc}")
+            _LOG.warning(
+                "solver_error_next_solver",
+                exc_info=True,
+                extra={"extra_fields": {"solver": solver, "error": str(exc)}},
+            )
             continue
         if problem.status == cp.OPTIMAL and problem.value is not None:
             return solver
@@ -202,8 +210,12 @@ def fallback_chain(
             if not isinstance(capped, pd.Series):
                 raise TypeError("series input must produce series output")
             check_weights(capped, cfg.optimizer)
-        except (OptimizerError, TypeError):
+        except (OptimizerError, TypeError) as exc:
             attempts.append(f"{flag}:invalid")
+            _LOG.warning(
+                "fallback_candidate_invalid",
+                extra={"extra_fields": {"candidate": flag, "error": str(exc)}},
+            )
             continue
         details = dict(diagnostics or {})
         details["fallback_attempts"] = attempts
@@ -230,6 +242,7 @@ def cholesky_with_jitter(matrix: np.ndarray) -> tuple[np.ndarray, float]:
     except np.linalg.LinAlgError:
         n = len(symmetric)
         jitter = 1e-12 * max(float(np.trace(symmetric)) / n, 1.0)
+        _LOG.warning("strategy_cholesky_jitter", extra={"extra_fields": {"jitter": jitter}})
         try:
             return np.linalg.cholesky(symmetric + jitter * np.eye(n)), jitter
         except np.linalg.LinAlgError as exc:

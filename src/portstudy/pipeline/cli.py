@@ -62,6 +62,9 @@ def run_job_cmd(
 ) -> None:
     ctx = _context(synthetic, allow_over_budget, force, now, week, config)
     w = _week_or_current(week, ctx)
+    from portstudy.logging_setup import new_run_id, set_run_id
+
+    set_run_id(new_run_id())  # N6 (1): a job run alone gets its own run_id
     try:
         status = run_named(ctx, job.upper(), w)
     except JobFailed as exc:
@@ -123,6 +126,14 @@ def status_cmd(
         if st.error:
             line += f" error: {st.error}"
         typer.echo(line)
+    from portstudy.pipeline.study_log import read_study_log
+
+    log = read_study_log()
+    if len(log):
+        typer.echo("study log (last rows):")
+        cols = ["week_id", "failed_job", "universe_size", "n_removed", "n_fallback_rows"]
+        cols += ["arctic_gpu_hours_total", "litellm_cost_total", "audit_ok"]
+        typer.echo(log.tail(5).loc[:, cols].to_string(index=False))
     for row in strategy_status_summary(w, ctx):
         mean_shift = row["mean_view_shift"]
         shift_text = f"{mean_shift:.6f}" if mean_shift is not None else "n/a"
@@ -189,10 +200,143 @@ def eval_cmd(
     typer.echo(f"report written to {out}")
 
 
+@app.command("audit")
+def audit_cmd(
+    week: str | None = typer.Option(None, "--week"),
+    synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
+) -> None:
+    """Verify a week end to end (N6 (9)); exit code 1 on any problem."""
+    from portstudy.pipeline.audit import audit_week
+
+    ctx = _context(synthetic, False, False, None, week, config)
+    w = _week_or_current(week, ctx)
+    problems = audit_week(ctx, w)
+    for line in problems:
+        typer.echo(f"problem: {line}")
+    typer.echo(f"audit {w}: {'ok' if not problems else f'{len(problems)} problem(s)'}")
+    if problems:
+        raise typer.Exit(code=1)
+
+
+@app.command("canary")
+def canary_cmd(
+    week: str | None = typer.Option(None, "--week"),
+    synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
+) -> None:
+    """G21: gateway model list and canary prompts for the week; flags never fail the command."""
+    from portstudy.llm.canary import run_canary
+    from portstudy.pipeline.jobs import _week_runner
+
+    ctx = _context(synthetic, False, False, None, week, config)
+    w = _week_or_current(week, ctx)
+    for row in run_canary(ctx, w, _week_runner(ctx, w)):
+        flag = " MODEL_CHANGE" if row["model_change"] else ""
+        typer.echo(f"{row['model']}: {row['matches']}/{row['n']} identical{flag} {row['reasons']}")
+
+
+@app.command("repeat-check")
+def repeat_check_cmd(
+    week: str | None = typer.Option(None, "--week"),
+    synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
+) -> None:
+    """G20 (once, in the pilot after J4): re-rate 50 stocks, write pilot_repeatability.csv and
+    the canary baseline."""
+    from portstudy.llm.canary import repeat_check
+    from portstudy.pipeline.jobs import _week_runner
+
+    ctx = _context(synthetic, False, False, None, week, config)
+    w = _week_or_current(week, ctx)
+    table = repeat_check(ctx, w, _week_runner(ctx, w))
+    typer.echo(table.to_string(index=False) if len(table) else "no gateway models checked")
+
+
 @app.command("jobs")
 def jobs_cmd() -> None:
     for name in JOBS:
         typer.echo(name)
+
+
+ledger_app = typer.Typer(help="Price-ledger maintenance.", no_args_is_help=True)
+app.add_typer(ledger_app, name="ledger")
+
+
+@ledger_app.command("rebuild")
+def ledger_rebuild_cmd(
+    start: str | None = typer.Option(
+        None,
+        "--start",
+        help="first fetch date (default: first snapshot cutoff minus history buffer; "
+        "required when no snapshot exists)",
+    ),
+    yes: bool = typer.Option(False, "--yes", help="confirm archiving the existing ledger"),
+    synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
+) -> None:
+    """Archive the current price ledger and re-fetch it for the whole study window."""
+    import datetime as _dt
+
+    from portstudy import calendar as _cal
+    from portstudy.data import ledger as _ledger
+    from portstudy.data.universe import load_universe, universe_path
+    from portstudy.paths import snapshots_dir
+
+    ctx = _context(synthetic, False, True, None, None, config)
+
+    weeks = (
+        sorted(p.name for p in snapshots_dir().iterdir() if p.is_dir())
+        if snapshots_dir().exists()
+        else []
+    )
+    if start is None:
+        if not weeks:
+            typer.echo("--start is required: no snapshot exists to anchor the history")
+            raise typer.Exit(code=1)
+        first_cutoff = _cal.cutoff_day(weeks[0])
+        start_date = first_cutoff - _dt.timedelta(
+            days=int(ctx.cfg.data.price_history_days * 1.6) + 30
+        )
+    else:
+        start_date = _dt.date.fromisoformat(start)
+    end_date = _cal.prev_trading_day(ctx.now().date(), inclusive=True)
+
+    universe = load_universe(universe_path(ctx.cfg, synthetic=ctx.synthetic))
+    tickers = sorted(universe["ticker"].astype(str))
+
+    if not yes:
+        typer.echo(
+            f"would archive data/ledger files and re-fetch {len(tickers)} tickers "
+            f"(+ ETF proxies) from {start_date} to {end_date}"
+        )
+        raise typer.Exit(code=1)
+
+    archive, n = _ledger.rebuild_ledger(
+        ctx.cfg, ctx.providers(), tickers, start_date, end_date, ctx.log("ledger")
+    )
+    typer.echo(f"ledger rebuilt: {n} price rows; archive at {archive}")
+
+
+@app.command("closeout")
+def closeout_cmd(
+    week: str | None = typer.Option(
+        None, "--week", help="last live week (default: timing.live_end_date week)"
+    ),
+    now: str | None = typer.Option(None, "--now", help="fixed clock for tests"),
+    synthetic: bool = typer.Option(False, "--synthetic"),
+    config: str | None = typer.Option(None, "--config", help="study YAML path"),
+) -> None:
+    """End-of-study closeout: final J8 and the study_complete.json marker."""
+    from portstudy.pipeline.closeout import CloseoutNotReady, run_closeout
+
+    ctx = _context(synthetic, False, True, now, week, config)
+    try:
+        out = run_closeout(ctx, week, logger=ctx.log("closeout"))
+    except CloseoutNotReady as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"study complete: {out}")
 
 
 def main() -> None:

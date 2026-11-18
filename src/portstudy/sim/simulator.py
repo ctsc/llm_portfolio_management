@@ -13,11 +13,19 @@ Rules (all from PLAN.md Phase 9):
 - Average cost is the share-weighted average on buys and unchanged by sales.
 - Dividends credit cash on the ex-date; splits multiply shares and divide the average cost.
 - A stock with no price on a day carries its last close, is flagged, and is sold at the first
-  open where a price exists.
+  open where a price exists. After `no_price_liquidation_days` consecutive missing days it is
+  sold at its last close instead (`no_price_liquidation`, DECISION(U2)).
+- Each week's trade date records the portfolio value at the open (after that day's corporate
+  actions, before any rebalance or pending sale) as `week_opens` for open-to-open weekly
+  returns ((N4)); `replay` appends a closing entry at the following Monday open when
+  the book has it.
+- A stop pending on a rebalance day whose position is still held afterwards resets its
+  `avg_cost` to the rebalance open, so the same move does not fire the stop twice (G1b).
 """
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -79,6 +87,7 @@ class Position:
     shares: float
     avg_cost: float
     last_close: float
+    no_price_days: int = 0  # consecutive ledger days without a positive close (U2)
 
 
 @dataclass
@@ -89,6 +98,7 @@ class WeekPlan:
     weights: pd.Series | None  # None means hold (no_rebalance)
     decision_source: DecisionSource = "llm"
     week_status: WeekStatus = "normal"
+    removed: frozenset[str] = frozenset()  # tickers removed from the study (U1)
 
 
 @dataclass
@@ -101,6 +111,8 @@ class PortfolioSim:
     pending_sales: dict[str, str] = field(default_factory=dict)  # ticker -> reason
     trades: list[Trade] = field(default_factory=list)
     daily: list[DailyRecord] = field(default_factory=list)
+    # (week_id, trade date, value at the open) per week, plus one closing entry (N4).
+    week_opens: list[tuple[str, dt.date, float]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.cash == 0.0:
@@ -194,6 +206,32 @@ class PortfolioSim:
             )
         )
 
+    def _liquidate_at_last_close(
+        self,
+        week_id: str,
+        day: dt.date,
+        ticker: str,
+        prices: dict[str, float],
+        decision_source: DecisionSource,
+    ) -> bool:
+        """Sell the whole position at `last_close` with the usual cost (U2/U1)."""
+        pos = self.positions.get(ticker)
+        if pos is None or pos.shares <= EPS_SHARES or pos.last_close <= 0:
+            return False
+        v_open, _ = self.value_at(prices)
+        self._trade(
+            week_id,
+            day,
+            ticker,
+            -pos.shares,
+            pos.last_close,
+            "no_price_liquidation",
+            decision_source,
+            v_open,
+        )
+        self.pending_sales.pop(ticker, None)
+        return True
+
     def rebalance(
         self,
         week_id: str,
@@ -201,7 +239,18 @@ class PortfolioSim:
         weights: pd.Series,
         opens: dict[str, float],
         decision_source: DecisionSource,
+        removed: frozenset[str] = frozenset(),
     ) -> None:
+        # U1: a held ticker removed from the study with no positive open today is liquidated at
+        # its last close; with a positive open it is simply sold at the open (weight 0 below).
+        for tk in sorted(set(self.positions) & set(removed)):
+            if not (opens.get(tk) or 0) > 0:
+                self._liquidate_at_last_close(week_id, day, tk, opens, decision_source)
+        stopped = {
+            tk
+            for tk, reason in self.pending_sales.items()
+            if reason in ("stop_loss", "take_profit")
+        }
         v_open, _ = self.value_at(opens)
         targets = {str(t): float(w) for t, w in weights.items() if float(w) > 0}
         tickers = sorted(set(targets) | set(self.positions))
@@ -253,6 +302,15 @@ class PortfolioSim:
         for tk in list(self.pending_sales):
             if tk in opens and tk in targets:
                 self.pending_sales.pop(tk)
+        # G1b: a stop-loss or take-profit pending on the rebalance day has been handled here;
+        # if the position is still held and priced, reset avg_cost to today's open so the same
+        # move does not fire the stop again at the close. forced_exit pendings are not reset.
+        for tk in stopped:
+            pos = self.positions.get(tk)
+            price = opens.get(tk)
+            if pos is not None and pos.shares > EPS_SHARES and price is not None and price > 0:
+                pos.avg_cost = price
+                self.pending_sales.pop(tk, None)
         # Float rounding can leave cash a hair below zero after a fully scaled buy.
         if abs(self.cash) < 1e-6:
             self.cash = 0.0
@@ -285,15 +343,28 @@ class PortfolioSim:
                 self.pending_sales.setdefault(tk, "take_profit")
 
     def mark(
-        self, week_id: str, day: dt.date, closes: dict[str, float], week_status: WeekStatus
+        self,
+        week_id: str,
+        day: dt.date,
+        closes: dict[str, float],
+        week_status: WeekStatus,
+        decision_source: DecisionSource = "hold",
     ) -> None:
         flags: list[str] = []
-        for tk, pos in self.positions.items():
+        for tk, pos in list(self.positions.items()):  # a liquidation removes the entry
             p = closes.get(tk)
             if p is None or p <= 0:
+                pos.no_price_days += 1
+                if pos.no_price_days >= self.cfg.no_price_liquidation_days:
+                    # U2: too long without a price; sell at the last close today so the daily
+                    # value already reflects the sale, then forget the waiting pending sale.
+                    if self._liquidate_at_last_close(week_id, day, tk, closes, decision_source):
+                        flags.append(f"liquidated:{tk}")
+                        continue
                 flags.append(f"carried:{tk}")
                 self.pending_sales.setdefault(tk, "forced_exit")
             else:
+                pos.no_price_days = 0
                 pos.last_close = p
         value, _ = self.value_at(closes)
         self.daily.append(
@@ -326,14 +397,29 @@ def simulate_week(
     for day in week_days(plan.week_id, book):
         sim.apply_actions(book.actions.get(day, []))
         opens = book.open.get(day, {})
+        open_value: float | None = None
+        if day == trade_date:
+            # N4: value at the week's open, after that day's corporate actions and before any
+            # rebalance or pending sale; recorded for every week status.
+            open_value, _ = sim.value_at(opens)
+            sim.week_opens.append((plan.week_id, day, open_value))
         if day == trade_date and plan.week_status != "no_rebalance" and plan.weights is not None:
-            sim.rebalance(plan.week_id, day, plan.weights, opens, plan.decision_source)
+            sim.rebalance(
+                plan.week_id,
+                day,
+                plan.weights,
+                opens,
+                plan.decision_source,
+                removed=plan.removed,
+            )
             # Pending sales for stocks the optimizer dropped were sold inside the rebalance;
             # anything still pending has no price today and waits.
         else:
             sim.execute_pending(plan.week_id, day, opens, plan.decision_source)
         closes = book.close.get(day, {})
-        sim.mark(plan.week_id, day, closes, plan.week_status)
+        sim.mark(plan.week_id, day, closes, plan.week_status, plan.decision_source)
+        if day == trade_date and sim.daily:
+            sim.daily[-1].value_open = open_value
         sim.check_stops(closes)
     return sim.trades[n_t:], sim.daily[n_d:]
 
@@ -345,4 +431,15 @@ def replay(
     sim = PortfolioSim(portfolio_id, cfg)
     for plan in plans:
         simulate_week(sim, plan, book)
+    if plans:
+        # N4: the last week's open-to-open return needs the following Monday open. When the
+        # book has it, append a closing entry for the next week id, valued on a deep copy so
+        # that day's corporate actions apply without trading.
+        last_week = plans[-1].week_id
+        end_day = cal.window_end_date(last_week)
+        if book.has_day(end_day):
+            clone = copy.deepcopy(sim)
+            clone.apply_actions(book.actions.get(end_day, []))
+            value, _ = clone.value_at(book.open[end_day])
+            sim.week_opens.append((cal.next_week_id(last_week), end_day, value))
     return sim

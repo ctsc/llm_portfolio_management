@@ -17,7 +17,9 @@ from portstudy.data.snapshot import make_snapshot, read_snapshot
 EXPECTED_CODES = {
     "missing_days",
     "nonpositive_price",
-    "extreme_move",
+    "large_move",
+    "crash_removal",
+    "removed_from_study",
     "duplicate_rows",
     "stale_price",
     "no_news",
@@ -43,6 +45,9 @@ def test_thirty_consecutive_snapshots(
         # Only planted tickers may be skipped; no_news is info only and never skips.
         skipped = set(issues.loc[issues["rule"] == "skip_stock", "ticker"])
         assert skipped <= PLANTED_TICKERS, skipped - PLANTED_TICKERS
+        # U1: only the planted -45% crash is removed from the study, and it never returns.
+        removed = set(issues.loc[issues["rule"] == "remove", "ticker"])
+        assert removed <= {PLANTED["extreme_move"][0]}, removed
         assert len(snap.included_tickers) >= 95
     # The ledger holds one row per (date, ticker) and never duplicates across weeks.
     led = ledger.read_ledger()

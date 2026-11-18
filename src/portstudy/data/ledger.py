@@ -6,12 +6,19 @@ provider later re-adjusts its history.
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from portstudy.io import read_csv, write_csv_atomic
 from portstudy.paths import ledger_dir
+
+if TYPE_CHECKING:
+    from portstudy.config import StudyConfig
+    from portstudy.data.providers.base import ProviderBundle
 
 LEDGER_COLUMNS = ["date", "ticker", "open", "high", "low", "close", "volume"]
 ACTION_COLUMNS = ["date", "ticker", "action", "value"]
@@ -105,3 +112,55 @@ def append_actions(new_rows: pd.DataFrame) -> int:
     merged = merged.sort_values(["date", "ticker", "action"], kind="stable").reset_index(drop=True)
     write_csv_atomic(merged, ledger_dir() / "corporate_actions.csv")
     return len(incoming)
+
+
+def rebuild_ledger(
+    cfg: StudyConfig,
+    providers: ProviderBundle,
+    tickers: list[str],
+    start: dt.date,
+    end: dt.date,
+    logger: logging.Logger | None = None,
+) -> tuple[Path, int]:
+    """Rebuild the price ledger from scratch (`portstudy ledger rebuild`).
+
+    Existing `prices_raw.csv` and `corporate_actions.csv` are moved into
+    `ledger/archive/<UTC timestamp>/` (never deleted); raw prices and corporate actions for
+    `tickers` plus the ETF proxies are fetched for [start, end] and appended. Returns the
+    archive folder and the number of appended price rows.
+    """
+    log = logger or logging.getLogger("portstudy.ledger")
+    folder = ledger_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    archive = folder / "archive" / stamp
+    prices_path = folder / "prices_raw.csv"
+    actions_path = folder / "corporate_actions.csv"
+    moved = False
+    if prices_path.exists() or actions_path.exists():
+        archive.mkdir(parents=True, exist_ok=True)
+        for path in (prices_path, actions_path):
+            if path.exists():
+                path.replace(archive / path.name)
+                moved = True
+        log.info("ledger_archived", extra={"extra_fields": {"archive": str(archive)}})
+
+    etfs = list(cfg.universe.etf_proxies)
+    prices = providers.prices.get_prices(tickers, start, end)
+    etf_prices = providers.prices.get_prices(etfs, start, end)
+    actions = providers.prices.get_corporate_actions(tickers, start, end)
+    n = append_prices(pd.concat([prices, etf_prices], ignore_index=True), logger=log)
+    append_actions(actions)
+    log.info(
+        "ledger_rebuilt",
+        extra={
+            "extra_fields": {
+                "tickers": len(tickers) + len(etfs),
+                "rows": n,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "archived": moved,
+            }
+        },
+    )
+    return archive, n

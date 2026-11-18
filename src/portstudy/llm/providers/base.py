@@ -149,6 +149,12 @@ class LlmProviderError(RuntimeError):
     model_wide = False
 
 
+class LlmConnectionError(LlmProviderError):
+    """The endpoint could not be reached (for example the GSU VPN dropped). The runner pauses
+    and retries these within `llm.network_outage_tolerance_minutes` without using up the
+    request's retry count."""
+
+
 class LlmCallCutoff(LlmProviderError):
     """The lock cutoff passed before the request was sent; the request stays unrecorded."""
 

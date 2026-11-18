@@ -130,6 +130,7 @@ def time_gateway(
                 "json_mode": raw.json_mode,
                 "deployment_id": raw.deployment_id,
                 "gateway_version": raw.gateway_version,
+                "response_cost": headers.get("x-litellm-response-cost", ""),
                 "ratelimit": json.dumps(ratelimit, sort_keys=True),
             }
 

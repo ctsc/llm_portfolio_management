@@ -41,7 +41,9 @@ DAILY_COLUMNS = [
     "week_status",
     "week_id",
     "flags",
+    "value_open",
 ]
+WEEK_OPENS_COLUMNS = ["week_id", "date", "value_open"]
 
 
 def portfolio_dir(portfolio_id: str) -> Path:
@@ -62,13 +64,25 @@ def daily_frame(records: list[DailyRecord]) -> pd.DataFrame:
     return pd.DataFrame([r.to_dict() for r in records]).loc[:, DAILY_COLUMNS]
 
 
+def week_opens_frame(week_opens: list[tuple[str, dt.date, float]]) -> pd.DataFrame:
+    if not week_opens:
+        return pd.DataFrame(columns=WEEK_OPENS_COLUMNS)
+    return pd.DataFrame(
+        [{"week_id": w, "date": d.isoformat(), "value_open": v} for w, d, v in week_opens]
+    ).loc[:, WEEK_OPENS_COLUMNS]
+
+
 def write_records(
-    portfolio_id: str, trades: list[Trade], records: list[DailyRecord]
-) -> tuple[Path, Path]:
+    portfolio_id: str,
+    trades: list[Trade],
+    records: list[DailyRecord],
+    week_opens: list[tuple[str, dt.date, float]] | None = None,
+) -> tuple[Path, Path, Path]:
     folder = portfolio_dir(portfolio_id)
     t_path = write_csv_atomic(trades_frame(trades), folder / "trades.csv")
     d_path = write_csv_atomic(daily_frame(records), folder / "daily.csv")
-    return t_path, d_path
+    o_path = write_csv_atomic(week_opens_frame(week_opens or []), folder / "week_opens.csv")
+    return t_path, d_path, o_path
 
 
 def read_trades(portfolio_id: str) -> pd.DataFrame:
@@ -92,11 +106,21 @@ def read_daily(portfolio_id: str) -> pd.DataFrame:
     return df
 
 
+def read_week_opens(portfolio_id: str) -> pd.DataFrame:
+    path = portfolios_dir() / portfolio_id / "week_opens.csv"
+    if not path.exists():
+        return pd.DataFrame(columns=WEEK_OPENS_COLUMNS)
+    df = read_csv(path, keep_default_na=False, na_values=[""])
+    if len(df):
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+    return df
+
+
 def records_hash(portfolio_id: str) -> dict[str, str]:
     folder = portfolios_dir() / portfolio_id
     return {
         name: sha256_file(folder / name)
-        for name in ("trades.csv", "daily.csv")
+        for name in ("trades.csv", "daily.csv", "week_opens.csv")
         if (folder / name).exists()
     }
 

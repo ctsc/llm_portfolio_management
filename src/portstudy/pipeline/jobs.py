@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import shutil
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -16,16 +17,18 @@ from portstudy.baseline.combine import build_baseline, read_baseline, read_basel
 from portstudy.config import repo_root
 from portstudy.data import ledger
 from portstudy.data.snapshot import make_snapshot, read_snapshot, snapshot_exists
-from portstudy.data.universe import build_universe, universe_path
+from portstudy.data.universe import build_universe, removed_tickers, universe_path
 from portstudy.hashing import sha256_file, stable_hash
 from portstudy.io import read_csv, read_json, write_json_atomic
 from portstudy.llm.cache import LlmCache
 from portstudy.llm.runner import WeekRunner, lock_deadline, read_scores
+from portstudy.logging_setup import current_run_id
 from portstudy.optimize import (
     WeekInputs,
     build_control_weights,
     build_q0_weights,
     build_weights,
+    existing_q0_weights,
     portfolio_ics,
     posterior_dir,
     posterior_for_q0,
@@ -35,6 +38,7 @@ from portstudy.optimize import (
 )
 from portstudy.paths import ledger_dir, snapshot_dir, week_output_dir
 from portstudy.pipeline import fallback as fb
+from portstudy.pipeline import fallback_ledger as fl
 from portstudy.pipeline.context import RunContext
 from portstudy.pipeline.status import JobStatus, hash_paths, read_status, run_job
 from portstudy.risk.covariance import build_risk_model
@@ -85,6 +89,199 @@ def _universe(ctx: RunContext, week_id: str) -> pd.DataFrame:
     return read_csv(path)
 
 
+# Fallback ledger feeders (N6 (5)). Each derives its rows from the files the job just wrote, so a
+# rerun upserts the same rows instead of adding new ones.
+
+_SNAPSHOT_KINDS = {
+    "market_cap_carried": "market_cap_carried",
+    "market_cap_missing": "market_cap_missing",
+    "missing_days": "forward_filled_prices",
+    "crash_removal": "removed_stock",
+    "removed_from_study": "removed_stock",
+}
+
+
+def _ledger_snapshot(week_id: str) -> None:
+    issues = read_snapshot(week_id).issues
+    rows: list[dict[str, str]] = []
+    for issue in issues.to_dict("records"):
+        code, rule = str(issue["code"]), str(issue["rule"])
+        kind = _SNAPSHOT_KINDS.get(code) or ("skipped_stock" if rule == "skip_stock" else "")
+        if kind:
+            rows.append(
+                {
+                    "kind": kind,
+                    "job": "J1",
+                    "ticker": str(issue["ticker"]),
+                    "reason": f"{code}: {issue['message']}",
+                }
+            )
+    fl.record_many(week_id, rows)
+
+
+def _ledger_sources(ctx: RunContext, week_id: str, plan: fb.FallbackPlan) -> None:
+    from portstudy.llm.runner import read_run_status, settings_for_model
+
+    rows: list[dict[str, str]] = []
+    scores = read_scores(week_id)
+    statuses = read_run_status(week_id)
+    for source in ctx.sources():
+        if plan.statuses.get(source.key) == "fallback":
+            rows.append(
+                {
+                    "kind": "fallback_q0",
+                    "job": "J6",
+                    "source": source.key,
+                    "reason": plan.reasons.get(source.key, ""),
+                }
+            )
+        sub = scores[(scores["model"] == source.model) & (scores["config_id"] == source.config_id)]
+        if len(sub):
+            flags = sub["fallback_flag"].fillna("").astype(str)
+            n_provider = int((flags == "provider_error").sum())
+            n_invalid = int((~sub["valid"].astype(bool)).sum()) - n_provider
+            if n_provider:
+                rows.append(
+                    {
+                        "kind": "provider_error",
+                        "job": "J4",
+                        "source": source.key,
+                        "reason": f"{n_provider} of {len(sub)} requests",
+                    }
+                )
+            if n_invalid > 0:
+                rows.append(
+                    {
+                        "kind": "invalid_output",
+                        "job": "J6",
+                        "source": source.key,
+                        "reason": f"{n_invalid} of {len(sub)} answers invalid",
+                    }
+                )
+        status = statuses.get(source.key)
+        if status is not None:
+            settings = settings_for_model(ctx.cfg, ctx.registry.get(source.model))
+            for name, wanted, got in (
+                ("seed", settings.send_seed, status.send_seed),
+                ("json_mode", settings.json_mode, status.json_mode),
+            ):
+                if wanted and got is False:
+                    rows.append(
+                        {
+                            "kind": "feature_disabled",
+                            "job": "J4",
+                            "source": source.key,
+                            "reason": f"gateway rejected {name}; disabled for the run",
+                        }
+                    )
+    fl.record_many(week_id, rows)
+
+
+def _ledger_weights(ctx: RunContext, week_id: str, plan: fb.FallbackPlan) -> None:
+    """Record weight-level degradations and cross-check them against J6's plan (N6 (5))."""
+    log = ctx.log("weights")
+    rows: list[dict[str, str]] = []
+    if plan.no_rebalance:
+        rows.append(
+            {
+                "kind": "no_rebalance",
+                "job": "J7",
+                "portfolio": "*",
+                "reason": plan.no_rebalance_reason,
+            }
+        )
+        fl.record_many(week_id, rows)
+        return
+    first_solver = ctx.cfg.optimizer.solvers[0] if ctx.cfg.optimizer.solvers else ""
+    for key in ctx.portfolio_keys():
+        if not (weights_dir(week_id) / f"{key}.meta.json").exists():
+            continue
+        meta = read_weights_meta(week_id, key)
+        if meta.get("decision_source") == "fallback_q0":
+            rows.append(
+                {
+                    "kind": "fallback_q0",
+                    "job": "J7",
+                    "portfolio": key,
+                    "source": str(meta.get("source") or ""),
+                    "reason": str(meta.get("reason", "")),
+                }
+            )
+        flag = meta.get("fallback_flag")
+        if flag:
+            rows.append(
+                {"kind": "solver_fallback", "job": "J7", "portfolio": key, "reason": str(flag)}
+            )
+        elif meta.get("strategy") == "mvo" and meta.get("solver") not in ("", first_solver):
+            rows.append(
+                {
+                    "kind": "solver_next",
+                    "job": "J7",
+                    "portfolio": key,
+                    "reason": f"solved by {meta.get('solver')} after {first_solver} failed",
+                }
+            )
+        if meta.get("solver_status") == "optimal_inaccurate":
+            rows.append(
+                {
+                    "kind": "optimal_inaccurate",
+                    "job": "J7",
+                    "portfolio": key,
+                    "reason": "solver status optimal_inaccurate",
+                }
+            )
+        source = meta.get("source")
+        planned = bool(source) and plan.statuses.get(str(source)) == "fallback"
+        served = meta.get("decision_source") == "fallback_q0"
+        if source and planned and not served:
+            log.warning(
+                "fallback_ledger_mismatch",
+                extra={
+                    "extra_fields": {
+                        "week_id": week_id,
+                        "portfolio": key,
+                        "detail": "planned fallback not served",
+                    }
+                },
+            )
+        if source and served and not planned and meta.get("reason") != "lock_deadline":
+            log.warning(
+                "fallback_ledger_mismatch",
+                extra={
+                    "extra_fields": {
+                        "week_id": week_id,
+                        "portfolio": key,
+                        "detail": "fallback served without a plan",
+                    }
+                },
+            )
+    fl.record_many(week_id, rows)
+
+
+def _ledger_liquidations(weeks: list[str], keys: list[str]) -> None:
+    from portstudy.sim.records import read_trades
+
+    by_week: dict[str, list[dict[str, str]]] = {}
+    for key in keys:
+        trades = read_trades(key)
+        if not len(trades):
+            continue
+        hits = trades[trades["reason"] == "no_price_liquidation"]
+        for week, ticker, date in zip(hits["week_id"], hits["ticker"], hits["date"]):
+            by_week.setdefault(str(week), []).append(
+                {
+                    "kind": "no_price_liquidation",
+                    "job": "J8",
+                    "portfolio": key,
+                    "ticker": str(ticker),
+                    "reason": f"sold at the last close on {date}",
+                }
+            )
+    for week, rows in by_week.items():
+        if week in weeks:
+            fl.record_many(week, rows)
+
+
 # J1 -------------------------------------------------------------------------------------------
 
 
@@ -102,6 +299,7 @@ def J1_snapshot(ctx: RunContext, week_id: str) -> JobStatus:
         universe = _universe(ctx, week_id)
         ref = make_snapshot(week_id, ctx.cfg, ctx.providers(), universe, logger=ctx.log("snapshot"))
         snap = read_snapshot(week_id)
+        _ledger_snapshot(week_id)
         return {
             "path": str(ref.path),
             "n_included": len(snap.included_tickers),
@@ -137,6 +335,8 @@ def J2_baseline(ctx: RunContext, week_id: str) -> JobStatus:
         risk = build_risk_model(week_id, ctx.cfg.risk, snap, tickers=list(base["ticker"]))
         build_prior(week_id, ctx.cfg.risk, risk, snap.reference)
         meta = read_baseline_meta(week_id)
+        if meta.get("kronos_fallback"):
+            fl.record(week_id, "kronos_fallback", str(meta.get("reason", "")), "J2", portfolio="*")
         return {
             "n_stocks": len(base),
             "alpha": risk.alpha,
@@ -223,13 +423,19 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
                     try:
                         results[model] = future.result()
                     except Exception as exc:  # one model crashing must not stop the others
-                        results[model] = {"crashed": f"{type(exc).__name__}: {exc}"}
+                        results[model] = {
+                            "crashed": f"{type(exc).__name__}: {exc}",
+                            "traceback": traceback.format_exc(),
+                        }
         else:
             for model in models:
                 try:
                     results[model] = run_model(model)
                 except Exception as exc:
-                    results[model] = {"crashed": f"{type(exc).__name__}: {exc}"}
+                    results[model] = {
+                        "crashed": f"{type(exc).__name__}: {exc}",
+                        "traceback": traceback.format_exc(),
+                    }
         log = ctx.log("llm")
         crashed: list[str] = []
         for model in models:
@@ -246,7 +452,13 @@ def J4_open_weight_infer(ctx: RunContext, week_id: str) -> JobStatus:
             elif result.get("crashed"):
                 log.error(
                     "model_crashed",
-                    extra={"extra_fields": {"model": model, "error": result["crashed"]}},
+                    extra={
+                        "extra_fields": {
+                            "model": model,
+                            "error": result["crashed"],
+                            "traceback": result.pop("traceback", ""),
+                        }
+                    },
                 )
                 crashed.append(f"{model}: {result['crashed']}")
         if crashed:
@@ -338,6 +550,7 @@ def J6_validate(ctx: RunContext, week_id: str) -> JobStatus:
                 "runs still incomplete before the lock margin: " + ", ".join(incomplete)
             )
         fb.write_plan(plan)
+        _ledger_sources(ctx, week_id, plan)
         n_fb = sum(1 for s in plan.statuses.values() if s == "fallback")
         return {"n_fallback": n_fb, "reasons": plan.reasons}
 
@@ -429,6 +642,7 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                 {"portfolio": "*", "status": "no_rebalance", "reason": plan.no_rebalance_reason}
             )
             fb.write_log(week_id, entries)
+            _ledger_weights(ctx, week_id, plan)
             write_json_atomic(
                 {
                     "week_id": week_id,
@@ -444,10 +658,32 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
         store = ICStore()
         ic_b, _ = portfolio_ics(week_id, ctx.cfg, store, ctx.live_start_week)
         summary: dict[str, Any] = {}
+        # Phase 3A checkpoint: portfolios already solved for these exact inputs (a run killed
+        # mid-J7) are kept; only the rest are solved. A forced run solves everything again.
+        done_path = week_output_dir(week_id) / "j7_done.json"
+        done: dict[str, str] = read_json(done_path) if done_path.exists() and not ctx.force else {}
+
+        def reusable(key: str) -> bool:
+            folder = weights_dir(week_id)
+            return (
+                done.get(key) == inputs
+                and (folder / f"{key}.csv").exists()
+                and (folder / f"{key}.meta.json").exists()
+            )
+
+        def mark_done(key: str) -> None:
+            done[key] = inputs
+            write_json_atomic(done, done_path)
+
         q0_posterior = posterior_for_q0(inputs_week, ctx.cfg, ic_b, logger=log)
         q0_results: dict[str, Any] = {}
         for strategy in ctx.cfg.strategies.enabled:
             q0_key = PortfolioId.q0(strategy).key
+            kept = existing_q0_weights(week_id, strategy) if reusable(q0_key) else None
+            if kept is not None:
+                q0_results[strategy] = kept
+                summary[q0_key] = {"ic_b": ic_b, "solver": kept.solver, "resumed": True}
+                continue
             q0 = build_q0_weights(
                 week_id,
                 ctx.cfg,
@@ -460,9 +696,14 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
             )
             q0_results[strategy] = q0
             summary[q0_key] = {"ic_b": ic_b, "solver": q0.solver}
+            mark_done(q0_key)
         for name in ctx.cfg.strategies.controls:
+            if reusable(name):
+                summary[name] = {"solver": read_weights_meta(week_id, name).get("solver")}
+                continue
             control = build_control_weights(week_id, name, ctx.cfg, inputs_week, log)
             summary[name] = {"solver": control.solver}
+            mark_done(name)
 
         def copy_q0(
             source: RatingSource,
@@ -496,6 +737,7 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                     "use_llm_view": False,
                     "view_shift": 0.0,
                     "fallback": fallback,
+                    "run_id": current_run_id(),
                 }
             )
             if reason:
@@ -514,7 +756,12 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                 )
 
         q0_posterior_path = posterior_dir(week_id) / "Q0.csv"
-        for source in ctx.sources():
+        from portstudy.pipeline import progress
+
+        progress.start(week_id, "J7")
+        n_sources = len(ctx.sources())
+        for i_source, source in enumerate(ctx.sources()):
+            progress.update(week_id, "J7", i_source, n_sources, force=i_source == 0)
             source_status = plan.status_for(source.key)
             _, ic_l = portfolio_ics(
                 week_id,
@@ -554,6 +801,25 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                     }
                     continue
                 q0 = q0_results[strategy]
+                if reusable(key):
+                    meta = read_weights_meta(week_id, key)
+                    summary[key] = {
+                        "ic_l": ic_l,
+                        "use_llm_view": meta.get("use_llm_view"),
+                        "solver": meta.get("solver"),
+                        "n_invalid": meta.get("n_invalid"),
+                        "resumed": True,
+                    }
+                    if meta.get("fallback_flag"):
+                        entries.append(
+                            {
+                                "portfolio": key,
+                                "status": "normal",
+                                "reason": meta["fallback_flag"],
+                                "decision_source": "llm",
+                            }
+                        )
+                    continue
                 w = build_weights(
                     week_id,
                     source.model,
@@ -576,6 +842,7 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                     "solver": w.solver,
                     "n_invalid": w.n_invalid,
                 }
+                mark_done(key)
                 if w.fallback_flag:
                     entries.append(
                         {
@@ -585,7 +852,9 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                             "decision_source": "llm",
                         }
                     )
+        progress.update(week_id, "J7", n_sources, n_sources)
         fb.write_log(week_id, entries)
+        _ledger_weights(ctx, week_id, plan)
         files = {
             p.name: sha256_file(p)
             for p in sorted(weights_dir(week_id).iterdir())
@@ -649,7 +918,15 @@ def build_plans(ctx: RunContext, weeks: list[str]) -> dict[str, list[WeekPlan]]:
                     if status == "fallback"
                     else "llm"
                 )
-            plans[key].append(WeekPlan(w, weights, decision_source, status))  # type: ignore[arg-type]
+            plans[key].append(
+                WeekPlan(
+                    w,
+                    weights,
+                    decision_source,  # type: ignore[arg-type]
+                    status,  # type: ignore[arg-type]
+                    removed=frozenset(removed_tickers(through_week=w)),
+                )
+            )
     return plans
 
 
@@ -746,16 +1023,22 @@ def refresh_ledger(ctx: RunContext, through: dt.date) -> int:
     return n
 
 
-def replay_weeks(week_id: str) -> list[str]:
-    """Every calendar week from the first locked week through `week_id` (review fix H2): a week
-    without `locked.json` (J1 or J2 failed and the hold was never written) is still replayed as
-    `no_rebalance`, so its stops, dividends and daily values are not skipped."""
+def replay_weeks(ctx: RunContext, week_id: str) -> list[str]:
+    """Every calendar week to replay through `week_id` (review fix H2): a week without
+    `locked.json` is still replayed as `no_rebalance`. DECISION(A7): with `live_start_week`
+    scoring every portfolio starts from cash at the first live week's Monday open, so pilot
+    and dry-run weights on disk are never replayed."""
     locked = [w for w in weeks_with_weights() if w <= week_id]
     if week_id not in locked and (week_output_dir(week_id) / "fallback_plan.json").exists():
         locked.append(week_id)
     if not locked:
         return []
-    return cal.weeks_between(min(locked), max(locked))
+    first = min(locked)
+    if ctx.cfg.views.ic_history_start == "live_start_week":
+        first = max(first, ctx.live_start_week)
+    if first > max(locked):
+        return []
+    return cal.weeks_between(first, max(locked))
 
 
 def J8_replay_score(ctx: RunContext, week_id: str) -> JobStatus:
@@ -763,9 +1046,10 @@ def J8_replay_score(ctx: RunContext, week_id: str) -> JobStatus:
         # Marks run through the latest close: bring the ledger up to today first.
         today = ctx.now().date()
         n_new = refresh_ledger(ctx, cal.prev_trading_day(today, inclusive=True))
-        weeks = replay_weeks(week_id)
+        weeks = replay_weeks(ctx, week_id)
         book = PriceBook(ledger.read_ledger(), ledger.read_actions())
         hashes = replay_all(ctx.cfg, build_plans(ctx, weeks), book)
+        _ledger_liquidations(weeks, ctx.portfolio_keys())
         n_ic = update_ic_history(ctx, weeks, book)
         return {
             "weeks": weeks,

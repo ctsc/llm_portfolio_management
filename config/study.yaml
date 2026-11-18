@@ -42,14 +42,15 @@ data:
   checks:
     missing_days: forward_fill
     nonpositive_price: skip_stock
-    extreme_move: skip_stock
     duplicate_rows: skip_stock
     stale_price: skip_stock
     no_news: forward_fill         # the stock stays; the no-news sentence is used
     news_after_cutoff: forward_fill  # rows are dropped, the stock stays
     short_history: skip_stock
     stopped_trading: skip_stock   # delisted or suspended: dropped without replacement
-    extreme_move_threshold: 0.40
+    unexplained_split: skip_stock # U1: raw jump absent from adjusted, no split action; skip this week only
+    large_move_flag: 0.10         # U1: 5-day adjusted move at or beyond this flags the stock, keeps it
+    crash_removal: -0.40          # U1: single-day or 5-day adjusted return at or below this removes the stock for good
     stale_days: 5
 
 synthetic:
@@ -104,6 +105,7 @@ llm:
   retry_invalid_once: true
   batch_retry_count: 1
   parallel_models: true           # PLAN3 phase 3: J4 runs the open-weight models side by side
+  network_outage_tolerance_minutes: 60  # pause and retry on connection errors (VPN drop) before counting failures
   api_poll_seconds: 300
   model_ids: []
   prompt_ids: []
@@ -126,6 +128,9 @@ llm:
 
 views:
   tau: 0.05
+  ic_mode: fixed                  # DECISION(A8): fixed scale until enough scored weeks exist
+  fixed_ic: 0.02                  # DECISION(A8)
+  ic_history_start: live_start_week  # DECISION(A7): pilot and dry-run weeks never feed views or results
   ic_window_weeks: 8
   ic_floor: 0.0
   cold_start_weeks: 5             # DECISION(A6)
@@ -166,6 +171,7 @@ simulator:
   cost_bps: 10
   stop_loss: -0.08
   take_profit: 0.15
+  no_price_liquidation_days: 5    # DECISION(U2): sell a position with no price this many ledger days at its last close
 
 pipeline:
   jobs: [J1, J2, J3, J4, J5, J6, J7, J8, J9]
@@ -192,6 +198,15 @@ eval:
   h3b:                            # DECISION(G3b)
     split: median
     min_group_size: 10
+
+arctic:                           # DECISION(N7): usage tracking; the run never stops on GPU-hours
+  gpu_hours_allocated: 1000       # startup allocation, 2026-11-16
+  gpu_seconds_per_request:        # estimates until the timing run measures them
+    gemma-4-31b: 40
+    minimax-m2.7: 90
+  litellm_budget_usd: 10          # gateway dollar budget (Andalib, 2026-11-17); checked before J4
+  warn_share: 0.75
+  alert_share: 0.90
 
 backup:
   keep_zips: true

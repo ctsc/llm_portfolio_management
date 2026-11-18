@@ -5,6 +5,7 @@ rerunning `python scripts/run_weekend.py --from J4` retries when the gateway is 
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -22,6 +23,7 @@ from portstudy.paths import week_output_dir
 from portstudy.pipeline.context import RunContext
 
 HEALTH_REASON = "gateway_health_check_failed"
+_LOG = logging.getLogger("portstudy.llm.health")
 HEALTH_TICKER = "HLTH"
 
 
@@ -99,6 +101,11 @@ def gateway_health_check(ctx: RunContext, week_id: str, runner: WeekRunner) -> H
             report.ok.append(model_id)
         except Exception as exc:  # any transport or provider failure counts as unhealthy
             report.failed[model_id] = f"{type(exc).__name__}: {exc}"
+            _LOG.warning(
+                "gateway_health_failed",
+                exc_info=True,
+                extra={"extra_fields": {"week_id": week_id, "model": model_id}},
+            )
     earlier = read_health(week_id)
     if earlier is not None:
         report.previous = [{k: v for k, v in earlier.to_dict().items() if k != "previous"}]

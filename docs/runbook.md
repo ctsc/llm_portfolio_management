@@ -137,14 +137,41 @@ The final evaluation (residual IC, active-return factor regressions on
 Kenneth French daily factors, Ledoit-Wolf Sharpe tests, pre-registered main comparisons) is
 specified in `plans/PLAN4.md` Phases 5 to 9 and `llm_research/05_evaluation_methodology.md`.
 
-## Where to look (pending PLAN4 Phase 3A, decision N6)
+## Where to look (decision N6)
 
-After Phase 3A every weekend run will leave: an event timeline `data/logs/runs/<run_id>.jsonl`
+Every weekend run leaves: an event timeline `data/logs/runs/<run_id>.jsonl`
 (every job start, end, retry, fallback and resume), job logs `data/logs/<job>/<date>.jsonl` and
 library warnings `data/logs/libraries/<date>.jsonl` (all tagged with the `run_id`), status files
 with full tracebacks, `data/outputs/<week>/fallbacks.csv` (every degradation and its reason),
 `data/outputs/<week>/run_summary.md` (what happened and what needs attention), and the result of
-`portstudy audit --week <week>`. Until then, the job logs and status files are the record.
+`portstudy audit --week <week>` (run after J9; non-zero exit on any problem). One row per week
+goes into `data/outputs/study_log.csv` (jobs, data, sources, costs, ARCTIC usage, canaries,
+backup, audit); `portstudy status` prints the last rows. `data/outputs/<week>/progress.json`
+shows J2, J4 and J7 progress, and the run warns when a projected finish passes the lock margin.
+
+**Resuming.** Rerun the same command after a crash, sleep or kill: J2 resumes from its last
+finished Kronos chunk (`kronos_chunks/`), J4 from its saved records and cache, J7 keeps the
+portfolios it already solved (`j7_done.json`), and the run reports any job left `running`.
+A VPN drop during J4 or J5 pauses and retries for up to
+`llm.network_outage_tolerance_minutes` (60) without using up request retries. Under WSL the
+run keeps Windows awake (`--no-keep-awake` disables it).
+
+**Weekly model checks (G21).** Before J4 the run saves the gateway's model list to
+`data/runs/<week>/gateway_models.json` and sends the 10 canary prompts
+(`config/canary/canary_inputs.csv`) to each gateway model; `data/outputs/model_checks.csv`
+records matches against the pilot's answers and a `model_change` flag, which is printed and
+never stops the run (`portstudy canary --week W` runs it alone). In the pilot, after J4, run
+`portstudy repeat-check --week <pilot week>` once: it writes `pilot_repeatability.csv` and
+the canary baseline.
+
+**ARCTIC usage (N7).** The summary prints estimated GPU-hours and gateway dollars with their
+projections (warning above 75%, alert above 90%). Before J4 the run stops if the gateway
+dollars spent plus the week's estimate would pass `arctic.litellm_budget_usd`; ask ARCTIC to
+raise the LiteLLM limit, or pass `--allow-over-budget`.
+
+**End of study.** After the Monday open following the last live week is in the ledger, run
+`portstudy closeout`; earlier it refuses and prints the date. `portstudy ledger rebuild --yes`
+re-fetches the price ledger (once, at the freeze; the old files are archived).
 
 ## Checks before a live run (PLAN4 Phase 3)
 

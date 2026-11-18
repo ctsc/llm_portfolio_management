@@ -78,17 +78,23 @@ def test_each_check_fires_on_its_planted_problem(
     window = days[idx + 70 - 299 : idx + 71]
     prices = world.prices[(world.prices["date"] >= window[0]) & (world.prices["date"] <= cutoff)]
     issues = check_prices(
-        prices, window, study_config.data.checks, world.actions, min_history_days=300
+        prices,
+        window,
+        study_config.data.checks,
+        world.actions,
+        min_history_days=300,
+        since=days[idx + 45],  # crash window covers the planted move at offset 50
     )
     codes = {(i.ticker, i.code) for i in issues}
     assert (PLANTED["delisting"][0], "stopped_trading") in codes
     assert (PLANTED["halt"][0], "missing_days") in codes
     assert (PLANTED["zero_price"][0], "nonpositive_price") in codes
-    assert (PLANTED["extreme_move"][0], "extreme_move") in codes
+    assert (PLANTED["extreme_move"][0], "crash_removal") in codes
     assert (PLANTED["stale_price"][0], "stale_price") in codes
     assert (PLANTED["duplicate_rows"][0], "duplicate_rows") in codes
-    # A split is not an extreme move.
-    assert (PLANTED["split"][0], "extreme_move") not in codes
+    # A split is neither a crash nor an unexplained raw move.
+    assert (PLANTED["split"][0], "crash_removal") not in codes
+    assert (PLANTED["split"][0], "unexplained_split") not in codes
     # Short history fires at the first cutoff for the late starter.
     early_window = days[idx - 299 : idx + 1]
     early = world.prices[

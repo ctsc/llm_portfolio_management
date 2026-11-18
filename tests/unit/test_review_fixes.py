@@ -44,6 +44,16 @@ def test_h1_ledger_holds_only_provider_rows_after_forward_fill(
     assert not (led["volume"] == 0).any()
 
 
+def _stub_phase3a_steps(rw, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    """Phase 3A run steps that read real run files; the fake context here has none."""
+    monkeypatch.setattr(rw, "dollar_budget_check", lambda ctx, w: None)
+    monkeypatch.setattr(rw, "model_checks", lambda ctx, w: [])
+    monkeypatch.setattr(rw, "report_progress", lambda ctx, w: [])
+    monkeypatch.setattr(rw, "audit_week", lambda ctx, w: [])
+    monkeypatch.setattr(rw, "finish_run", lambda *a, **k: None)
+    monkeypatch.setattr(rw, "start_keep_awake", lambda: None)
+
+
 def test_h4_catch_up_runs_for_every_start_job_and_from_j8_runs_j8(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -69,6 +79,7 @@ def test_h4_catch_up_runs_for_every_start_job_and_from_j8_runs_j8(
             return run_weekend.synthetic_clock("2026-W05")()
 
     monkeypatch.setattr(run_weekend, "default_context", lambda **kw: Ctx())
+    _stub_phase3a_steps(run_weekend, monkeypatch)
     assert run_weekend.main(["--synthetic", "--week", "2026-W05", "--from", "J6"]) == 0
     assert calls == ["catch_up", "J6", "J7", "J9"]
     calls.clear()
@@ -96,10 +107,13 @@ def test_h2_replay_weeks_fill_the_gap_and_a_j1_failure_writes_the_hold(
 
     monkeypatch.setenv("PORTSTUDY_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(jobs, "weeks_with_weights", lambda: ["2026-W10", "2026-W12"])
-    assert jobs.replay_weeks("2026-W12") == ["2026-W10", "2026-W11", "2026-W12"]
-    assert jobs.replay_weeks("2026-W10") == ["2026-W10"]
+    from portstudy.pipeline.context import default_context
+
+    ctx = default_context(synthetic=True)
+    assert jobs.replay_weeks(ctx, "2026-W12") == ["2026-W10", "2026-W11", "2026-W12"]
+    assert jobs.replay_weeks(ctx, "2026-W10") == ["2026-W10"]
     monkeypatch.setattr(jobs, "weeks_with_weights", lambda: [])
-    assert jobs.replay_weeks("2026-W12") == []
+    assert jobs.replay_weeks(ctx, "2026-W12") == []
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
     import run_weekend
@@ -123,6 +137,7 @@ def test_h2_replay_weeks_fill_the_gap_and_a_j1_failure_writes_the_hold(
             return run_weekend.synthetic_clock("2026-W05")()
 
     monkeypatch.setattr(run_weekend, "default_context", lambda **kw: Ctx())
+    _stub_phase3a_steps(run_weekend, monkeypatch)
     assert run_weekend.main(["--synthetic", "--week", "2026-W05"]) == 1
     assert calls == ["J1", "J6", "J7"]
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -151,7 +150,6 @@ class StubLlmProvider(LlmProvider):
         rng = _rng(self.seed, "timeout", self.rng_model_id, item.custom_id, str(self.calls))
         if rng.random() < self.failures.timeout_rate:
             raise LlmProviderError("injected timeout")
-        start = time.perf_counter()
         text, stop = self._text_for(item, settings)
         return RawResult(
             custom_id=item.custom_id,
@@ -159,7 +157,7 @@ class StubLlmProvider(LlmProvider):
             tokens_in=max(1, len(item.prompt.full_text) // 4),
             tokens_out=max(1, len(text) // 4),
             tokens_cached=max(0, len(item.prompt.shared_prefix) // 4),
-            latency_s=time.perf_counter() - start,
+            latency_s=0.0,  # no network: a measured time would differ between identical runs
             model_version=self.model_version,
             stop_reason=stop,
         )

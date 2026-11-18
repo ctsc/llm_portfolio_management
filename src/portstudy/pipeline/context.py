@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from portstudy import calendar as cal
 from portstudy.config import (
     ModelRegistry,
     StudyConfig,
@@ -46,11 +47,7 @@ class RunContext:
 
     @property
     def live_start_week(self) -> str:
-        if self.cfg.timing.live_start_week:
-            return self.cfg.timing.live_start_week
-        if self.synthetic:
-            return self.cfg.synthetic.first_week
-        raise ValueError("timing.live_start_week is not set")
+        return live_start_week_of(self.cfg, self.synthetic)
 
     def providers(self) -> ProviderBundle:
         if self.data_providers is None:
@@ -138,6 +135,19 @@ class RunContext:
         return self.q0_keys() + self.control_keys() + self.steered_keys()
 
 
+def live_start_week_of(cfg: StudyConfig, synthetic: bool) -> str:
+    """The first week that counts toward live results (DECISION(A2/A7). With
+    `timing.live_start_week` set it is that week; with only `timing.pilot_week` set it is the
+    week after the pilot; synthetic runs fall back to `synthetic.first_week`."""
+    if cfg.timing.live_start_week:
+        return cfg.timing.live_start_week
+    if cfg.timing.pilot_week:
+        return cal.next_week_id(cfg.timing.pilot_week)
+    if synthetic:
+        return cfg.synthetic.first_week
+    raise ValueError("timing.live_start_week is not set")
+
+
 def default_context(
     synthetic: bool = False,
     allow_over_budget: bool = False,
@@ -158,7 +168,5 @@ def default_context(
 
 def synthetic_clock(week_id: str) -> Callable[[], dt.datetime]:
     """A clock fixed at Friday 20:00 ET of the week's cutoff, before the Monday lock."""
-    from portstudy import calendar as cal
-
     fixed = dt.datetime.combine(cal.cutoff_day(week_id), dt.time(20, 0), tzinfo=ET)
     return lambda: fixed

@@ -66,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         env=os.environ,
         now=dt.datetime.now(),
         gateway_probe=(lambda _url: None) if skip else None,
+        clock_skew_s=(lambda _url: None) if skip else None,
     )
 
     for line in report.failures:

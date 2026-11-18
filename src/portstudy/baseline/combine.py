@@ -12,7 +12,7 @@ from typing import Any
 import pandas as pd
 
 from portstudy.baseline.common import complete_tickers, rank_u
-from portstudy.baseline.kronos import ForecastProvider, make_forecaster
+from portstudy.baseline.kronos import ForecastProvider, KronosForecaster, make_forecaster
 from portstudy.baseline.momentum import momentum_features
 from portstudy.config import StudyConfig
 from portstudy.data.snapshot import Snapshot
@@ -77,6 +77,12 @@ def build_baseline(
             },
         )
     fc = forecaster or make_forecaster(cfg.baseline)
+    if isinstance(fc, KronosForecaster):
+        from portstudy.pipeline import progress
+
+        fc.checkpoint_dir = week_output_dir(week_id) / "kronos_chunks"
+        progress.start(week_id, "J2")
+        fc.progress = lambda done, total: progress.update(week_id, "J2", done, total)
     kc = cfg.baseline.kronos
     data = ohlcv_by_ticker(snapshot, tickers, kc.context_candles)
     kronos_fallback = False
@@ -116,10 +122,23 @@ def build_baseline(
             "kronos_fallback": kronos_fallback,
             "reason": reason,
             "n_stocks": int(len(out)),
+            "kronos_peak_gpu_mb": _peak_gpu_mb(fc),
+            "kronos_seconds": float(
+                sum(float(s.get("seconds") or 0.0) for s in getattr(fc, "last_chunk_stats", []))
+            ),
         },
         week_output_dir(week_id) / "baseline_meta.json",
     )
     return out
+
+
+def _peak_gpu_mb(forecaster: ForecastProvider) -> float | None:
+    peaks = [
+        float(s["peak_gpu_mb"])
+        for s in getattr(forecaster, "last_chunk_stats", [])
+        if s.get("peak_gpu_mb") is not None
+    ]
+    return max(peaks) if peaks else None
 
 
 def read_baseline(week_id: str) -> pd.DataFrame:

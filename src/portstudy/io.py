@@ -18,17 +18,43 @@ import pandas as pd
 FLOAT_FORMAT = "%.12g"
 
 
+def _fsync_dir(folder: Path) -> None:
+    """Flush a folder entry to disk after a rename (POSIX only; Windows has no folder fsync)."""
+    if os.name == "nt":
+        return
+    fd = os.open(folder, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _atomic_replace(tmp_path: Path, final_path: Path) -> None:
+    # N6 (6): the temp file reaches the disk before the rename, and the folder after it.
+    with tmp_path.open("r+b") as fh:  # Windows refuses fsync on a read-only handle
+        os.fsync(fh.fileno())
     # os.replace is atomic on POSIX and on Windows for same-volume paths. Windows refuses the
     # replace while another thread or process has the target open, so retry briefly there.
     for attempt in range(20):
         try:
             os.replace(tmp_path, final_path)
-            return
+            break
         except PermissionError:
             if os.name != "nt" or attempt == 19:
                 raise
             time.sleep(0.05)
+    _fsync_dir(final_path.parent)
+
+
+def append_line_durable(path: Path, line: str) -> None:
+    """Append one line to a JSON-lines file, then flush and fsync it (N6 (6))."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = line if line.endswith("\n") else line + "\n"
+    with path.open("a", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def _tmp_for(path: Path) -> Path:

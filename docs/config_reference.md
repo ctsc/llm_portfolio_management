@@ -10,7 +10,7 @@ keys marked "pending PLAN4" are added by `plans/PLAN4.md`.
 
 | Variable | Meaning |
 |---|---|
-| `PORTSTUDY_DATA_DIR` | Root of every data folder (default `./data`). |
+| `PORTSTUDY_DATA_DIR` | Root of every data folder (default `./data`). Point it at a scratch folder for dry runs so no pre-pilot week lands in the live folder (A7). |
 | `PORTSTUDY_ROOT` | Repository root override (default: the checkout holding `src/`). |
 | `PORTSTUDY_CONFIG` | Study YAML path (default `config/study.yaml`; CLI `--config` takes precedence). |
 | `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY` | Alpaca bars and news. |
@@ -61,7 +61,9 @@ Keys go in a `.env` file outside the repository (`~/.env` inside WSL, mode 600; 
 | `retries.attempts`, `retries.backoff_seconds` | 3, 2.0 | HTTP retries with exponential backoff |
 | `fixture_dir` | tests/fixtures/providers | Recorded JSON for replay mode |
 | `checks.<code>` | see file | Rule per check code: `skip_stock`, `forward_fill`, or `halt` |
-| `checks.extreme_move_threshold` | 0.40 | Absolute daily move without a split flag, checked over the whole history; replaced in PLAN4 Phase 3A by `large_move_flag` (0.10, 5-day move, flag and keep), `crash_removal` (-0.40, permanent removal) and an `unexplained_split` data-error check (decision U1) |
+| `checks.large_move_flag` | 0.10 | 5-day adjusted move since the previous cutoff at or beyond this is flagged (`large_move`) and the stock is kept (U1) |
+| `checks.crash_removal` | -0.40 | A single-day or 5-day adjusted return at or below this removes the stock for the rest of the study (`data/universe_removals.csv`); nothing replaces it (U1) |
+| `checks.unexplained_split` | skip_stock | A raw jump of the same size absent from the adjusted series with no split action: a data error, the stock is skipped for that week only (U1) |
 | `checks.stale_days` | 5 | Unchanged close run length |
 
 ### synthetic
@@ -215,7 +217,7 @@ configuration id or `skills_mean` for the enabled skills mean). `skills_5` is di
 Decision B1. Maintained by
 `scripts/refresh_manifest.py`.
 
-## Keys added by PLAN4 after the 2026-11-11 review (pending the phase named)
+## Keys added by PLAN4 after the 2026-11-11 review (built in the phase named unless that phase is still to come)
 
 | Key | Default | Meaning | Decision | Phase |
 |---|---|---|---|---|
@@ -227,8 +229,9 @@ Decision B1. Maintained by
 | `simulator.no_price_liquidation_days` | 5 | Trading days without a price before a held stock is sold at its last close | U2 | 3A |
 | `llm.settings.<model>.request_timeout_seconds` | 180 (MiniMax 600 until measured) | Gateway request timeout per model | G15 | 3 |
 | `llm.gateway.features_frozen` | false | When true, a rejected `seed` or JSON mode is an error and not a silent change | G15 | 3 |
+| `arctic.gpu_hours_allocated`, `arctic.gpu_seconds_per_request` | 1000; Gemma 40, MiniMax 90 | ARCTIC usage tracking against the allocation (replace the per-request values after the timing run) | N7 | 3A |
+| `arctic.litellm_budget_usd`, `arctic.warn_share`, `arctic.alert_share` | 10, 0.75, 0.90 | Gateway dollar budget checked before J4, and the warning and alert shares of the projections | N7 | 3A |
 | `llm.network_outage_tolerance_minutes` | 60 | How long J4 and J5 wait out a connection outage before counting failures | N4, N5 | 3A |
 | `view_sensitivity_min_tracking_error` (in `config/preregistration.yaml`) | null | Threshold below which a strategy is reported as insensitive to views | G13 | 4 |
 
 The LLM view formula changes in Phase 3B (decision E7): `q_L = mu_Q0 + IC_L sigma z_L`.
-| `arctic.gpu_hours_allocated`, `arctic.gpu_seconds_per_request` | 1000; Gemma 40, MiniMax 90 | ARCTIC usage tracking against the allocation (replace the per-request values after the timing run) | N7 | 3A |

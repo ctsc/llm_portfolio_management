@@ -6,6 +6,8 @@ A job whose status is `done` with an unchanged `inputs_hash` is skipped unless f
 from __future__ import annotations
 
 import logging
+import shutil
+import time
 import traceback
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -14,8 +16,8 @@ from typing import Any, Literal
 
 from portstudy.hashing import sha256_file, stable_hash
 from portstudy.io import read_json, write_json_atomic
-from portstudy.logging_setup import now_et
-from portstudy.paths import week_output_dir
+from portstudy.logging_setup import current_run_id, now_et
+from portstudy.paths import data_dir, week_output_dir
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +36,9 @@ class JobStatus:
     outputs_hash: str | None = None
     error: str | None = None
     result: dict[str, Any] | None = None
+    traceback: str | None = None  # N6 (3): full traceback of a failure
+    run_id: str = ""
+    duration_s: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -60,7 +65,9 @@ def read_status(week_id: str, job: str) -> JobStatus:
     path = status_path(week_id, job)
     if not path.exists():
         return JobStatus(job=job, week_id=week_id)
-    return JobStatus(**read_json(path))
+    data = read_json(path)
+    known = set(JobStatus.__dataclass_fields__)
+    return JobStatus(**{k: v for k, v in data.items() if k in known})
 
 
 def write_status(status: JobStatus) -> None:
@@ -69,6 +76,14 @@ def write_status(status: JobStatus) -> None:
 
 def all_statuses(week_id: str) -> dict[str, JobStatus]:
     return {job: read_status(week_id, job) for job in JOB_NAMES}
+
+
+# N6 (7): no job starts with less free disk than this at the data folder.
+MIN_FREE_GB = 2.0
+
+
+def free_disk_gb(path: Path) -> float:
+    return shutil.disk_usage(path).free / 1024**3
 
 
 def hash_paths(paths: list[Path]) -> str:
@@ -90,6 +105,8 @@ def run_job(
     If `fn` returns a dict containing `{"pending": True}` and `pending_ok` is set, the job is
     left in state `pending` (for example a batch that has not returned yet) rather than `done`.
     """
+    from portstudy.pipeline.events import emit
+
     current = read_status(week_id, job)
     if current.state == "done" and current.inputs_hash == inputs_hash and not force:
         # Review fix M5: a done job is skipped only while its recorded outputs are still there
@@ -101,33 +118,70 @@ def run_job(
         )
         if outputs_intact:
             current.state = "skipped"
+            emit("job_skip", job=job, week_id=week_id, inputs_hash=inputs_hash)
             return current
         log.warning(
             "%s %s: outputs changed or missing since it was done; running again", job, week_id
         )
+    if current.state == "running":
+        # The process that started this job died without writing an end state.
+        emit("job_interrupted", job=job, week_id=week_id, previous_run_id=current.run_id)
     status = JobStatus(
         job=job,
         week_id=week_id,
         state="running",
         started_at=now_et().isoformat(),
         inputs_hash=inputs_hash,
+        run_id=current_run_id(),
     )
+    folder = data_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    free = free_disk_gb(folder)
+    if free < MIN_FREE_GB:
+        status.state = "failed"
+        status.finished_at = status.started_at
+        status.error = f"only {free:.1f} GB free at {folder}; at least {MIN_FREE_GB:.0f} GB needed"
+        write_status(status)
+        emit("job_fail", job=job, week_id=week_id, error=status.error)
+        raise JobFailed(job, week_id, status.error)
     write_status(status)
+    emit("job_start", job=job, week_id=week_id, inputs_hash=inputs_hash)
+    started = time.perf_counter()
     try:
         result = fn() or {}
     except Exception as exc:  # the job's own error is recorded and re-raised as JobFailed
         status.state = "failed"
         status.finished_at = now_et().isoformat()
+        status.duration_s = time.perf_counter() - started
         status.error = f"{type(exc).__name__}: {exc}"
-        status.result = {"traceback": traceback.format_exc()[-4000:]}
+        status.traceback = traceback.format_exc()
+        status.result = {"traceback": status.traceback[-4000:]}
         write_status(status)
+        log.error("%s %s failed: %s", job, week_id, status.error, exc_info=True)
+        emit(
+            "job_fail",
+            job=job,
+            week_id=week_id,
+            error=status.error,
+            duration_s=status.duration_s,
+            traceback=status.traceback,
+        )
         raise JobFailed(job, week_id, status.error) from exc
     status.finished_at = now_et().isoformat()
+    status.duration_s = time.perf_counter() - started
     status.result = {k: v for k, v in result.items() if k != "traceback"}
     status.state = "pending" if (pending_ok and result.get("pending")) else "done"
     if outputs is not None and status.state == "done":
         status.outputs_hash = hash_paths(outputs())
     write_status(status)
+    emit(
+        "job_end",
+        job=job,
+        week_id=week_id,
+        state=status.state,
+        duration_s=status.duration_s,
+        inputs_hash=inputs_hash,
+    )
     return status
 
 

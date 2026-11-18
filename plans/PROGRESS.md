@@ -1170,3 +1170,135 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
 - Found while testing on Windows: two parallel J4 workers both rewrote `cost_log.csv` and
   `llm_scores.csv` without a lock (a lost update on any system, and a `PermissionError` on
   Windows). Both writes now take a lock, and the atomic replace retries briefly on Windows.
+
+## v4 phase 3A: week-to-week integrity and data tracking
+
+### What changed
+
+- **Open-to-open weekly returns (N4).** The simulator records the portfolio value at each week's
+  Monday open (after that day's corporate actions, before any trade) in
+  `data/portfolios/<portfolio>/week_opens.csv` and `value_open` on the trade-day daily record, for
+  every week status including `no_rebalance`; `replay` adds a closing entry at the next Monday open
+  once the ledger has it. `eval/data.py` scores weekly returns from one Monday open to the next
+  (`weekly_open_returns`); the last week waits for the following Monday open. The old
+  close-to-close function is kept as `weekly_close_returns` for comparison.
+- **Large moves and crash removal (U1).** `extreme_move` is gone. Checks look only at days since
+  the previous cutoff: a 5-day adjusted move of 10% or more is flagged (`large_move`) and kept; a
+  single-day or 5-day adjusted return of -40% or worse removes the stock for the rest of the study
+  (`data/universe_removals.csv`; later snapshots do not fetch it; nothing replaces it); a raw jump
+  absent from the adjusted series with no split action is `unexplained_split` (skipped for that
+  week only). Snapshot manifests carry `removed`, `removed_earlier` and `n_large_move`.
+- **Stop on a rebalance day (G1b).** A stop-loss or take-profit merged into the rebalance resets
+  the position's average cost to the rebalance open, so the same move does not fire again.
+- **No-price liquidation (U2).** A holding without a positive close for
+  `simulator.no_price_liquidation_days` (5) consecutive ledger days is sold at its last close with
+  cost (`no_price_liquidation`); a removed stock without a Monday open is sold the same way.
+- **Fixed view scale (A8).** `views.ic_mode: fixed`, `views.fixed_ic: 0.02`: both views use 0.02
+  every week; weight metas record `ic_mode`. J8 still scores every weekly rank IC.
+  `config/study_test.yaml` sets `ic_mode: trailing` so the older trailing-IC tests keep their meaning.
+- **Clean live start (A7).** `views.ic_history_start: live_start_week`: trailing IC and the
+  evaluation ignore weeks before the first live week, and the replay starts every portfolio from
+  cash at the first live week's Monday open (pilot weights stay on disk). With only
+  `timing.pilot_week` set, the first live week is the week after it (A2); one helper
+  (`live_start_week_of`) serves the pipeline and the evaluation.
+- **`portstudy ledger rebuild --yes`** archives the ledger files to `ledger/archive/<UTC time>/`
+  and re-fetches them. **`portstudy closeout`** refuses (and prints the date) until the Monday open
+  after the last live week is in the ledger, then runs the final J8, checks every portfolio has its
+  closing entry and writes `data/outputs/study_complete.json`.
+- **Logging and durable progress (N6), all ten parts.** (1) `run_id` per `run_weekend.py` run (and
+  per `portstudy run-job`), on every log line, status file, LLM record, weight meta and study-log
+  row. (2) Event timeline `data/logs/runs/<run_id>.jsonl` (`pipeline/events.py`): run start and
+  end, job start, end, skip, failure and interruption, preflight, resume, fallbacks, flags. (3)
+  Status files keep a `traceback` field; the J4 crash handler, solver fallbacks, provider errors and
+  the health check log tracebacks; a test fails on any new `except` block with no log line or
+  re-raise (per-file counts of the existing ones are pinned). (4) Python warnings and the `cvxpy`,
+  `httpx`, `urllib3` loggers go to `data/logs/libraries/<date>.jsonl`. (5) Weekly fallback ledger
+  `data/outputs/<week>/fallbacks.csv` (`pipeline/fallback_ledger.py`) fed by J1 (skipped, removed
+  and forward-filled stocks, carried or missing market caps), J2 (Kronos fallback), J4/J6 (Q0
+  fallbacks, `provider_error`, invalid outputs, disabled gateway features), J7 (Q0 fallbacks,
+  `no_rebalance`, solver fallbacks, next-solver, `optimal_inaccurate`, cross-checked against J6's
+  plan), J8 (no-price liquidations) and the canary (`model_change`); rows are upserted, so a rerun
+  never duplicates them. (6) Atomic writes fsync the temp file and the folder; JSON-lines appends
+  flush and fsync each line. (7) `run_job` refuses to start with less than 2 GB free. (8)
+  `data/outputs/<week>/run_summary.md` after every run, including failed runs, with a printed
+  "needs attention" list. (9) `portstudy audit --week W` (also run after J9): job states, snapshot
+  and weight hashes, a record for every planned LLM request, weights for every portfolio, and the
+  ledger against the weight metas. (10) Logs are under `data/logs/`, which every backup includes;
+  nothing rotates or deletes them.
+- **Study log.** `data/outputs/study_log.csv`, one row per week (upserted at the end of every run):
+  job states and durations, failing job, git commit, config and preregistration hashes, universe
+  size, removals, large moves, carried caps, price provider and feed, Kronos fallback and peak GPU
+  memory, per-source status and invalid rate, API cost, gateway model list and per-model timing,
+  canary matches and `model_change`, ARCTIC usage, backup path and zip check, audit result.
+  `portstudy status` prints the last rows.
+- **ARCTIC usage (N7)**, including Carter's 2026-11-17 gateway-dollar addition: estimated
+  GPU-hours (requests times `arctic.gpu_seconds_per_request`), gateway dollars (sum of
+  `x-litellm-response-cost`, canaries and repeat check included), running totals and projections,
+  warning above 75% and alert above 90%. Before J4 the run stops if the dollars spent plus the
+  week's estimate (previous week's mean cost per request, or the timing run's) would pass
+  `arctic.litellm_budget_usd` (10), printing "ask ARCTIC to raise the LiteLLM limit";
+  `--allow-over-budget` proceeds; with no cost values yet the check is skipped with a warning.
+  `--time-gateway` now also records `response_cost`.
+- **Model checks and canaries (G21).** `llm/canary.py`: before J4 the run saves `/v1/models` and
+  `/v1/model/info` to `data/runs/<week>/gateway_models.json`, rates the 10 canary stocks
+  (`config/canary/canary_inputs.csv`, built from the synthetic world; Carter replaces it with a
+  real past week before the freeze) with the cache bypassed, and compares with
+  `data/outputs/canary_baseline.csv`: a changed `model_version` or deployment ID, or fewer
+  identical answers than the binomial bound (1% level, pilot agreement share), flags
+  `model_change`; a changed gateway version or `updated_at` is `gateway_changed` (information
+  only). Results in `data/outputs/model_checks.csv`; `portstudy canary --week W`.
+- **Pilot repeat check (G20).** `portstudy repeat-check --week W`: re-rates the first 50 stocks
+  under every prompt type per gateway model with the cache bypassed and writes
+  `pilot_repeatability.csv` (identical share, within-1 share, rank correlation, invalid count) and
+  the canary baseline.
+- **Keep-awake.** Under WSL `run_weekend.py` starts a `powershell.exe` helper calling
+  `SetThreadExecutionState` and stops it on every exit path; `--no-keep-awake` disables it.
+- **Checkpoints and resume.** J2 saves each finished Kronos chunk (`kronos_chunks/`, keyed by the
+  chunk's inputs) and skips it on a rerun; J7 keeps portfolios already solved for the same inputs
+  (`j7_done.json`); J4 resumes from its records and cache. A truncated last record line (a hard
+  kill mid-append) is skipped with a warning. `run_weekend.py` reports jobs left `running`.
+- **Network outage tolerance.** Connection errors to the gateway (`LlmConnectionError`) pause and
+  retry with backoff for up to `llm.network_outage_tolerance_minutes` (60), printing "check the GSU
+  VPN", without using up the request's retries and never past the lock margin; J5 polling does the
+  same.
+- **Progress.** J2, J4 (per model) and J7 write `data/outputs/<week>/progress.json`; the run prints
+  progress and warns when a projected finish passes the lock margin.
+- **Clock check.** The preflight compares the local clock with the gateway's `Date` header and
+  fails above 2 minutes, printing `sudo hwclock -s`.
+- **Docs.** README, `docs/runbook.md` (where to look, resuming, model checks, ARCTIC usage, end of
+  study), `docs/config_reference.md` (new keys), `docs/design.md`, `docs/open_questions.md`.
+
+### Tests
+
+- New: `test_v4_phase3a_sim.py` (10), `test_v4_phase3a_data.py` (8), `test_v4_phase3a_pipeline.py`
+  (4), `test_v4_phase3a_logging.py` (15), `test_v4_phase3a_resilience.py` (11, of which the
+  random-kill test is `slow`). The random-kill test runs `run_weekend.py` in a subprocess and makes
+  it exit without cleanup right after its N-th event (`PORTSTUDY_TEST_KILL_AT_EVENT`), at seeded
+  points across J1 to J9, then compares outputs, record uniqueness and the timeline with an
+  uninterrupted run.
+- Changed on purpose: `test_phase2_data.py`, `test_phase9_simulator.py`, `test_review_fixes.py`
+  (extreme-move and close-to-close expectations), `test_snapshots_30_weeks.py` (`large_move`,
+  `crash_removal`, `removed_from_study` are expected codes; only the planted crash may be removed),
+  `test_v4_phase3_preflight.py` (the fake weekend stubs the new run steps; the clock probe is
+  injected).
+- Run after the last change: `pytest tests/unit tests/integration` (default selection, Windows) passes with no failures; the `slow` random-kill test passes (16 kill points across J1 to J9, then a rerun: every output CSV identical to an uninterrupted run, no duplicated LLM record, interruptions in the timeline). `tests/e2e` collects (not run; Phase 11). `ruff check`, `ruff format --check`, `mypy` clean.
+
+### UNVERIFIED items added
+
+- `pipeline/keep_awake.py`: the `powershell.exe` keep-awake helper under WSL needs confirming on Carter's desktop.
+- The clock check reads the gateway's `Date` header; its availability on ARCTIC is untested.
+
+### Choices made while unattended
+
+- `fallbacks.csv` has no run_id or timestamp columns (they are in the event timeline) so the CSV
+  stays byte-identical on reruns, which the e2e determinism test checks.
+- The random-kill test kills at event points rather than with an external SIGKILL at random
+  times: the process ends without any cleanup, which is what SIGKILL does, and the points are
+  reproducible on Windows and Linux.
+- J4 progress is reported per model (`J4 <model>`), because the models run in parallel.
+- A canary with no pilot baseline yet records "no pilot baseline yet" and never flags.
+- The canary checks only real gateway models (stub models only when a provider is injected), like
+  the health check.
+- Phase 3A was built in three parts and committed once.
+- The stub LLM now reports `latency_s` 0.0 instead of a measured time: the random-kill test showed that column was the only difference between a resumed and an uninterrupted run, and a stub has no network to time.
+- The canary skips a model the health check marked down that week.

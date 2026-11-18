@@ -481,6 +481,12 @@ def test_run_weekend_continues_to_j6_when_j4_fails_at_the_lock_margin(
     monkeypatch.setattr(run_weekend, "gateway_health", lambda ctx, w: None)
     monkeypatch.setattr(run_weekend, "wait_for_batches", lambda ctx, w, s, p: None)
     monkeypatch.setattr(run_weekend, "print_summary", lambda w: None)
+    monkeypatch.setattr(run_weekend, "dollar_budget_check", lambda ctx, w: None)
+    monkeypatch.setattr(run_weekend, "model_checks", lambda ctx, w: [])
+    monkeypatch.setattr(run_weekend, "report_progress", lambda ctx, w: [])
+    monkeypatch.setattr(run_weekend, "audit_week", lambda ctx, w: [])
+    monkeypatch.setattr(run_weekend, "finish_run", lambda *a, **k: None)
+    monkeypatch.setattr(run_weekend, "start_keep_awake", lambda: None)
 
     class Ctx:
         def __init__(self, now):

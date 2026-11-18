@@ -130,8 +130,8 @@ batch not finished by the lock deadline minus the margin.
 
 ```
 Rank IC:    Spearman(likely rating at Friday cutoff, total return from next Monday open to the following Monday open)
-Trailing IC: mean of last 8 scored weeks, floored at 0 ; fixed 0.02 for the first 5 live weeks
-            (pending PLAN4 Phase 3A, decision A8: IC_b = IC_L = 0.02 every week)
+View scale: IC_b = IC_L = views.fixed_ic (0.02) every week (A8, ic_mode: fixed); the trailing
+            mean of the last 8 scored weeks is kept for ic_mode: trailing
 Residual:   s = a + c z_b + e ;  z_L = standardize(e)        (invalid outputs excluded)
 Views:      q_b = pi + IC_b sigma z_b ;  q_L = pi + IC_L sigma z_L
             (pending PLAN4 Phase 3B, decision E7: q_L = mu_Q0 + IC_L sigma z_L, centered on the

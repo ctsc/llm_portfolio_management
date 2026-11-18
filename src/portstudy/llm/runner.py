@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import logging
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
@@ -31,6 +32,7 @@ from portstudy.llm.providers.base import (
     BatchHandle,
     BatchItem,
     LlmCallCutoff,
+    LlmConnectionError,
     LlmProvider,
     LlmProviderError,
     RawResult,
@@ -40,6 +42,7 @@ from portstudy.llm.providers.factory import make_provider
 from portstudy.llm.providers.litellm import LlmBudgetError
 from portstudy.llm.schema import INVALID_OUTPUT, INVALID_TRUNCATED, fallback_response
 from portstudy.llm.validate import parse_response
+from portstudy.logging_setup import current_run_id
 from portstudy.paths import week_output_dir
 
 ET = ZoneInfo("America/New_York")
@@ -176,6 +179,9 @@ class WeekRunner:
         self.stub_seed = stub_seed
         self.clock = clock
         self._providers: dict[str, LlmProvider] = dict(providers or {})
+        # Outage tolerance clock and sleep, replaceable in tests.
+        self._monotonic: Callable[[], float] = time.monotonic
+        self._sleep: Callable[[float], None] = time.sleep
         self._plans: dict[str, list[Task]] = {}
         self.folder = week_output_dir(week_id) / "llm"
         self.folder.mkdir(parents=True, exist_ok=True)
@@ -257,9 +263,17 @@ class WeekRunner:
             return out
         with path.open("r", encoding="utf-8") as fh:
             for line in fh:
-                if line.strip():
+                if not line.strip():
+                    continue
+                try:
                     rec = json.loads(line)
-                    out[str(rec["custom_id"])] = rec
+                except json.JSONDecodeError:
+                    self.log.warning(
+                        "record_line_unreadable",
+                        extra={"extra_fields": {"file": path.name, "line": line[:200]}},
+                    )
+                    continue
+                out[str(rec["custom_id"])] = rec
         return out
 
     def _append_record(self, model: str, config_id: str, rec: dict[str, Any]) -> None:
@@ -345,6 +359,7 @@ class WeekRunner:
             "retries": retries,
             "send_seed": settings.send_seed if raw.send_seed is None else raw.send_seed,
             "json_mode": settings.json_mode if raw.json_mode is None else raw.json_mode,
+            "run_id": current_run_id(),
             "reasoning_text": raw.reasoning_text or "",
             "reasoning_chars": len(raw.reasoning_text or ""),
             "tokens_reasoning": raw.tokens_reasoning,
@@ -403,6 +418,11 @@ class WeekRunner:
             try:
                 raw = provider.complete(item, settings)
             except LlmProviderError as exc:
+                self.log.warning(
+                    "provider_error",
+                    exc_info=True,
+                    extra={"extra_fields": {"custom_id": item.custom_id, "adhoc": True}},
+                )
                 records[index] = self._provider_error_record(task, spec, settings, exc)
                 return
             if not bypass_cache:
@@ -620,12 +640,22 @@ class WeekRunner:
         set_cutoff = getattr(provider, "set_call_cutoff", None)
         if callable(set_cutoff):
             set_cutoff(cutoff, self._now)
+        from portstudy.pipeline import progress
+
+        job = f"J4 {model}"
+        n_done = len(tasks) - len(remaining)
+        progress.start(self.week_id, job)
+        progress.update(self.week_id, job, n_done, len(tasks), force=True)
+
         workers = max(1, self.cfg.llm.concurrency.get(model, 4))
         pending: dict[Future[RawResult], tuple[Task, str, int, RawResult | None]] = {}
         versions: set[str] = set()
         next_index = 0
         fatal: Exception | None = None
         provider_errors: dict[str, int] = {}
+        tolerance_s = 60.0 * self.cfg.llm.network_outage_tolerance_minutes
+        outage_started: float | None = None
+        outage_waits = 0
 
         def call_provider(task: Task) -> RawResult:
             if self._now() >= cutoff:
@@ -654,6 +684,41 @@ class WeekRunner:
                     except (_CallCutoff, LlmCallCutoff):
                         continue
                     except LlmProviderError as exc:
+                        if isinstance(exc, LlmConnectionError):
+                            # Network outage tolerance: a connection error inside the window does
+                            # not count against the request (N5); past the window or the lock
+                            # margin it falls through to the normal provider-error handling.
+                            now_m = self._monotonic()
+                            if outage_started is None:
+                                outage_started = now_m
+                            if (
+                                now_m - outage_started < tolerance_s
+                                and self._now() < cutoff
+                                and fatal is None
+                                and summary.aborted is None
+                            ):
+                                wait_s = min(60.0, 2.0 ** min(outage_waits, 6))
+                                outage_waits += 1
+                                self.log.warning(
+                                    "network_outage",
+                                    extra={
+                                        "extra_fields": {
+                                            "week_id": self.week_id,
+                                            "model": model,
+                                            "error": str(exc),
+                                            "outage_s": round(now_m - outage_started, 1),
+                                            "message": "check the GSU VPN",
+                                        }
+                                    },
+                                )
+                                print(
+                                    f"[{model}] gateway unreachable; check the GSU VPN "
+                                    f"(retrying in {wait_s:.0f}s)",
+                                    flush=True,
+                                )
+                                self._sleep(wait_s)
+                                submit(task, key, retries, first)
+                                continue
                         features = (
                             getattr(provider, "send_seed", None),
                             getattr(provider, "json_mode", None),
@@ -703,6 +768,7 @@ class WeekRunner:
                         )
                         self.log.warning(
                             "provider_error",
+                            exc_info=exc,
                             extra={
                                 "extra_fields": {
                                     "week_id": self.week_id,
@@ -722,6 +788,8 @@ class WeekRunner:
                             record = self._provider_error_record(task, spec, settings, exc)
                             self._append_record(model, task.config_id, record)
                             self._update_open_weight_status(task, record)
+                            n_done += 1
+                            progress.update(self.week_id, job, n_done, len(tasks))
                             summary.n_provider_error += 1
                             summary.n_invalid += 1
                             summary.per_config[task.config_id] = (
@@ -731,6 +799,7 @@ class WeekRunner:
                     except Exception as exc:
                         fatal = exc
                         continue
+                    outage_started, outage_waits = None, 0
 
                     if retries == 0:
                         response = parse_response(
@@ -768,6 +837,8 @@ class WeekRunner:
                     record = self._record_open_weight_result(
                         task, spec, settings, raw, retries, key
                     )
+                    n_done += 1
+                    progress.update(self.week_id, job, n_done, len(tasks))
                     summary.n_invalid += 0 if record["valid"] else 1
                     summary.cost_usd += float(record["cost_usd"])
                     summary.n_retries += retries

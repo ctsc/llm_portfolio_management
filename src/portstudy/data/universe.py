@@ -143,3 +143,53 @@ def build_universe(
     if out_path is not None:
         write_csv_atomic(out, out_path)
     return out
+
+
+# Study removals ((U1)): a crash-removed ticker never returns; nothing replaces it.
+REMOVAL_COLUMNS = ["week_id", "ticker", "date", "return", "reason"]
+
+
+def removals_path() -> Path:
+    from portstudy.paths import data_dir
+
+    return data_dir() / "universe_removals.csv"
+
+
+def read_removals() -> pd.DataFrame:
+    path = removals_path()
+    if not path.exists():
+        return pd.DataFrame(columns=REMOVAL_COLUMNS)
+    df = read_csv(path)
+    if len(df):
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+    return df
+
+
+def record_removal(week_id: str, ticker: str, date: dt.date, ret: float, reason: str) -> None:
+    """Append a removal; the first removal for a ticker wins (idempotent)."""
+    df = read_removals()
+    if len(df) and ticker in set(df["ticker"].astype(str)):
+        return
+    row = pd.DataFrame(
+        [
+            {
+                "week_id": week_id,
+                "ticker": ticker,
+                "date": date,
+                "return": ret,
+                "reason": reason,
+            }
+        ]
+    )
+    out = pd.concat([df, row], ignore_index=True).loc[:, REMOVAL_COLUMNS]
+    write_csv_atomic(out, removals_path())
+
+
+def removed_tickers(through_week: str | None = None) -> set[str]:
+    """Tickers recorded as removed, optionally only those removed by `through_week`."""
+    df = read_removals()
+    if len(df) == 0:
+        return set()
+    if through_week is not None:
+        df = df[df["week_id"].astype(str) <= through_week]
+    return set(df["ticker"].astype(str))

@@ -3,6 +3,9 @@ llm:
   model_ids: [stub-ow-a, stub-ow-b]
   prompt_ids: [bare, placebo, skills_1, skills_2]
 
+views:
+  ic_mode: trailing               # the trailing-IC tests keep their meaning under A8
+
 synthetic:
   n_tickers: 120
 

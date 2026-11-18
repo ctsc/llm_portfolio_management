@@ -26,18 +26,28 @@ import datetime as dt
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
 from portstudy import calendar as cal
 from portstudy.config import repo_root
+from portstudy.data.snapshot import snapshot_exists
 from portstudy.llm import health
 from portstudy.llm.runner import lock_deadline
+from portstudy.llm.usage import BudgetCheck, check_dollar_budget, usage_summary
+from portstudy.logging_setup import current_run_id, new_run_id, set_run_id
 from portstudy.pipeline import fallback as fb
+from portstudy.pipeline import study_log
+from portstudy.pipeline.audit import audit_week
 from portstudy.pipeline.context import RunContext, default_context, synthetic_clock
+from portstudy.pipeline.events import emit
 from portstudy.pipeline.frozen import save_frozen_config
 from portstudy.pipeline.jobs import current_week, read_weights_lock, run_named, weeks_with_weights
+from portstudy.pipeline.keep_awake import start_keep_awake, stop_keep_awake
 from portstudy.pipeline.preflight import live_ready
+from portstudy.pipeline.progress import read_progress
+from portstudy.pipeline.run_summary import write_run_summary
 from portstudy.pipeline.status import JobFailed, read_status
 from portstudy.types import PortfolioId
 
@@ -116,12 +126,32 @@ def _summarize(job: str, result: dict[str, Any]) -> str:
     return ""
 
 
+CONNECTION_MARKERS = ("ConnectError", "ConnectTimeout", "ConnectionError", "unreachable")
+
+
 def wait_for_batches(ctx: RunContext, week: str, synthetic: bool, poll_seconds: int) -> None:
     deadline = lock_deadline(week, ctx.cfg) - dt.timedelta(
         minutes=ctx.cfg.pipeline.lock_margin_minutes
     )
+    outage_started: float | None = None
+    tolerance_s = 60.0 * ctx.cfg.llm.network_outage_tolerance_minutes
     while True:
-        state = run(ctx, "J5", week, synthetic)
+        try:
+            state = run(ctx, "J5", week, synthetic)
+        except JobFailed as exc:
+            # Network outage tolerance for batch polling: a connection error (VPN drop) is
+            # retried within the window and never past the lock margin.
+            text = str(exc)
+            if not any(k in text for k in CONNECTION_MARKERS) or ctx.now() >= deadline:
+                raise
+            now_m = time.monotonic()
+            outage_started = now_m if outage_started is None else outage_started
+            if now_m - outage_started >= tolerance_s:
+                raise
+            say("provider unreachable while polling batches; check the GSU VPN (retrying in 30s)")
+            time.sleep(30)
+            continue
+        outage_started = None
         if state != "pending":
             return
         now = ctx.now()
@@ -182,6 +212,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the live-readiness checks (check_live_ready.py is the standalone run)",
     )
+    parser.add_argument(
+        "--no-keep-awake",
+        action="store_true",
+        help="do not start the WSL helper that keeps Windows from sleeping",
+    )
     args = parser.parse_args(argv)
     if args.from_job not in STEP_ORDER or args.until_job not in STEP_ORDER:
         parser.error(f"--from/--until must be one of {STEP_ORDER}")
@@ -224,6 +259,21 @@ def main(argv: list[str] | None = None) -> int:
         for job in ctx.cfg.pipeline.jobs:
             print(f"  {job}: {read_status(week, job).state}")
         return 0
+    awake = None if args.no_keep_awake else start_keep_awake()
+    try:
+        return run_live(ctx, args, week, poll, argv)
+    finally:
+        stop_keep_awake(awake)
+
+
+def run_live(
+    ctx: RunContext, args: argparse.Namespace, week: str, poll: int, argv: list[str] | None
+) -> int:
+    """Everything after the dry-run check: preflight, jobs, audit, study log and summary."""
+    set_run_id(new_run_id())
+    started_at = ctx.now().isoformat()
+    emit("run_start", week_id=week, argv=list(argv or sys.argv[1:]), synthetic=args.synthetic)
+    say(f"run_id {current_run_id()}")
     if not args.synthetic:
         if not args.skip_preflight:
             report = live_ready(
@@ -239,27 +289,61 @@ def main(argv: list[str] | None = None) -> int:
                 say(f"preflight FAIL: {line}")
             for line in report.warnings:
                 say(f"preflight WARN: {line}")
+            emit("preflight", week_id=week, failures=report.failures, warnings=report.warnings)
             if report.failures:
                 say(
                     "preflight failed; fix the failures or rerun with --skip-preflight "
                     "(see scripts/check_live_ready.py)"
                 )
+                emit("run_end", week_id=week, exit_code=2, reason="preflight")
                 return 2
         if week == ctx.cfg.timing.pilot_week:
             # Phase 3C frozen-config: the pilot run snapshots the configuration every later
             # week is diffed against.
             save_frozen_config(repo_root())
             say("pilot week: configuration frozen under data/frozen/")
+    interrupted = [job for job in STEP_ORDER if read_status(week, job).state == "running"]
+    if interrupted:
+        say(f"previous run was interrupted during {' '.join(interrupted)}; resuming")
+        emit("resume", week_id=week, interrupted=interrupted)
     jobs = jobs_between(args.from_job, args.until_job)
     say(f"jobs this run: {' '.join(jobs)}")
+    code, failed_job, messages = run_jobs(ctx, week, jobs, args, poll)
+    audit_problems: list[str] | None = None
+    if code == 0 and "J9" in jobs:
+        print_summary(week)
+        audit_problems = audit_week(ctx, week)
+        for line in audit_problems:
+            say(f"audit: {line}")
+        if not audit_problems:
+            say("audit ok")
+    finish_run(ctx, week, started_at, failed_job, messages, audit_problems)
+    emit("run_end", week_id=week, exit_code=code, failed_job=failed_job)
+    return code
+
+
+def run_jobs(
+    ctx: RunContext, week: str, jobs: list[str], args: argparse.Namespace, poll: int
+) -> tuple[int, str, list[str]]:
+    """Run the requested jobs; returns the exit code, the failing job and summary messages."""
     explicit_j8 = "J8" in (args.from_job, args.until_job)
+    messages: list[str] = []
+    current = "catch-up"
     try:
         # Review fix H4: the catch-up (J8 and J9 for earlier weeks) runs on every invocation, so
         # a rerun that starts at J3 or J6 still replays and scores the earlier weeks.
         step1_catch_up(ctx, week, args.synthetic)
         for job in jobs:
+            current = job
             if job == "J4":
+                budget = dollar_budget_check(ctx, week)
+                if budget is not None:
+                    say(budget.message)
+                    if not budget.ok:
+                        emit("budget_stop", week_id=week, message=budget.message)
+                        return 1, "J4 (LiteLLM budget)", [budget.message]
                 gateway_health(ctx, week)
+                messages.extend(model_checks(ctx, week))
             if job == "J5":
                 wait_for_batches(ctx, week, args.synthetic, poll)
             elif job == "J8" and not explicit_j8:
@@ -273,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
                     say(f"{job} failed: writing the no_rebalance plan and lock for {week}")
                     for hold_job in ("J6", "J7"):
                         run(ctx, hold_job, week, args.synthetic)
-                    return 1
+                    return 1, job, messages
             elif job == "J4":
                 try:
                     run(ctx, job, week, args.synthetic)
@@ -288,15 +372,100 @@ def main(argv: list[str] | None = None) -> int:
                             "J4 failed at the lock margin; continuing to J6 "
                             "(unfinished sources trade their strategy's Q0, N1)"
                         )
+                        messages.append("J4 did not finish before the lock margin")
                         continue
                     raise
             else:
                 run(ctx, job, week, args.synthetic)
+            if job in ("J2", "J4", "J7"):
+                messages.extend(report_progress(ctx, week))
     except JobFailed:
-        return 1
-    if "J9" in jobs:
-        print_summary(week)
-    return 0
+        return 1, current, messages
+    return 0, "", messages
+
+
+def model_checks(ctx: RunContext, week: str) -> list[str]:
+    """G21 before J4: gateway model list and canaries. A flag is printed, never fatal."""
+    from portstudy.llm import canary
+    from portstudy.pipeline.jobs import _week_runner
+
+    try:
+        rows = canary.run_canary(ctx, week, _week_runner(ctx, week))
+    except Exception as exc:  # a failed check must not stop the week
+        say(f"model checks not run: {type(exc).__name__}: {exc}")
+        emit("model_checks_failed", week_id=week, error=str(exc), traceback=traceback.format_exc())
+        return [f"model checks not run: {exc}"]
+    out = []
+    for row in rows:
+        say(f"canary {row['model']}: {row['matches']}/{row['n']} identical ({row['reasons']})")
+        if row["model_change"]:
+            line = f"model_change flag for {row['model']}: {row['reasons']}"
+            say(f"warning: {line}")
+            emit("flag", week_id=week, flag="model_change", model=row["model"])
+            out.append(line)
+    return out
+
+
+def dollar_budget_check(ctx: RunContext, week: str) -> BudgetCheck | None:
+    """DECISION(N7): stop before any gateway request when the LiteLLM budget would be passed."""
+    gateway = [
+        m for m in ctx.open_weight_models() if ctx.run_registry().get(m).serving == "gateway"
+    ]
+    if not gateway or not snapshot_exists(week):
+        return None
+    from portstudy.pipeline.jobs import _week_runner
+
+    runner = _week_runner(ctx, week)
+    n_planned = sum(runner.n_unrecorded(m) for m in gateway)
+    if n_planned == 0:
+        return None
+    return check_dollar_budget(
+        ctx.cfg, ctx.registry, week, n_planned, allow_over_budget=ctx.allow_over_budget
+    )
+
+
+def report_progress(ctx: RunContext, week: str) -> list[str]:
+    """Print the long jobs' progress; warn when a projected finish passes the lock margin."""
+    margin = lock_deadline(week, ctx.cfg) - dt.timedelta(
+        minutes=ctx.cfg.pipeline.lock_margin_minutes
+    )
+    out: list[str] = []
+    for job, entry in sorted(read_progress(week).items()):
+        say(f"progress {job}: {entry['done']}/{entry['total']} in {entry['elapsed_s']:.0f}s")
+        projected = entry.get("projected_finish")
+        if projected and entry["done"] < entry["total"]:
+            if dt.datetime.fromisoformat(projected) > margin:
+                line = f"{job} is projected to finish {projected}, after the lock margin {margin}"
+                say(f"warning: {line}")
+                out.append(line)
+    return out
+
+
+def finish_run(
+    ctx: RunContext,
+    week: str,
+    started_at: str,
+    failed_job: str,
+    messages: list[str],
+    audit_problems: list[str] | None,
+) -> None:
+    """Study-log row, ARCTIC usage lines and run_summary.md, also after a failed run."""
+    usage = usage_summary(ctx.cfg, ctx.registry, week)
+    for line in usage.messages:
+        say(line)
+    try:
+        study_log.upsert(study_log.week_row(ctx, week, started_at, failed_job, audit_problems))
+    except Exception as exc:  # the log must never hide the run's own result
+        say(f"study log not written: {type(exc).__name__}: {exc}")
+        emit("study_log_failed", week_id=week, error=str(exc), traceback=traceback.format_exc())
+    path, attention = write_run_summary(
+        week, failed_job, [*messages, *usage.messages], audit_problems
+    )
+    say(f"run summary: {path}")
+    if attention:
+        say("needs attention:")
+        for line in attention:
+            say(f"  - {line}")
 
 
 STEP_ORDER = ["J1", "J2", "J3", "J4", "J5", "J6", "J7", "J8", "J9"]

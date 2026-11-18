@@ -16,7 +16,7 @@ from portstudy.llm.runner import read_scores
 from portstudy.optimize import read_weights_meta, weights_dir
 from portstudy.pipeline import fallback as fb
 from portstudy.pipeline.jobs import weeks_with_weights
-from portstudy.sim.records import read_daily, read_trades
+from portstudy.sim.records import read_daily, read_trades, read_week_opens
 from portstudy.types import PortfolioId, RatingSource
 from portstudy.views.ic import ICStore, weekly_returns
 
@@ -29,13 +29,29 @@ def width_column(source: str) -> str:
     return f"width:{source}"
 
 
-def weekly_portfolio_returns(daily: pd.DataFrame, initial_value: float) -> pd.Series:
-    """Return per week from the last close of the previous week to the last close of this week."""
+def weekly_close_returns(daily: pd.DataFrame, initial_value: float) -> pd.Series:
+    """Return per week from the last close of the previous week to the last close of this week.
+    Kept for comparison tests and descriptive use; scored returns are open-to-open (N4)."""
     if len(daily) == 0:
         return pd.Series(dtype=float)
     last = daily.groupby("week_id")["value"].last().sort_index()
     prev = last.shift(1).fillna(initial_value)
     return (last / prev - 1.0).rename("ret")
+
+
+def weekly_open_returns(week_opens: pd.DataFrame) -> pd.Series:
+    """N4: per-week return from this week's Monday open to the next week's Monday
+    open, the same window rank IC uses. A week without both entries has no value; the last
+    week gets one only once the following Monday open is in the ledger."""
+    if len(week_opens) == 0:
+        return pd.Series(dtype=float).rename("ret")
+    v = week_opens.set_index("week_id")["value_open"].astype(float)
+    out = {
+        w: float(v[cal.next_week_id(w)] / v[w] - 1.0)
+        for w in v.index
+        if cal.next_week_id(w) in v.index
+    }
+    return pd.Series(out, name="ret")
 
 
 def max_drawdown(values: pd.Series) -> float:
@@ -208,12 +224,25 @@ def _meta_tables(weeks: list[str], keys: list[str]) -> tuple[pd.DataFrame, pd.Da
 
 
 def load_eval_data(
-    cfg: StudyConfig, portfolios: list[str], weeks: list[str] | None = None
+    cfg: StudyConfig,
+    portfolios: list[str],
+    weeks: list[str] | None = None,
+    synthetic: bool = False,
 ) -> EvalData:
+    from portstudy.pipeline.context import live_start_week_of
+
     all_weeks = weeks or weeks_with_weights()
     pilot = cfg.timing.pilot_week
     # The pilot week never counts toward results.
     weeks_used = [w for w in all_weeks if w != pilot]
+    # DECISION(A7): with live_start_week scoring, weeks before the live start are ignored.
+    if cfg.views.ic_history_start == "live_start_week":
+        try:
+            live_start = live_start_week_of(cfg, synthetic)
+        except ValueError:
+            live_start = None
+        if live_start is not None:
+            weeks_used = [w for w in weeks_used if w >= live_start]
     keys = list(dict.fromkeys(portfolios))
     source_portfolios = [key for key in keys if PortfolioId.parse(key).source is not None]
     portfolio_by_source: dict[str, str] = {}
@@ -231,10 +260,8 @@ def load_eval_data(
         ic[signal] = ic[signal][ic[signal].index.isin(weeks_used)]
     daily = {k: read_daily(k) for k in keys}
     trades = {k: read_trades(k) for k in keys}
-    weekly = pd.DataFrame(
-        {k: weekly_portfolio_returns(daily[k], cfg.simulator.initial_value) for k in keys}
-    )
-    weekly = weekly[weekly.index.isin(weeks_used)]
+    weekly = pd.DataFrame({k: weekly_open_returns(read_week_opens(k)) for k in keys})
+    weekly = weekly.reindex(weeks_used)
     statuses = pd.DataFrame({k: {w: fb.week_status_for(w, k) for w in weeks_used} for k in keys})
     spy_weekly, spy_vol = _spy_series(weeks_used)
     solver_failed, view_shift = _meta_tables(weeks_used, keys)

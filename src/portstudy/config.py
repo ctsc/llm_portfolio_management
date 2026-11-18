@@ -59,14 +59,15 @@ class RetryConfig(StrictModel):
 class CheckRules(StrictModel):
     missing_days: CheckRule = "forward_fill"
     nonpositive_price: CheckRule = "skip_stock"
-    extreme_move: CheckRule = "skip_stock"
     duplicate_rows: CheckRule = "skip_stock"
     stale_price: CheckRule = "skip_stock"
     no_news: CheckRule = "forward_fill"
     news_after_cutoff: CheckRule = "forward_fill"
     short_history: CheckRule = "skip_stock"
     stopped_trading: CheckRule = "skip_stock"
-    extreme_move_threshold: float = 0.40
+    unexplained_split: CheckRule = "skip_stock"
+    large_move_flag: float = 0.10
+    crash_removal: float = -0.40
     stale_days: int = 5
 
     def rule_for(self, code: str) -> CheckRule:
@@ -175,6 +176,7 @@ class LlmConfig(StrictModel):
     settings: dict[str, LlmSettings] = Field(default_factory=dict)
     concurrency: dict[str, int] = Field(default_factory=dict)
     parallel_models: bool = True  # PLAN3 phase 3: each open-weight model in its own J4 worker
+    network_outage_tolerance_minutes: float = Field(default=60.0, ge=0)
     gateway: GatewayConfig = GatewayConfig()
 
     def settings_for(self, model_id: str) -> LlmSettings:
@@ -188,6 +190,9 @@ class ViewsConfig(StrictModel):
     cold_start_weeks: int = 5
     cold_start_ic: float = 0.02
     ic_min_weeks: int = 3
+    ic_mode: Literal["fixed", "trailing"] = "fixed"
+    fixed_ic: float = 0.02
+    ic_history_start: Literal["live_start_week", "first_locked_week"] = "live_start_week"
     kronos_spread_clip: tuple[float, float] = (0.25, 4.0)
     width_conf_clip: tuple[float, float] = (0.1, 1.0)
     ic_signal_for_llm: Literal["llm_resid", "llm_raw"] = "llm_resid"
@@ -245,6 +250,7 @@ class SimulatorConfig(StrictModel):
     cost_bps: float = 10.0
     stop_loss: float = -0.08
     take_profit: float = 0.15
+    no_price_liquidation_days: int = Field(default=5, ge=1)
 
 
 class PipelineConfig(StrictModel):
@@ -279,6 +285,18 @@ class EvalConfig(StrictModel):
     )
     min_group_size: int = 10
     h3b: H3bConfig = H3bConfig()
+
+
+class ArcticConfig(StrictModel):
+    """DECISION(N7): ARCTIC usage tracking (GPU-hour estimate and the gateway dollar budget)."""
+
+    gpu_hours_allocated: float = 1000.0
+    gpu_seconds_per_request: dict[str, float] = Field(
+        default_factory=lambda: {"gemma-4-31b": 40.0, "minimax-m2.7": 90.0}
+    )
+    litellm_budget_usd: float = 10.0
+    warn_share: float = 0.75
+    alert_share: float = 0.90
 
 
 class BackupConfig(StrictModel):
@@ -318,6 +336,7 @@ class StudyConfig(StrictModel):
     pipeline: PipelineConfig = PipelineConfig()
     eval: EvalConfig = EvalConfig()
     backup: BackupConfig = BackupConfig()
+    arctic: ArcticConfig = ArcticConfig()
     decisions: list[Decision] = Field(default_factory=list)
 
     @field_validator("decisions")

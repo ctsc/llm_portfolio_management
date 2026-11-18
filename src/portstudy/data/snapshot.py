@@ -31,6 +31,7 @@ from portstudy.data.checks import (
     tickers_to_skip,
 )
 from portstudy.data.providers.base import REFERENCE_COLUMNS, ProviderBundle
+from portstudy.data.universe import record_removal, removed_tickers
 from portstudy.hashing import sha256_file
 from portstudy.io import read_csv, read_json, write_csv_atomic, write_json_atomic
 from portstudy.logging_setup import now_et
@@ -225,6 +226,21 @@ def make_snapshot(
     tickers = sorted(universe["ticker"].astype(str))
     etfs = list(cfg.universe.etf_proxies)
 
+    # U1: tickers removed in an earlier week are not fetched at all; they stay in the
+    # snapshot's universe.csv with included = False and nothing replaces them.
+    earlier_removed = sorted(removed_tickers(cal.prev_week_id(week_id)) & set(tickers))
+    fetch_tickers = [t for t in tickers if t not in earlier_removed]
+    removal_issues = [
+        Issue(
+            "info",
+            tk,
+            "removed_from_study",
+            "removed from the study in an earlier week",
+            "remove",
+        )
+        for tk in earlier_removed
+    ]
+
     # Prices: at least price_history_days trading days back to the cutoff.
     hist_days = cfg.data.price_history_days
     start = cutoff - dt.timedelta(days=int(hist_days * 1.6) + 30)
@@ -232,11 +248,11 @@ def make_snapshot(
     if len(expected_days) > hist_days:
         expected_days = expected_days[-hist_days:]
     start = expected_days[0]
-    prices = providers.prices.get_prices(tickers, start, cutoff)
+    prices = providers.prices.get_prices(fetch_tickers, start, cutoff)
     prices = prices[prices["date"] <= cutoff].copy()
     etf_prices = providers.prices.get_prices(etfs, start, cutoff)
     etf_prices = etf_prices[etf_prices["date"] <= cutoff].copy()
-    actions = providers.prices.get_corporate_actions(tickers, start, cutoff)
+    actions = providers.prices.get_corporate_actions(fetch_tickers, start, cutoff)
 
     # News window: (previous cutoff 16:00 ET, cutoff 16:00 ET]; first snapshot uses 7 days.
     prev_week = cal.prev_week_id(week_id)
@@ -245,7 +261,9 @@ def make_snapshot(
     else:
         news_start = cutoff_utc - dt.timedelta(days=cfg.data.first_snapshot_news_days)
     # Pull a little past the cutoff so the leakage check can see late articles, then drop them.
-    raw_news = providers.news.get_news(tickers, news_start, cutoff_utc + dt.timedelta(hours=12))
+    raw_news = providers.news.get_news(
+        fetch_tickers, news_start, cutoff_utc + dt.timedelta(hours=12)
+    )
     news_issues = check_news(raw_news, tickers, cutoff_utc, cfg.data.checks)
     if len(raw_news):
         pub = pd.to_datetime(raw_news["published_at"], utc=True)
@@ -278,11 +296,11 @@ def make_snapshot(
                 )
             )
     try:
-        fetched = providers.reference.get_reference(tickers, cutoff)
+        fetched = providers.reference.get_reference(fetch_tickers, cutoff)
     except Exception:
         log.exception("reference_call_failed", extra={"extra_fields": {"week_id": week_id}})
         fetched = pd.DataFrame(columns=REFERENCE_COLUMNS)
-    reference = fetched.set_index("ticker").reindex(tickers).reset_index()
+    reference = fetched.set_index("ticker").reindex(fetch_tickers).reset_index()
     for col in REFERENCE_COLUMNS:
         if col not in reference.columns:
             reference[col] = pd.NA
@@ -309,8 +327,9 @@ def make_snapshot(
         cfg.data.checks,
         actions,
         min_history_days=cfg.universe.min_history_days,
+        since=cal.cutoff_day(prev_week),
     )
-    issues: list[Issue] = price_issues + news_issues + universe_issues + cap_issues
+    issues: list[Issue] = price_issues + news_issues + universe_issues + cap_issues + removal_issues
     for issue in issues:
         log.log(
             logging.WARNING if issue.severity != "info" else logging.INFO,
@@ -380,6 +399,9 @@ def make_snapshot(
         "n_included": int(universe_out["included"].sum()),
         "n_market_cap_carried": n_cap_carried,
         "n_market_cap_missing": n_cap_missing,
+        "n_large_move": sum(1 for i in issues if i.code == "large_move"),
+        "removed": sorted(i.ticker for i in issues if i.code == "crash_removal"),
+        "removed_earlier": earlier_removed,
         "skipped": sorted(skipped),
         "files": {name: sha256_file(folder / name) for name in SNAPSHOT_FILES},
     }
@@ -389,6 +411,18 @@ def make_snapshot(
     all_raw = pd.concat([raw_prices, etf_prices], ignore_index=True)
     ledger.append_prices(all_raw, logger=log)
     ledger.append_actions(actions)
+
+    # U1: record this week's crash removals after the folder is written, so every
+    # later snapshot excludes them (the first removal for a ticker wins).
+    for issue in issues:
+        if issue.code == "crash_removal":
+            record_removal(
+                week_id,
+                issue.ticker,
+                dt.date.fromisoformat(str(issue.details["date"])),
+                float(issue.details["return"]),
+                "crash_removal",
+            )
     return _ref_for(week_id, folder, version)
 
 
