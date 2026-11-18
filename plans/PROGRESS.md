@@ -1486,3 +1486,52 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
 - `load_eval_data` loads factors without the coverage check (characteristics use what exists); the
   Phase 8 factor regressions enforce coverage for the final run.
 - The ETF proxy method has no momentum proxy in the snapshot ETFs, so MOM is omitted there.
+
+## v4 phase 7: signal-level hypothesis tests
+
+### What changed
+
+- New `eval/signal_tests.py` (kept apart from `hypotheses.py`, which is near 600 lines):
+  - Same-stock IC gaps (G14): every gap is computed each week on the stocks valid in both
+    signals, with the stock count reported (`mean_n_stocks`).
+  - H1 per source: LLM minus baseline-score IC gap (G12 paired summary), ICIR, IC hit rate with
+    binomial p, top-minus-bottom quintile spread, LLM IC above zero, and the residual IC (G9):
+    weekly Fama-MacBeth slope of standardized next-week return ranks on the standardized score,
+    the preregistered numeric controls (z-scored) and sector dummies, tested with Newey-West and
+    t(T-1); the "residualize the score, then rank IC" version is the `cross_check_resid_ic` column.
+    Pooled: source-week gap on an intercept with effect-coded model fixed effects (so the
+    intercept is the mean over models), week-clustered SEs, t(weeks - 1) p; the pooled LLM IC above
+    zero is a secondary row.
+  - H2 signal: steered tilt (`posterior/<source>.csv`) minus Q0 tilt (`posterior/Q0.csv`) IC on the
+    same stocks, the steered tilt's residual IC, the mean G18 uncertainty ratio per source
+    (`EvalData.conf_only_ratio`), and the pooled tilt gap.
+  - H3 signal: per model each skills file minus bare and minus placebo (same stocks); pooled
+    source-week IC on a skills indicator with model and week fixed effects, clustered by week.
+  - Model comparisons: paired IC difference for every model pair on
+    `main_model_comparison_prompt`, and pooled model effects with prompt and week fixed effects.
+  - H3b: weekly Fama-MacBeth score-by-confidence interaction (c from E1) and the weekly Spearman
+    correlation of width with absolute rank error, both tested over weeks (narrow-minus-wide stays
+    in `hypotheses.h3b_width`).
+  - Rows carry `hypothesis`, `comparison`, `unit`, `comparison_id` (the four preregistered ids on
+    the pooled rows) and go through `assign_families` (Holm primary, BH secondary, H4 exploratory).
+
+### Tests
+
+- New: `tests/unit/test_v4_phase7_signal.py` (3): a planted stock-specific effect gives a large,
+  significant residual IC while a style tilt (the score is a control plus noise) has a clearly
+  positive raw IC and a residual IC near zero and not significant; the pooled regression recovers
+  a planted 0.03 skills-minus-placebo IC difference; on the shared synthetic run every hypothesis
+  appears, the four primary rows carry the preregistered ids, and each model's `skills_1` IC beats
+  its placebo IC (the stub's noise progression).
+- The shared test pipeline has one scored week, so p-values there are NaN (T = 1) and the test
+  checks that only rows with T >= 2 get adjusted p-values; the many-week pooled check runs in the
+  Phase 11 synthetic e2e run. The zero-rating H2 identity (steered tilt equals Q0 tilt) is pinned
+  by Phase 3B's posterior-mean test.
+- Existing evaluation tests pass. `ruff`, `mypy` clean.
+
+### Choices made while unattended
+
+- Fama-MacBeth target: next-week return ranks standardized each week, so the slope is in IC-like
+  units; numeric controls use the Phase 6 z-scored columns.
+- Pooled source-week regressions use effect (sum) coding for model fixed effects in H1 and H2 so
+  the intercept is the average gap over models.

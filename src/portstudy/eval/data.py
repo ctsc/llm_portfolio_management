@@ -138,6 +138,19 @@ class EvalData:
                 return self.clean_mask(key)
         return pd.Series(True, index=self.weeks)
 
+    def conf_only_ratio(self, source: str) -> float:
+        """Mean G18 `conf_only_uncertainty_ratio` over the source's steered weight metas."""
+        values = []
+        for w in self.weeks:
+            for key, src in self.source_of.items():
+                path = weights_dir(w) / f"{key}.meta.json"
+                if src == source and path.exists():
+                    v = read_weights_meta(w, key).get("conf_only_uncertainty_ratio")
+                    if v is not None:
+                        values.append(float(v))
+                    break
+        return float(np.mean(values)) if values else float("nan")
+
     def fallback_counts(self) -> pd.DataFrame:
         rows = []
         for p in self.statuses.columns:
