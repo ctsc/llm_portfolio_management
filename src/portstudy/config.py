@@ -275,16 +275,35 @@ class H3bConfig(StrictModel):
     min_group_size: int = 10
 
 
+class MultipleTestingConfig(StrictModel):
+    """DECISION(G7): Holm on the preregistered primary family, BH on the rest, H4 exploratory."""
+
+    primary_procedure: Literal["holm"] = "holm"
+    secondary_procedure: Literal["fdr_bh"] = "fdr_bh"
+    exploratory: list[str] = Field(default_factory=lambda: ["H4"])
+
+
 class EvalConfig(StrictModel):
-    tie_band: float = 0.01
+    tie_band: float = 0.001  # DECISION(G12): 10 bps
+    tie_band_sensitivity: list[float] = Field(
+        default_factory=lambda: [0.0, 0.0005, 0.001, 0.005, 0.01]
+    )
     bootstrap_samples: int = 2000
+    bootstrap_block_mean: float | None = None  # None means T^(1/3)
+    signflip_exact_max_t: int = 24  # exact enumeration up to this T, Monte Carlo above
     permutation_samples: int = 10000
     significance: float = 0.05
     seed: int = 2026
     combined_signal: str = "bl_tilt"
     factor_frequency: str = "daily"
+    factor_source: Literal["french", "etf_proxy"] = "french"  # DECISION(G11)
     fama_french_file: str | None = None
-    holm_families: dict[str, str] = Field(default_factory=dict)
+    momentum_file: str | None = None
+    risk_free: Literal["fred"] = "fred"
+    cer_gamma: list[float] = Field(default_factory=lambda: [2.0, 5.0])
+    report_active_weeks: bool = True  # DECISION(G8)
+    preregistration_file: str = "config/preregistration.yaml"
+    multiple_testing: MultipleTestingConfig = MultipleTestingConfig()
     h4_splits: list[str] = Field(
         default_factory=lambda: ["market_direction", "volatility", "earnings_week"]
     )
@@ -464,3 +483,99 @@ def load_model_registry(path: Path | None = None) -> ModelRegistry:
     """Load and validate models.yaml."""
     cfg_path = path or repo_root() / "config" / "models.yaml"
     return ModelRegistry.model_validate(_read_yaml(cfg_path))
+
+
+PrimaryKind = Literal["pooled_source_ic_gap", "pooled_tilt_ic_gap", "pooled_prompt_ic_gap"]
+RESIDUAL_IC_CONTROLS = (
+    "baseline_score",
+    "momentum_12_1",
+    "log_market_cap",
+    "volatility_63d",
+    "beta_252d",
+    "sector",
+    "loading_hml",
+    "loading_rmw",
+    "loading_cma",
+)
+MAX_PRIMARY_COMPARISONS = 10
+
+
+class PrimaryComparison(StrictModel):
+    """One preregistered main comparison (DECISION(G7)); Phase 7 builds the estimators."""
+
+    id: str
+    hypothesis: str
+    kind: PrimaryKind
+    models: list[str] = Field(default_factory=list)  # empty: every enabled model
+    prompts: list[str] = Field(default_factory=list)  # the treated prompt ids; empty: all
+    control_prompt: str | None = None  # pooled_prompt_ic_gap: the prompt compared against
+    strategies: list[str] = Field(default_factory=list)  # pooled_tilt_ic_gap; empty: all
+
+
+class Preregistration(StrictModel):
+    """config/preregistration.yaml: fixed before the live run (Carter sets `frozen: true`)."""
+
+    frozen: bool = False
+    frozen_on: str | None = None
+    primary_comparisons: list[PrimaryComparison] = Field(default_factory=list)
+    residual_ic_controls: list[str] = Field(default_factory=lambda: list(RESIDUAL_IC_CONTROLS))
+    main_model_comparison_prompt: str = "bare"
+    view_sensitivity_min_tracking_error: float | None = None  # DECISION(G13)
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> Preregistration:
+        ids = [c.id for c in self.primary_comparisons]
+        if len(ids) != len(set(ids)):
+            raise ValueError("primary_comparisons ids must be unique")
+        if len(ids) > MAX_PRIMARY_COMPARISONS:
+            raise ValueError(
+                f"at most {MAX_PRIMARY_COMPARISONS} primary comparisons, got {len(ids)}"
+            )
+        unknown = sorted(set(self.residual_ic_controls) - set(RESIDUAL_IC_CONTROLS))
+        if unknown:
+            raise ValueError(
+                f"unknown residual_ic_controls {unknown}; allowed: {list(RESIDUAL_IC_CONTROLS)}"
+            )
+        for c in self.primary_comparisons:
+            if c.kind == "pooled_prompt_ic_gap" and not c.control_prompt:
+                raise ValueError(f"{c.id}: pooled_prompt_ic_gap needs control_prompt")
+        if self.frozen:
+            if not self.frozen_on:
+                raise ValueError("frozen: true needs frozen_on (the freeze date)")
+            if self.view_sensitivity_min_tracking_error is None:
+                raise ValueError("frozen: true needs view_sensitivity_min_tracking_error (G13)")
+        return self
+
+    def check_against(
+        self, cfg: StudyConfig, registry: ModelRegistry, prompt_ids: list[str]
+    ) -> list[str]:
+        """Selectors must name enabled models, prompts and strategies; returns the problems."""
+        enabled_models = {m.id for m in registry.enabled()} | {
+            m.id for m in registry.stub_models if m.enabled
+        }
+        problems: list[str] = []
+        prompts = set(prompt_ids)
+        for c in self.primary_comparisons:
+            for m in c.models:
+                if m not in enabled_models:
+                    problems.append(f"{c.id}: model {m} is not enabled")
+            for p in [*c.prompts, *([c.control_prompt] if c.control_prompt else [])]:
+                if p not in prompts:
+                    problems.append(f"{c.id}: prompt {p} is not enabled")
+            for s in c.strategies:
+                if s not in cfg.strategies.enabled:
+                    problems.append(f"{c.id}: strategy {s} is not enabled")
+        if self.main_model_comparison_prompt not in prompts:
+            problems.append(
+                f"main_model_comparison_prompt {self.main_model_comparison_prompt} is not enabled"
+            )
+        return problems
+
+
+def load_preregistration(
+    path: Path | None = None, cfg: StudyConfig | None = None
+) -> Preregistration:
+    """Read and validate the preregistration file (`eval.preregistration_file` by default)."""
+    target = path or repo_root() / (cfg or load_study_config()).eval.preregistration_file
+    return Preregistration.model_validate(_read_yaml(target))

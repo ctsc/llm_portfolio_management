@@ -51,3 +51,16 @@ def test_git_history_has_one_commit_per_phase() -> None:
     phases = [int(re.match(r"phase (\d+):", s).group(1)) for s in subjects]  # type: ignore[union-attr]
     assert len(phases) == len(set(phases)), subjects
     assert set(phases) >= set(range(1, 16))
+    # PLAN4 subjects: "v4 phase N: ..." (N may carry a letter, for example 3A), each once.
+    v4 = [s for s in log.stdout.splitlines() if s.startswith("v4 phase ")]
+    v4_ids = [re.match(r"v4 phase (\w+):", s).group(1) for s in v4]  # type: ignore[union-attr]
+    assert len(v4_ids) == len(set(v4_ids)), v4
+
+
+def test_retired_decision_ids_are_not_code_tags() -> None:
+    retired = ("G6", "W1", "M1")
+    for p in _py_files() + [REPO_ROOT / "config" / "study.yaml"]:
+        text = p.read_text(encoding="utf-8")
+        for rid in retired:
+            assert f"DECISION({rid})" not in text, (p, rid)
+            assert f"- id: {rid}\n" not in text, (p, rid)

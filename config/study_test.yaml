@@ -16,3 +16,6 @@ strategies:
     n_scenarios: 2000
   resampled:
     n_draws: 20
+
+eval:
+  preregistration_file: config/preregistration_test.yaml

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from portstudy.config import ModelRegistry, StudyConfig
+from portstudy.config import ModelRegistry, StudyConfig, load_preregistration
 from portstudy.llm.prompts import PromptManifest
 from portstudy.paths import data_dir, outputs_dir, snapshots_dir
 from portstudy.pipeline.frozen import frozen_config_diff
@@ -317,6 +317,22 @@ def live_ready(
             + ", ".join(diff)
             + '; run check_live_ready.py --accept-config-change "<note>" if intended'
         )
+
+    # Pre-registration (Phase 4): valid, matching the enabled models and prompts, and frozen.
+    try:
+        prereg = load_preregistration(root / cfg.eval.preregistration_file)
+    except (OSError, ValueError) as exc:
+        failures.append(f"{cfg.eval.preregistration_file} is missing or invalid: {exc}")
+    else:
+        prompts = cfg.llm.prompt_ids or [p.id for p in manifest.enabled()]
+        failures.extend(
+            f"preregistration: {p}" for p in prereg.check_against(cfg, registry, prompts)
+        )
+        if not prereg.frozen:
+            failures.append(
+                "config/preregistration.yaml is not frozen (set frozen: true, frozen_on and "
+                "view_sensitivity_min_tracking_error before the pilot)"
+            )
 
     for check in EXTRA_CHECKS:
         failures.extend(

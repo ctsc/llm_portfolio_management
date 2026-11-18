@@ -377,6 +377,15 @@ def ready_setup(
     (root / "config" / "universe.csv").write_text(
         "ticker,name,sector\nAAA,A Corp,Tech\nBBB,B Corp,Health\n", encoding="utf-8"
     )
+    # v4 phase 4: a frozen copy of the test pre-registration (the preflight refuses an unfrozen one).
+    prereg = (REPO_ROOT / "config" / "preregistration_test.yaml").read_text(encoding="utf-8")
+    prereg = prereg.replace("frozen: false", "frozen: true").replace(
+        "frozen_on: null", 'frozen_on: "2026-11-20"'
+    )
+    prereg = prereg.replace(
+        "view_sensitivity_min_tracking_error: null", "view_sensitivity_min_tracking_error: 0.0005"
+    )
+    (root / "config" / "preregistration_test.yaml").write_text(prereg, encoding="utf-8")
 
     pinned = "abc123def456"
     kronos = study_config.baseline.kronos.model_copy(update={"repo_commit": pinned})

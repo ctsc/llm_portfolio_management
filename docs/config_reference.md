@@ -158,22 +158,36 @@ failed this long before the lock so that J7 can still write; decision N1).
 
 | Key | Default | Meaning | Decision |
 |---|---|---|---|
-| `tie_band` | 0.01 | Win, tie, loss band on weekly gaps (0.001 with a sensitivity table, pending PLAN4 Phase 4) | G12 |
-| `bootstrap_samples`, `permutation_samples` | 2000, 10000 | Resampling sizes | |
+| `tie_band` | 0.001 | Win, tie, loss band on weekly gaps (10 bps) | G12 |
+| `tie_band_sensitivity` | 0, 0.0005, 0.001, 0.005, 0.01 | Bands reported in the tie-band sensitivity table | G12 |
+| `bootstrap_samples`, `permutation_samples` | 2000, 10000 | Resampling sizes (Monte Carlo sign flips above the exact limit) | |
+| `bootstrap_block_mean` | null | Mean block length of the stationary bootstrap; null means T^(1/3) | G12 |
+| `signflip_exact_max_t` | 24 | Exact sign-flip enumeration up to this many weeks | G12 |
 | `significance` | 0.05 | After multiple-testing adjustment | |
 | `seed` | 2026 | Every test is seeded | |
 | `combined_signal` | bl_tilt | Combined score for H2 is the ranked BL tilt | E3 |
 | `factor_frequency` | daily | Factor regression frequency | G5 |
-| `fama_french_file` | null | Path to the official daily five-factor file; the final H5 run uses French daily FF5 plus momentum (`momentum_file`, `factor_source`, pending PLAN4 Phases 4 and 6) | G11 |
-| `holm_families` | see file | Current Holm families; replaced by `multiple_testing` (Holm on the main comparisons in `config/preregistration.yaml`, Benjamini-Hochberg on the rest) in PLAN4 Phase 4 | G7 |
+| `factor_source` | french | `french` (Kenneth French daily FF5 plus momentum) or `etf_proxy` (live monitoring only) | G11 |
+| `fama_french_file`, `momentum_file` | null | Paths to the French daily five-factor and momentum CSVs | G11 |
+| `risk_free` | fred | Risk-free rate: the FRED T-bill series stored in each snapshot | G10 |
+| `cer_gamma` | 2, 5 | Risk aversions for the certainty-equivalent return | G10 |
+| `report_active_weeks` | true | H2 reported intention-to-treat and active-view weeks only | G8 |
+| `preregistration_file` | config/preregistration.yaml | The pre-registration (the test config points at `config/preregistration_test.yaml`) | G7 |
+| `multiple_testing` | holm, fdr_bh, [H4] | Holm on the preregistered primary family, Benjamini-Hochberg on the rest, H4 exploratory | G7 |
 | `h4_splits` | market_direction, volatility, earnings_week | Exploratory splits | G4 |
 | `min_group_size` | 10 | Minimum stocks per group for the earnings split IC | |
 | `h3b.split`, `h3b.min_group_size` | median, 10 | H3b width split per source-week; weeks with a smaller group or all-equal widths are skipped | G3b |
 
-Pending PLAN4 Phase 4: `tie_band_sensitivity`, `bootstrap_block_mean`, `signflip_exact_max_t`,
-`factor_source`, `momentum_file`, `risk_free`, `cer_gamma`, `report_active_weeks` (G8),
-`multiple_testing`, and the new file `config/preregistration.yaml` (main comparisons, residual-IC
-controls, model-comparison prompt, `frozen` flag).
+### config/preregistration.yaml
+
+Fixed before the live run (G7, G9, G13). `frozen` (false until Carter freezes it, with
+`frozen_on`); `primary_comparisons` (the four pooled main comparisons: `rq1_llm_vs_baseline`,
+`rq2_tilt_gap`, `rq3_skills_vs_bare`, `rq5_skills_vs_placebo`, each with `kind` and optional
+`models`, `prompts`, `control_prompt`, `strategies` selectors; at most 10); `residual_ic_controls`
+(the nine G9 controls); `main_model_comparison_prompt` (bare);
+`view_sensitivity_min_tracking_error` (null until Carter sets it; `frozen: true` is refused while it
+is null). The preflight refuses a live run while the file is invalid, names a disabled model,
+prompt or strategy, or is not frozen, and the frozen-config check covers it after the pilot.
 
 ### backup
 

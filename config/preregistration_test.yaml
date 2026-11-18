@@ -1,0 +1,43 @@
+# Test pre-registration for config/study_test.yaml (DECISION(G7), DECISION(G9), DECISION(G13)). Fixed before the live run:
+# Carter sets frozen: true and frozen_on before the pilot (manualwork.md D4); the preflight then
+# refuses a live run if this file changes. Validation rejects unknown controls, more than 10
+# primary comparisons, and selectors naming a disabled model, prompt or strategy.
+frozen: false
+frozen_on: null
+
+# Exactly the four pooled main comparisons of G7, corrected together with Holm. Each is a
+# source-week regression with model fixed effects and week-clustered standard errors (Phase 7).
+# Empty selector lists mean every enabled model, prompt or strategy.
+primary_comparisons:
+  - id: rq1_llm_vs_baseline
+    hypothesis: H1
+    kind: pooled_source_ic_gap      # LLM minus baseline rank IC on the same stocks (G14)
+  - id: rq2_tilt_gap
+    hypothesis: H2
+    kind: pooled_tilt_ic_gap        # steered minus Q0 tilt rank IC
+  - id: rq3_skills_vs_bare
+    hypothesis: H3
+    kind: pooled_prompt_ic_gap
+    prompts: [skills_1, skills_2]
+    control_prompt: bare
+  - id: rq5_skills_vs_placebo
+    hypothesis: H5
+    kind: pooled_prompt_ic_gap
+    prompts: [skills_1, skills_2]
+    control_prompt: placebo
+
+# Residual IC controls (G9). baseline_score already contains momentum, so momentum_12_1 is partly
+# redundant; it is kept so the residual IC also nets out momentum measured alone.
+residual_ic_controls:
+  - baseline_score
+  - momentum_12_1
+  - log_market_cap
+  - volatility_63d
+  - beta_252d
+  - sector
+  - loading_hml
+  - loading_rmw
+  - loading_cma
+
+main_model_comparison_prompt: bare   # prompt used for model-vs-model portfolio tests
+view_sensitivity_min_tracking_error: null   # G13: Carter sets it from Phase 3B and the pilot

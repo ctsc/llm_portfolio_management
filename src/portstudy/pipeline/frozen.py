@@ -17,7 +17,12 @@ from portstudy.io import read_json, write_json_atomic
 from portstudy.logging_setup import now_et
 from portstudy.paths import data_dir
 
-FROZEN_FILES = ["config/study.yaml", "config/models.yaml", "config/prompts_manifest.yaml"]
+FROZEN_FILES = [
+    "config/study.yaml",
+    "config/models.yaml",
+    "config/prompts_manifest.yaml",
+    "config/preregistration.yaml",
+]
 
 
 def frozen_dir() -> Path:

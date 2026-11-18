@@ -1369,3 +1369,45 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
   (no simulator replay); that is what `expected_te_vs_q0` measures in the live run.
 - Confidence-only portfolios carry `decision_source: control`; their meta keeps the source key so
   fallbacks and the audit treat them like the source's other portfolios.
+
+## v4 phase 4: decisions, evaluation config and pre-registration file
+
+### What changed
+
+- `config/study.yaml` decisions: added L1, K2, K3, G8 to G17, G20, G21, G22, G1b, N4, N5, N6,
+  N7, C8, A7, A8, A9, U1, U2, D5 (E7, G18, G19, S8 came with Phase 3B); D4, B1 and B4 (now `100`)
+  and G3, G3b, G4, G7 carry the PLAN4 text. Long values are folded so yamllint passes. No
+  `DECISION(G6)`, `DECISION(W1)` or `DECISION(M1)` tag remains in code or config.
+- `eval` config: `tie_band` 0.001, `tie_band_sensitivity`, `bootstrap_block_mean`,
+  `signflip_exact_max_t` 24, `factor_source`, `momentum_file`, `risk_free`, `cer_gamma`,
+  `report_active_weeks`, `preregistration_file`, and `multiple_testing` (Holm primary, BH secondary,
+  H4 exploratory) replacing `holm_families` (an old `holm_families` key now fails validation).
+- New `config/preregistration.yaml` (and `config/preregistration_test.yaml` for the test config):
+  `frozen: false`, `frozen_on`, the four pooled G7 comparisons, the nine G9 residual-IC controls
+  (with the note on `momentum_12_1`), `main_model_comparison_prompt: bare`,
+  `view_sensitivity_min_tracking_error: null`. `Preregistration` in `config.py` rejects unknown
+  controls, duplicate ids, more than 10 comparisons, a prompt comparison without a control prompt,
+  and `frozen: true` without a date or the G13 threshold; `check_against` lists selectors naming a
+  disabled model, prompt or strategy.
+- Preflight: a live run is refused while the pre-registration is invalid, names something
+  disabled, or is not frozen; the frozen-config copy now includes `config/preregistration.yaml`,
+  so a change after the pilot also fails.
+- `docs/open_questions.md`: G13, G14, U1, N4 rows added (the table and the retired table were
+  already rewritten for PLAN4). `docs/config_reference.md`: the eval keys and the pre-registration
+  file are documented as built.
+
+### Tests
+
+- New: `tests/unit/test_v4_phase4_config.py` (7).
+- Changed on purpose: `test_phase16_checklist.py` (accepts `v4 phase N` subjects once each; new
+  test that retired ids are not code tags or decisions), `test_v2_phase10_eval.py`
+  (`holm_families` replaced by `multiple_testing`), `test_v4_phase3_preflight.py` (the complete
+  fixture now has a frozen pre-registration).
+- Run: the new file plus the preflight, checklist, eval, scaffold, config and CI files pass.
+  `ruff check`, `ruff format --check`, `mypy` clean.
+
+### Choices made while unattended
+
+- Selectors are lists (`models`, `prompts`, `strategies`, empty meaning every enabled one) plus
+  `control_prompt` for prompt comparisons; the skills prompts are listed explicitly in each file.
+- The test config gets its own pre-registration file through `eval.preregistration_file`.

@@ -180,20 +180,27 @@ pipeline:
   lock_margin_minutes: 30         # J6 fails a run not finished this long before the Monday lock
 
 eval:
-  tie_band: 0.01
+  tie_band: 0.001                 # DECISION(G12): 10 bps
+  tie_band_sensitivity: [0.0, 0.0005, 0.001, 0.005, 0.01]
   bootstrap_samples: 2000
+  bootstrap_block_mean: null      # null means T^(1/3)
+  signflip_exact_max_t: 24        # exact sign-flip enumeration up to this T, Monte Carlo above
   permutation_samples: 10000
   significance: 0.05
   seed: 2026
   combined_signal: bl_tilt        # DECISION(E3)
   factor_frequency: daily         # DECISION(G5)
-  fama_french_file: null
-  holm_families:
-    H1_ic_gap: all_sources
-    H2_ic_gap: all_sources
-    H2_portfolio_vs_q0: per_strategy
-    H3_skills_vs_controls: per_model
-    H3b_width: all_sources
+  factor_source: french           # DECISION(G11): french | etf_proxy
+  fama_french_file: null          # Kenneth French daily FF5 CSV
+  momentum_file: null             # Kenneth French daily momentum CSV
+  risk_free: fred
+  cer_gamma: [2, 5]
+  report_active_weeks: true       # DECISION(G8)
+  preregistration_file: config/preregistration.yaml
+  multiple_testing:               # DECISION(G7)
+    primary_procedure: holm
+    secondary_procedure: fdr_bh
+    exploratory: [H4]
   h4_splits: [market_direction, volatility, earnings_week]   # DECISION(G4)
   min_group_size: 10
   h3b:                            # DECISION(G3b)
@@ -226,16 +233,16 @@ decisions:
     value: 50.0
     status: provisional
   - id: D4
-    value: 0.0
+    value: "0.0 for every model with seed sent; outputs not guaranteed identical (ARCTIC, 2026-11-12); G20 measures it"
     status: confirmed
   - id: B1
-    value: "bare, placebo, and 4 to 5 similar-length specialized skills files; one placebo matched to mean skills length"
+    value: "bare, placebo, and 4 similar-length specialized skills files (skills_5 off); one placebo matched to mean skills length"
     status: confirmed
   - id: B2
     value: sp500_sector_balanced
     status: confirmed
   - id: B4
-    value: "100 to 300, set after ARCTIC allocation is known"
+    value: 100  # ARCTIC startup allocation, 1,000 GPU-hours (2026-11-16)
     status: confirmed
   - id: C3
     value: "JSON low, likely, high integers in [-5, 5], rationale; low <= likely <= high; no separate certainty field"
@@ -322,22 +329,30 @@ decisions:
     value: study_only
     status: confirmed
   - id: G3
-    value: "each skills file vs bare and placebo per model, plus H3b range-width test"
+    value: >-
+      each skills file vs bare and placebo per model on IC and active return, plus a pooled regression
+      with model fixed effects; H3b range-width test
     status: confirmed
   - id: G3b
-    value: "per source-week median width split; rank IC narrow minus wide"
+    value: >-
+      per source-week median width split (rank IC narrow minus wide), a score-by-confidence Fama-
+      MacBeth interaction and a width vs absolute rank error correlation
     status: confirmed
   - id: P1
     value: "each skills file within 5% of mean skills length; placebo within 2%"
     status: confirmed
   - id: G4
-    value: "strategy ranking by mean weekly gap vs own Q0, plus v1 market, volatility, earnings splits"
+    value: >-
+      exploratory: strategy ranking by mean active return vs own Q0, strategy-vs-strategy differences,
+      market, volatility and earnings splits
     status: confirmed
   - id: G5
     value: daily
     status: confirmed
   - id: G7
-    value: "IC tests as v1; portfolio return tests one family per strategy"
+    value: >-
+      Holm on the four pooled main comparisons in config/preregistration.yaml; Benjamini-Hochberg on
+      every other comparison; H4 exploratory
     status: confirmed
   - id: N2
     value: "Carter runs python scripts/run_weekend.py by hand on the desktop, Friday night (Saturday morning as backup); no scheduler"
@@ -347,4 +362,94 @@ decisions:
     status: confirmed
   - id: N3
     value: csv_weekly_download
+    status: confirmed
+  - id: L1
+    value: "everything except LLM calls on Carter's desktop in WSL2; Kronos on the local RTX 3050; ARCTIC is gateway GPU hours only"
+    status: confirmed
+  - id: K2
+    value: "Kronos in chunks of baseline.kronos.batch_size (100), one seed per (sample, chunk); batch_size frozen"
+    status: confirmed
+  - id: K3
+    value: "on Kronos failure the baseline is momentum only for every portfolio that week, flagged"
+    status: confirmed
+  - id: G8
+    value: "H2 reported intention-to-treat (all clean weeks) and active-view weeks, with each source's active-week share"
+    status: confirmed
+  - id: G9
+    value: "residual IC: weekly Fama-MacBeth on the controls in config/preregistration.yaml"
+    status: confirmed
+  - id: G10
+    value: "portfolio metrics net of the T-bill rate: Sharpe, Sortino, max drawdown, CVaR, IR, tracking error, PSR, CER, break-even cost"
+    status: confirmed
+  - id: G11
+    value: "Kenneth French daily FF5 plus momentum on daily active and excess returns; ETF proxies for live monitoring only"
+    status: confirmed
+  - id: G12
+    value: >-
+      Student-t with T-1 df; Newey-West lags floor(4 (T/100)^(2/9)); stationary block bootstrap
+      percentile-t; exact sign-flip when T <= 24; Ledoit-Wolf Sharpe test; tie band 0.001
+    status: confirmed
+  - id: G13
+    value: >-
+      view sensitivity as expected tracking error vs Q0 net of the confidence-only part; insensitive
+      below view_sensitivity_min_tracking_error
+    status: confirmed
+  - id: G14
+    value: "H2 signal test compares the steered tilt IC with Q0's tilt IC; every IC gap on the same stocks each week"
+    status: confirmed
+  - id: G15
+    value: "per-model max_output_tokens and timeout (Gemma 300/180 s, MiniMax 2000/600 s); reasoning saved; features frozen after the pilot"
+    status: confirmed
+  - id: G16
+    value: "Alpaca feed sip by default; yfinance fallback"
+    status: confirmed
+  - id: G17
+    value: "ARCTIC sizing: 300 to 8,000 input tokens; 300 (Gemma) and 2,000 (MiniMax) output; 40 and 90 GPU-seconds per request (estimates)"
+    status: confirmed
+  - id: G20
+    value: "pilot repeat check: first 50 stocks re-rated under every prompt type per gateway model, cache bypassed"
+    status: confirmed
+  - id: G21
+    value: "weekly model checks and 10 canaries before J4; model_change flags never stop the run"
+    status: confirmed
+  - id: G22
+    value: "every metric for every source, portfolio, model, prompt and strategy in results/eval/all_metrics.csv"
+    status: confirmed
+  - id: G1b
+    value: "a stop merged into the rebalance resets the average cost to the rebalance open"
+    status: confirmed
+  - id: N4
+    value: "study log one row per week; weekly returns Monday open to Monday open; keep-awake, outage tolerance, checkpoints, progress"
+    status: confirmed
+  - id: N5
+    value: "a failed gateway request is an invalid provider_error record; J4 fails while a request has no record"
+    status: confirmed
+  - id: N6
+    value: "run_id, event timeline, tracebacks, captured warnings, fallbacks.csv, fsync, disk check, run_summary.md, audit"
+    status: confirmed
+  - id: N7
+    value: "GPU-hours vs 1,000 and gateway dollars vs arctic.litellm_budget_usd; warn 75%, alert 90%; dollar check before J4"
+    status: confirmed
+  - id: C8
+    value: "prompt name and sector from the frozen universe file; yfinance market cap only, last good value reused"
+    status: confirmed
+  - id: A7
+    value: "views.ic_history_start live_start_week: pre-live weeks never count; every portfolio starts from cash at the first live week"
+    status: confirmed
+  - id: A8
+    value: "views.ic_mode fixed, IC_b = IC_L = 0.02 every week"
+    status: confirmed
+  - id: A9
+    value: "Friday 16:00 ET news cutoff, unchanged"
+    status: confirmed
+  - id: U1
+    value: >-
+      5-day adjusted move beyond 10% flagged and kept; -40% single day or 5-day removes the stock for
+      good; unexplained split skips one week
+    status: confirmed
+  - id: U2
+    value: "a holding with no price for 5 trading days is sold at its last close"
+    status: confirmed
+  - id: D5
+    value: "every enabled API model needs a dated snapshot_id for a live run"
     status: confirmed
