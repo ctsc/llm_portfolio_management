@@ -29,6 +29,7 @@ from portstudy.optimize.black_litterman import (
     black_litterman,
     black_litterman_q0,
 )
+from portstudy.optimize.counterfactual import conf_only_posterior, uncertainty_ratio
 from portstudy.optimize.strategies import run_control, run_strategy
 from portstudy.optimize.strategies.common import StrategyInputs, view_shift
 from portstudy.paths import week_output_dir
@@ -81,6 +82,9 @@ class Weights:
     solver_status: str = ""
     ic_mode: str = ""
     run_id: str = field(default_factory=current_run_id)
+    portfolio_kind: str = ""  # q0 | control | steered | conf_only
+    expected_te_vs_q0: float | None = None  # sqrt((w - w_Q0)' Sigma (w - w_Q0))
+    conf_only_uncertainty_ratio: float | None = None  # G18: trace(M_conf) / trace(M_Q0)
 
     def meta(self) -> dict[str, Any]:
         d = asdict(self)
@@ -213,6 +217,7 @@ def _optimize(
     endpoint: str = "",
     decision_source: str = "llm",
     q0_weights: pd.Series | None = None,
+    portfolio_kind: str = "",
 ) -> Weights:
     sigma_matrix = inputs.risk.sigma_matrix
     is_control = strategy in ("HRP", "EW")
@@ -276,6 +281,11 @@ def _optimize(
             },
         )
     shift = _shift_from_q0(result.weights, q0_weights, q0_only=q0_only, is_control=is_control)
+    te = (
+        expected_te(result.weights, q0_weights, sigma_matrix)
+        if q0_weights is not None and not q0_only and not is_control
+        else None
+    )
     out = Weights(
         portfolio=portfolio,
         week_id=inputs.week_id,
@@ -299,11 +309,25 @@ def _optimize(
         fallback=result.fallback_flag is not None,
         solver_status=solver_status,
         ic_mode=cfg.views.ic_mode,
+        portfolio_kind=portfolio_kind
+        or ("control" if is_control else "q0" if q0_only else "steered"),
+        expected_te_vs_q0=te,
     )
     for k, v in extra.items():
         setattr(out, k, v)
     _save(out, views if not is_control else None, inputs, z_l)
     return out
+
+
+def expected_te(weights: pd.Series, q0_weights: pd.Series, sigma: pd.DataFrame) -> float:
+    """Expected tracking error against Q0: sqrt((w - w_Q0)' Sigma (w - w_Q0))."""
+    tickers = list(sigma.index)
+    d = (
+        weights.reindex(tickers).fillna(0.0).astype(float)
+        - q0_weights.reindex(tickers).fillna(0.0).astype(float)
+    ).to_numpy()
+    value = float(d @ sigma.loc[tickers, tickers].to_numpy(dtype=float) @ d)
+    return float(np.sqrt(max(value, 0.0)))
 
 
 def _save(
@@ -370,6 +394,8 @@ def _save_posterior(
             "width": views.width.reindex(tickers).to_numpy(),
             "c": views.c.reindex(tickers).to_numpy(),
             "has_llm_view": frame["has_llm_view"].reindex(tickers).to_numpy(),
+            "q_L": frame["q_L"].reindex(tickers).to_numpy(),
+            "mu_Q0": views.mu_q0.reindex(tickers).to_numpy() if len(views.mu_q0) else float("nan"),
         }
     )
     data = data.loc[
@@ -386,6 +412,8 @@ def _save_posterior(
             "width",
             "c",
             "has_llm_view",
+            "q_L",
+            "mu_Q0",
         ],
     ]
     write_csv_atomic(data, posterior_dir(inputs.week_id) / f"{name}.csv")
@@ -402,6 +430,13 @@ def _q0_views(inputs: WeekInputs, cfg: StudyConfig, ic_b: float, logger: logging
         label="Q0",
         logger=logger,
     )
+
+
+def q0_posterior(
+    inputs: WeekInputs, cfg: StudyConfig, ic_b: float, logger: logging.Logger
+) -> Posterior:
+    """The week's Q0 posterior without writing files (its mean centers the LLM view, E7)."""
+    return black_litterman_q0(_q0_views(inputs, cfg, ic_b, logger), inputs.risk.sigma_matrix)
 
 
 def posterior_for_q0(
@@ -424,6 +459,7 @@ def _source_views(
     ic_b: float,
     ic_l: float,
     logger: logging.Logger,
+    mu_q0: pd.Series | None = None,
 ) -> tuple[Views, pd.Series, int]:
     scores = inputs.scores_for(source.model, source.config_id)
     valid = valid_scores(scores)
@@ -442,6 +478,7 @@ def _source_views(
         width=width,
         logger=logger,
         label=source.key,
+        mu_q0=mu_q0,
     )
     return views, z_l, n_invalid
 
@@ -453,9 +490,11 @@ def posterior_for_source(
     ic_b: float,
     ic_l: float,
     logger: logging.Logger | None = None,
+    q0_post: Posterior | None = None,
 ) -> Posterior | None:
     log = logger or logging.getLogger("portstudy.optimize")
-    views, z_l, _ = _source_views(inputs, source, cfg, ic_b, ic_l, log)
+    q0p = q0_post or q0_posterior(inputs, cfg, ic_b, log)
+    views, z_l, _ = _source_views(inputs, source, cfg, ic_b, ic_l, log, mu_q0=q0p.mu_bl)
     posterior = (
         black_litterman(views, inputs.risk.sigma_matrix, logger=log)
         if views.use_llm_view
@@ -527,13 +566,15 @@ def build_weights(
     strategy: StrategyName = "mvo",
     posterior: Posterior | None = None,
     q0_weights: pd.Series | None = None,
+    q0_post: Posterior | None = None,
 ) -> Weights:
     """Build one source-steered allocation using a shared source posterior."""
     log = logger or logging.getLogger("portstudy.optimize")
     inp = inputs or WeekInputs.load(week_id)
     source = RatingSource(model, config_id)
     key = PortfolioId.steered(strategy, source).key
-    views, z_l, n_invalid = _source_views(inp, source, cfg, ic_b, ic_l, log)
+    q0p = q0_post or q0_posterior(inp, cfg, ic_b, log)
+    views, z_l, n_invalid = _source_views(inp, source, cfg, ic_b, ic_l, log, mu_q0=q0p.mu_bl)
     post = posterior
     if post is None and views.use_llm_view:
         post = black_litterman(views, inp.risk.sigma_matrix, logger=log)
@@ -575,6 +616,9 @@ def build_weights(
             cov_mu_sha256=q0.cov_mu_sha256,
             fallback=q0.fallback,
             ic_mode=cfg.views.ic_mode,
+            portfolio_kind="steered",
+            expected_te_vs_q0=0.0,
+            conf_only_uncertainty_ratio=1.0,
         )
         write_json_atomic(out.meta(), weights_dir(week_id) / f"{key}.meta.json")
         _save_posterior(
@@ -583,6 +627,7 @@ def build_weights(
         return out
     if post is not None:
         _save_posterior(source.key, inp, views, post, z_l)
+    conf = conf_only_posterior(views, inp.risk.sigma_matrix, logger=log)
     out = _optimize(
         key,
         inp,
@@ -590,7 +635,10 @@ def build_weights(
         cfg,
         False,
         previous_week,
-        {"n_invalid": n_invalid},
+        {
+            "n_invalid": n_invalid,
+            "conf_only_uncertainty_ratio": uncertainty_ratio(conf, q0p),
+        },
         log,
         z_l=z_l,
         posterior=post,
@@ -599,8 +647,88 @@ def build_weights(
         endpoint=_source_endpoint(inp, source),
         decision_source="llm",
         q0_weights=q0_weights,
+        portfolio_kind="steered",
     )
     return out
+
+
+def build_conf_only_weights(
+    week_id: str,
+    model: str,
+    config_id: str,
+    cfg: StudyConfig,
+    ic_b: float,
+    ic_l: float,
+    inputs: WeekInputs | None = None,
+    previous_week: str | None = None,
+    logger: logging.Logger | None = None,
+    strategy: StrategyName = "robust",
+    q0_weights: pd.Series | None = None,
+    q0_post: Posterior | None = None,
+) -> Weights:
+    """G19: the strategy solved with Q0's posterior mean and the source's confidence-only
+    posterior covariance `M_conf` (same caps, previous weights and solver settings as the
+    steered portfolio). Without a valid LLM view it copies Q0's weights, like the steered one."""
+    log = logger or logging.getLogger("portstudy.optimize")
+    inp = inputs or WeekInputs.load(week_id)
+    source = RatingSource(model, config_id)
+    key = PortfolioId.conf(strategy, source).key
+    q0p = q0_post or q0_posterior(inp, cfg, ic_b, log)
+    views, z_l, n_invalid = _source_views(inp, source, cfg, ic_b, ic_l, log, mu_q0=q0p.mu_bl)
+    if not views.use_llm_view:
+        copy_q0_as(
+            week_id,
+            strategy,
+            key,
+            {
+                "source": source.key,
+                "decision_source": "control",
+                "portfolio_kind": "conf_only",
+                "conf_only_uncertainty_ratio": 1.0,
+                "expected_te_vs_q0": 0.0,
+            },
+        )
+        q0 = existing_q0_weights(week_id, strategy)
+        assert q0 is not None
+        return dataclasses.replace(q0, portfolio=key, portfolio_kind="conf_only")
+    conf = conf_only_posterior(views, inp.risk.sigma_matrix, logger=log)
+    return _optimize(
+        key,
+        inp,
+        views,
+        cfg,
+        False,
+        previous_week,
+        {"n_invalid": n_invalid, "conf_only_uncertainty_ratio": uncertainty_ratio(conf, q0p)},
+        log,
+        z_l=z_l,
+        posterior=conf,
+        strategy=strategy,
+        source=source,
+        endpoint=_source_endpoint(inp, source),
+        decision_source="control",
+        q0_weights=q0_weights,
+        portfolio_kind="conf_only",
+    )
+
+
+def copy_q0_as(week_id: str, strategy: StrategyName, key: str, meta_update: dict[str, Any]) -> None:
+    """Write the strategy's Q0 weights under another portfolio key with an updated meta."""
+    folder = weights_dir(week_id)
+    q0_key = PortfolioId.q0(strategy).key
+    shutil.copyfile(folder / f"{q0_key}.csv", folder / f"{key}.csv")
+    meta = read_weights_meta(week_id, q0_key)
+    meta.update(
+        {
+            "portfolio": key,
+            "strategy": strategy,
+            "use_llm_view": False,
+            "view_shift": 0.0,
+            "run_id": current_run_id(),
+            **meta_update,
+        }
+    )
+    write_json_atomic(meta, folder / f"{key}.meta.json")
 
 
 def build_control_weights(

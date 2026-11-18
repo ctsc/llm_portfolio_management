@@ -34,7 +34,7 @@ class RatingSource:
         if len(parts) != 2 or not all(parts):
             raise ValueError(f"invalid rating source key: {key}")
         model, config_id = parts
-        if model in ("Q0", "HRP", "EW"):
+        if model in ("Q0", "HRP", "EW", "CONF"):
             raise ValueError(f"reserved model id in rating source key: {key}")
         return cls(model, config_id)
 
@@ -46,6 +46,12 @@ class PortfolioId:
     strategy: str
     model: str
     config_id: str
+    conf_only: bool = False
+
+    @classmethod
+    def conf(cls, strategy: StrategyName, source: RatingSource) -> PortfolioId:
+        """Confidence-only control (G19): the source's view uncertainty with a neutral rating."""
+        return cls(strategy, source.model, source.config_id, conf_only=True)
 
     @classmethod
     def steered(cls, strategy: StrategyName, source: RatingSource) -> PortfolioId:
@@ -65,6 +71,8 @@ class PortfolioId:
             return self.strategy
         if self.is_q0:
             return f"{self.strategy}__Q0"
+        if self.conf_only:
+            return f"{self.strategy}__CONF__{self.model}__{self.config_id}"
         return f"{self.strategy}__{self.model}__{self.config_id}"
 
     @classmethod
@@ -75,11 +83,13 @@ class PortfolioId:
         strategies = ("mvo", "cvar", "robust", "resampled", "topk")
         if len(parts) == 2 and parts[0] in strategies and parts[1] == "Q0":
             return cls.q0(parts[0])  # type: ignore[arg-type]
+        if len(parts) == 4 and parts[0] in strategies and parts[1] == "CONF" and all(parts[2:]):
+            return cls.conf(parts[0], RatingSource(parts[2], parts[3]))  # type: ignore[arg-type]
         if (
             len(parts) == 3
             and parts[0] in strategies
             and all(parts[1:])
-            and parts[1] not in ("Q0", "HRP", "EW")
+            and parts[1] not in ("Q0", "HRP", "EW", "CONF")
         ):
             source = RatingSource(parts[1], parts[2])
             return cls.steered(parts[0], source)  # type: ignore[arg-type]

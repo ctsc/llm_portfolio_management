@@ -151,7 +151,7 @@ strategies:
   cvar:
     n_scenarios: 10000             # DECISION(S3)
     beta: 0.95                     # DECISION(S3)
-    lam: 1.0                       # DECISION(S4)
+    lam: 0.1                       # DECISION(S4): set by scripts/calibrate_view_sensitivity.py (S8), 2026-11-17
     seed: 7
     solvers: [CLARABEL, HIGHS]
   robust:
@@ -161,6 +161,7 @@ strategies:
     n_draws: 200                   # DECISION(S6)
     seed: 7
     max_failed_share: 0.10
+    draw_scale: 0.025              # DECISION(S8): set by scripts/calibrate_view_sensitivity.py, 2026-11-17
   topk:
     k: 20                          # DECISION(S7)
   hrp:
@@ -285,8 +286,20 @@ decisions:
     value: "10,000 Monte Carlo scenarios from the BL posterior; beta=0.95"
     status: confirmed
   - id: S4
-    value: 1.0
+    value: "0.1, set by the S8 calibration (2026-11-17); Carter confirms before the freeze"
+    status: provisional
+  - id: E7
+    value: "q_L = mu_Q0 + IC_L sigma z_L (LLM view centered on the Q0 posterior mean)"
     status: confirmed
+  - id: G18
+    value: "confidence-only counterfactual: same Omega_L, z_L = 0; trace ratio recorded"
+    status: confirmed
+  - id: G19
+    value: "confidence-only control portfolios for Robust and Resampled MVO"
+    status: confirmed
+  - id: S8
+    value: "Mean-CVaR lam 0.1 and Resampled draw_scale 0.025 by the fixed calibration rule (2026-11-17)"
+    status: provisional
   - id: S5
     value: "kappa=1.0, ellipsoid from BL posterior covariance of the mean"
     status: confirmed

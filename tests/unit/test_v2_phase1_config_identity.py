@@ -112,11 +112,18 @@ def test_test_config_selects_expected_sources_and_portfolio_count() -> None:
         *[f"{strategy}__Q0" for strategy in enabled],
         *ctx.cfg.strategies.controls,
         *[f"{strategy}__{source.key}" for strategy in enabled for source in ctx.sources()],
+        # v4 phase 3B (G19): confidence-only controls for Robust and Resampled MVO.
+        *[
+            f"{strategy}__CONF__{source.key}"
+            for strategy in ctx.cfg.strategies.conf_only_controls
+            for source in ctx.sources()
+        ],
     ]
     assert len(ctx.portfolio_keys()) == (
         len(ctx.cfg.strategies.enabled)
         + len(ctx.cfg.strategies.controls)
         + len(ctx.cfg.strategies.enabled) * len(ctx.sources())
+        + len(ctx.cfg.strategies.conf_only_controls) * len(ctx.sources())
     )
 
 

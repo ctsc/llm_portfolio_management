@@ -20,9 +20,9 @@ date and reason and flagged in the analysis. Code never changes a decision value
 | G15 | gateway output handling | per-model `max_output_tokens` (Gemma 300, MiniMax about 2,000 until measured), per-model timeout, reasoning text saved, tokens and `finish_reason` logged, features frozen after the pilot | confirmed (2026-11-11), built in PLAN4 Phase 3 |
 | G16 | price feed | Alpaca `sip` by default (not `iex`), yfinance fallback | confirmed (2026-11-11), built in PLAN4 Phase 3 |
 | G17 | ARCTIC sizing basis | 300 to 8,000 input tokens; output about 300 (Gemma) and 2,000 (MiniMax); estimated 40 and 90 GPU-seconds per request; 2,730 / 910 GPU-hours requested; corrected after the timing run | confirmed (2026-11-12) |
-| E7 | neutral LLM view | `q_L = mu_Q0 + IC_L sigma z_L` (centered on the Q0 posterior mean, not `pi`) | confirmed (2026-11-11), pending PLAN4 Phase 3B |
-| G18 | confidence-only counterfactual | posterior with the same LLM view uncertainty and `z_L = 0`; its uncertainty ratio is recorded per source-week | confirmed (2026-11-11), pending PLAN4 Phase 3B |
-| S8 | strategy sensitivity calibration | Mean-CVaR `lam` and Resampled `draw_scale` set on synthetic data by a fixed rule before the freeze | confirmed (2026-11-11), pending PLAN4 Phase 3B |
+| E7 | neutral LLM view | `q_L = mu_Q0 + IC_L sigma z_L` (centered on the Q0 posterior mean, not `pi`) | confirmed (2026-11-11), built in PLAN4 Phase 3B |
+| G18 | confidence-only counterfactual | posterior with the same LLM view uncertainty and `z_L = 0`; its uncertainty ratio is recorded per source-week | confirmed (2026-11-11), built in PLAN4 Phase 3B |
+| S8 | strategy sensitivity calibration | Mean-CVaR `lam` and Resampled `draw_scale` set on synthetic data by a fixed rule before the freeze | confirmed (2026-11-11), built in PLAN4 Phase 3B |
 | G1b | stop on a rebalance day | a stop merged into the rebalance resets the position's reference price to the rebalance open | confirmed (2026-11-11), built in PLAN4 Phase 3A |
 | N5 | gateway request failures | recorded as invalid `provider_error`; J4 not done while a request has no record | confirmed (2026-11-11), built in PLAN4 Phase 3 |
 | C8 | prompt name and sector | from the frozen universe file; yfinance for market cap only, last good value reused | confirmed (2026-11-11), built in PLAN4 Phase 3 |
@@ -32,7 +32,7 @@ date and reason and flagged in the analysis. Code never changes a decision value
 | A8 | view scale | IC_b and IC_L fixed at 0.02 every week (`views.ic_mode: fixed`); trailing-IC gating kept only for tests | confirmed (2026-11-12), built in PLAN4 Phase 3A |
 | A9 | news cutoff | Friday 16:00 ET, unchanged | confirmed (2026-11-12) |
 | K3 | Kronos failure | `momentum_only` for every portfolio that week, flagged | confirmed (2026-11-12), built in PLAN4 Phase 3 |
-| G19 | confidence-only control portfolios | Robust and Resampled MVO, rating 0 with the same view uncertainty | confirmed (2026-11-12), pending PLAN4 Phase 3B |
+| G19 | confidence-only control portfolios | Robust and Resampled MVO, rating 0 with the same view uncertainty | confirmed (2026-11-12), built in PLAN4 Phase 3B |
 | G20 | pilot repeat check | 50 fixed stocks re-rated under all prompt types per gateway model, cache bypassed; agreement reported | confirmed (2026-11-12), built in PLAN4 Phase 3A |
 | G21 | weekly model checks | `model` field, `x-litellm-model-id` and `x-litellm-version` headers, `reasoning_tokens`, `/v1/model/info` `updated_at`; 10 canaries per model before J4; model or deployment change or canary drop flags the week | confirmed (2026-11-16), built in PLAN4 Phase 3A |
 | N6 | logging and durable progress | run_id, event timeline, tracebacks, captured warnings, `fallbacks.csv`, fsync on every write, disk check per job, `run_summary.md`, `portstudy audit`, random-kill resume test | confirmed (2026-11-12), built in PLAN4 Phase 3A |
@@ -48,7 +48,7 @@ date and reason and flagged in the analysis. Code never changes a decision value
 | S1 | steered strategies | MVO, Mean-CVaR, Robust MVO, Resampled MVO, Top-K; each has its own Q0 | confirmed |
 | S2 | controls | HRP and equal weight; no LLM view or Q0 | confirmed |
 | S3 | Mean-CVaR | 10,000 Monte Carlo scenarios from the BL posterior; beta 0.95 | confirmed |
-| S4 | Mean-CVaR lambda | 1.0 until the S8 calibration sets it (PLAN4 Phase 3B) | changed (2026-11-11) |
+| S4 | Mean-CVaR lambda | 0.1, set by the S8 calibration on 2026-11-17 (`scripts/calibrate_view_sensitivity.py`); Resampled `draw_scale` 0.025 by the same rule; Carter confirms before the freeze | changed (2026-11-17) |
 | S5 | Robust MVO kappa | 1.0, ellipsoid from the BL posterior covariance of the mean | confirmed (design choice) |
 | S6 | Resampled MVO draws | 200 | confirmed |
 | S7 | Top-K | K = 20, equal weights | confirmed |

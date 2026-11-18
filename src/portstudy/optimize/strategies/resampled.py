@@ -34,7 +34,8 @@ def run(inputs: StrategyInputs, cfg: StudyConfig) -> StrategyResult:
         return fallback_chain(inputs, cfg, {"solver_error": str(exc)})
 
     z = standard_normals(inputs.week_id, "resampled", (config.n_draws, n), config.seed)
-    draws = mu[None, :] + z @ factor.T
+    # DECISION(S8): draws come from draw_scale * M; 1.0 keeps the full posterior covariance.
+    draws = mu[None, :] + np.sqrt(config.draw_scale) * (z @ factor.T)
     solutions: list[np.ndarray] = []
     objectives: list[float] = []
     solvers: list[str] = []

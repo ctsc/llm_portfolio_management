@@ -131,8 +131,21 @@ class RunContext:
 
         return [PortfolioId.control(name).key for name in self.cfg.strategies.controls]
 
+    def conf_only_keys(self) -> list[str]:
+        """G19 confidence-only controls: one per source and listed strategy."""
+        from portstudy.types import PortfolioId
+
+        strategies = [
+            s for s in self.cfg.strategies.conf_only_controls if s in self.cfg.strategies.enabled
+        ]
+        return [
+            PortfolioId.conf(strategy, source).key
+            for strategy in strategies
+            for source in self.sources()
+        ]
+
     def portfolio_keys(self) -> list[str]:
-        return self.q0_keys() + self.control_keys() + self.steered_keys()
+        return self.q0_keys() + self.control_keys() + self.steered_keys() + self.conf_only_keys()
 
 
 def live_start_week_of(cfg: StudyConfig, synthetic: bool) -> str:

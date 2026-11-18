@@ -1,7 +1,8 @@
 """Build the baseline and LLM views for Black-Litterman.
 
 q_b     = pi + IC_b * sigma * z_b
-q_L     = pi + IC_L * sigma * z_L
+q_L     = mu_Q0 + IC_L * sigma * z_L     (DECISION(E7): centered on the Q0 posterior mean, so a
+                                         rating of 0 changes no expected return)
 Omega_b = tau * diag(Sigma) * clip(k_sd / median(k_sd), 0.25, 4.0)
 Omega_L = tau * diag(Sigma) / clip(1 - width / 10, 0.1, 1.0)
 
@@ -41,6 +42,7 @@ class Views:
     use_llm_view: bool
     llm_tickers: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    mu_q0: pd.Series = field(default_factory=lambda: pd.Series(dtype=float))
 
     @property
     def n(self) -> int:
@@ -118,8 +120,10 @@ def build_views(
     width: pd.Series | None = None,
     logger: logging.Logger | None = None,
     label: str = "",
+    mu_q0: pd.Series | None = None,
 ) -> Views:
-    """Build baseline and valid LLM views for one portfolio."""
+    """Build baseline and valid LLM views for one portfolio. `mu_q0` is the week's Q0 posterior
+    mean (DECISION(E7)); without it the LLM view is centered on `pi` (Q0 with no baseline view)."""
     log = logger or logging.getLogger("portstudy.views")
     tickers = [str(t) for t in pi.index]
     sigma = sigma_vec.reindex(tickers).astype(float)
@@ -157,7 +161,8 @@ def build_views(
             if width is None or not set(llm_tickers).issubset(llm_width.index):
                 raise ValueError("width is required for every LLM view")
             zl = z_l.reindex(llm_tickers).astype(float)
-            q_l = pi.loc[llm_tickers] + ic_l * sigma.loc[llm_tickers] * zl
+            center = (mu_q0 if mu_q0 is not None else pi).reindex(llm_tickers).astype(float)
+            q_l = center + ic_l * sigma.loc[llm_tickers] * zl
             omega_l = cfg.tau * var.loc[llm_tickers] / c.reindex(llm_tickers)
             use_l = True
     if not use_l:
@@ -187,6 +192,7 @@ def build_views(
         use_llm_view=use_l,
         llm_tickers=llm_tickers,
         notes=notes,
+        mu_q0=(mu_q0 if mu_q0 is not None else pi).reindex(tickers).astype(float),
     )
 
 

@@ -180,7 +180,8 @@ def test_planted_fallback_appears_once_in_the_ledger(
     assert set(j6["source"]) == {f"stub-ow-a__{p}" for p in ctx.prompt_ids()}
     assert not j6.duplicated(["source"]).any()
     j7 = ledger[(ledger["kind"] == "fallback_q0") & (ledger["job"] == "J7")]
-    assert len(j7) == len(cfg.strategies.enabled) * len(ctx.prompt_ids())
+    n_strategies = len(cfg.strategies.enabled) + len(cfg.strategies.conf_only_controls)
+    assert len(j7) == n_strategies * len(ctx.prompt_ids())  # steered plus G19 controls
     before = len(ledger)
     forced = _ctx(cfg, model_registry, world, inject_week, {"stub-ow-a": FailingProvider()})
     forced.force = True

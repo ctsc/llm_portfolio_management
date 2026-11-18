@@ -25,9 +25,11 @@ from portstudy.llm.runner import WeekRunner, lock_deadline, read_scores
 from portstudy.logging_setup import current_run_id
 from portstudy.optimize import (
     WeekInputs,
+    build_conf_only_weights,
     build_control_weights,
     build_q0_weights,
     build_weights,
+    copy_q0_as,
     existing_q0_weights,
     portfolio_ics,
     posterior_dir,
@@ -738,6 +740,9 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                     "view_shift": 0.0,
                     "fallback": fallback,
                     "run_id": current_run_id(),
+                    "portfolio_kind": "steered",
+                    "expected_te_vs_q0": 0.0,  # a Q0 copy has no tracking error
+                    "conf_only_uncertainty_ratio": 1.0,
                 }
             )
             if reason:
@@ -759,6 +764,9 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
         from portstudy.pipeline import progress
 
         progress.start(week_id, "J7")
+        conf_strategies = [
+            s for s in ctx.cfg.strategies.conf_only_controls if s in ctx.cfg.strategies.enabled
+        ]
         n_sources = len(ctx.sources())
         for i_source, source in enumerate(ctx.sources()):
             progress.update(week_id, "J7", i_source, n_sources, force=i_source == 0)
@@ -775,7 +783,7 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
             source_posterior = None
             if source_status != "fallback" and ctx.now() < deadline:
                 source_posterior = posterior_for_source(
-                    inputs_week, source, ctx.cfg, ic_b, ic_l, logger=log
+                    inputs_week, source, ctx.cfg, ic_b, ic_l, logger=log, q0_post=q0_posterior
                 )
             else:
                 shutil.copyfile(
@@ -835,6 +843,7 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                     strategy=strategy,
                     posterior=source_posterior,
                     q0_weights=q0.weights,
+                    q0_post=q0_posterior,
                 )
                 summary[key] = {
                     "ic_l": ic_l,
@@ -852,6 +861,45 @@ def J7_weights(ctx: RunContext, week_id: str) -> JobStatus:
                             "decision_source": "llm",
                         }
                     )
+            for strategy in conf_strategies:
+                key = PortfolioId.conf(strategy, source).key
+                reason = plan.reason_for(source.key)
+                if source_status == "fallback" or ctx.now() >= deadline:
+                    # A source fallback week applies the same fallback to its controls.
+                    why = reason if source_status == "fallback" else "lock_deadline"
+                    copy_q0_as(
+                        week_id,
+                        strategy,
+                        key,
+                        {
+                            "source": source.key,
+                            "decision_source": "fallback_q0",
+                            "portfolio_kind": "conf_only",
+                            "fallback": True,
+                            "reason": why,
+                        },
+                    )
+                    summary[key] = {"fallback": True, "reason": why}
+                    continue
+                if reusable(key):
+                    summary[key] = {"resumed": True}
+                    continue
+                conf_w = build_conf_only_weights(
+                    week_id,
+                    source.model,
+                    source.config_id,
+                    ctx.cfg,
+                    ic_b,
+                    ic_l,
+                    inputs=inputs_week,
+                    previous_week=_previous_week_with_weights(week_id, key),
+                    logger=log,
+                    strategy=strategy,
+                    q0_weights=q0_results[strategy].weights,
+                    q0_post=q0_posterior,
+                )
+                summary[key] = {"solver": conf_w.solver, "conf_only": True}
+                mark_done(key)
         progress.update(week_id, "J7", n_sources, n_sources)
         fb.write_log(week_id, entries)
         _ledger_weights(ctx, week_id, plan)
@@ -908,7 +956,7 @@ def build_plans(ctx: RunContext, weeks: list[str]) -> dict[str, list[WeekPlan]]:
             decision_source = (
                 read_weights_meta(w, key).get("decision_source", "") if meta_path.exists() else ""
             )
-            if decision_source not in ("q0", "control", "llm", "fallback_q0"):
+            if decision_source not in ("q0", "control", "llm", "fallback_q0"):  # old metas
                 decision_source = (
                     "q0"
                     if pid.is_q0

@@ -58,10 +58,10 @@ Four pooled main comparisons (LLM-minus-baseline rank IC gap, steered-minus-Q0 t
 
 ```
 q_b = pi + IC_b sigma z_b          Omega_b,ii = tau Sigma_ii clip(s_i / median(s), 0.25, 4)       (K1)
-q_L = pi + IC_L sigma z_L          Omega_L,ii = tau Sigma_ii / c_i,  c_i = clip(1 - width_i/10, 0.1, 1)   (E1)
+q_L = mu_Q0 + IC_L sigma z_L       Omega_L,ii = tau Sigma_ii / c_i,  c_i = clip(1 - width_i/10, 0.1, 1)   (E1)
 ```
 
-Pending PLAN4 Phase 3B (decision E7): the LLM view becomes `q_L = mu_Q0 + IC_L sigma z_L`, centered on the Q0 posterior mean, so a rating of 0 leaves MVO and Top-K equal to Q0.
+The LLM view is centered on the week's Q0 posterior mean `mu_Q0` (decision E7), so a rating of 0 changes no expected return and leaves MVO and Top-K equal to Q0. For Robust and Resampled MVO, whose weights also react to the lower uncertainty a view brings, confidence-only control portfolios (`<strategy>__CONF__<model>__<prompt>`, decision G19) use Q0's mean with the source's view uncertainty, separating a view's information from its added confidence. Every steered portfolio's meta records `expected_te_vs_q0` and `conf_only_uncertainty_ratio` (G18).
 
 with `tau = 0.05`. The view strengths `IC_b` and `IC_L` are fixed at 0.02 every week (`views.ic_mode: fixed`, decision A8), so no view is switched off by a short noisy IC history; J8 still scores every weekly rank IC, and `ic_mode: trailing` keeps the older trailing-IC rule for tests. A Kronos spread above the median widens the baseline's uncertainty on that stock; a wide rating range (`width = high - low`) widens the LLM's. If `IC_L = 0`, or a source has no valid ratings, the LLM view rows are dropped and each portfolio trades exactly its strategy's Q0 weights.
 
@@ -248,7 +248,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs lint, unit tests and the reposi
 ## Project status
 
 - **Built and tested.** v1, v2 phases 1 to 14, the review fixes from `plans/results.md`, and PLAN3 phases 1 to 6, each recorded in `plans/PROGRESS.md`.
-- **In progress: `plans/PLAN4.md` Phases 1 to 11** (Phases 1 to 3A are done; Phase 3A added open-to-open weekly returns, the large-move and crash-removal rules, the stop and no-price fixes, the study log, event timeline, fallback ledger, audit, ARCTIC usage tracking, canaries and the kill-safe resume; Phase 3 added Kronos chunking, the gateway output and error handling, the consolidated price feed and the live-readiness preflight. Phases 1 and 2: the retired G6 test, the ARCTIC job scripts, the fallback server path and the small-model entries are removed; see `plans/PROGRESS.md`). Still to build: desktop runtime (Kronos chunking, live-readiness checks, lock file), the new evaluation and report, docs recheck, and end-to-end verification.
+- **In progress: `plans/PLAN4.md` Phases 1 to 11** (Phases 1 to 3B are done; Phase 3B added the neutral LLM view, the confidence-only controls and the S8 calibration; Phase 3A added open-to-open weekly returns, the large-move and crash-removal rules, the stop and no-price fixes, the study log, event timeline, fallback ledger, audit, ARCTIC usage tracking, canaries and the kill-safe resume; Phase 3 added Kronos chunking, the gateway output and error handling, the consolidated price feed and the live-readiness preflight. Phases 1 and 2: the retired G6 test, the ARCTIC job scripts, the fallback server path and the small-model entries are removed; see `plans/PROGRESS.md`). Still to build: desktop runtime (Kronos chunking, live-readiness checks, lock file), the new evaluation and report, docs recheck, and end-to-end verification.
 - **Manual work: `manualwork.md`** (Carter, the only manual list): emails to Parag and Andalib, gateway key and VPN, desktop setup, API keys and budget, skills and placebo texts, stock list, preregistration, smoke tests, the pilot, the `frozen-v4` tag.
 - **Not yet verified against live services** (`UNVERIFIED` in config and code): gateway JSON mode, seed support, rate limits and real seconds per request; whether MiniMax needs an output-token override; Kronos per-path sampling and its chunked GPU time.
 

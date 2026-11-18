@@ -1302,3 +1302,70 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
 - Phase 3A was built in three parts and committed once.
 - The stub LLM now reports `latency_s` 0.0 instead of a measured time: the random-kill test showed that column was the only difference between a resumed and an uninterrupted run, and a stub has no network to time.
 - The canary skips a model the health check marked down that week.
+
+## v4 phase 3B: neutral LLM view and strategy sensitivity
+
+### What changed
+
+- **Neutral LLM view (E7).** `build_views` takes the week's Q0 posterior mean and builds
+  `q_L = mu_Q0 + IC_L sigma z_L`; `Omega_L` is unchanged. `posterior_for_source` and
+  `build_weights` receive J7's Q0 posterior (`q0_post`), and the posterior files gain `q_L` and
+  `mu_Q0`. Callers that pass no Q0 mean keep the old centering on `pi`.
+- **Confidence-only counterfactual (G18).** `optimize/counterfactual.py`: the same views with every
+  LLM view moved onto `mu_Q0` (`z_L = 0`), one Black-Litterman solve; every steered weight meta
+  records `conf_only_uncertainty_ratio = trace(M_conf) / trace(M_Q0)` (1.0 when the source has no
+  view that week, including Q0 copies).
+- **Confidence-only controls (G19).** `PortfolioId.conf(strategy, source)` with key
+  `<strategy>__CONF__<model>__<config_id>` (`CONF` is now a reserved model id). J7 solves Robust
+  and Resampled MVO (`strategies.conf_only_controls`) once more per source with Q0's mean and the
+  source's `M_conf`, with the same caps, previous-week path and solver settings, and writes them
+  with `portfolio_kind: conf_only` and `decision_source: control`. No valid view: Q0's weights. A
+  source fallback week (or the lock deadline): Q0 with `fallback_q0`. They replay, score, enter
+  the fallback ledger and the audit like other portfolios, and are excluded from the evaluation's
+  source list (kept as `EvalData.conf_only` for Phases 7 and 8).
+- **Expected tracking error.** Every steered and confidence-only weight meta records
+  `expected_te_vs_q0 = sqrt((w - w_Q0)' Sigma (w - w_Q0))`; Q0 copies record 0.
+- **Resampled `draw_scale` (S8).** `strategies.resampled.draw_scale` (draws use `draw_scale * M`;
+  1.0 reproduces the earlier draws exactly).
+- **Calibration (S8).** `scripts/calibrate_view_sensitivity.py`: J1 and J2 on the synthetic world
+  at `universe.size` stocks for 12 weeks; for every strategy the median expected tracking error
+  against its own Q0 under all-zero, noise and skilled ratings (skilled: the next week's realized
+  return plus noise), plus the Mean-CVaR `lam` and Resampled `draw_scale` grids under noise ratings.
+  Rule: the largest grid value whose median noise tracking error is at least 25% of MVO's.
+  Run on 2026-11-17 (synthetic, 12 weeks, 100 stocks; median expected TE under noise ratings,
+  MVO 0.005153, so the bar is 0.001288): Mean-CVaR `lam` 1.0: 0.000522, 0.5: 0.000751, 0.25:
+  0.001164, 0.1: 0.002280, 0.05: 0.004315, 0.025: 0.005232, 0.01: 0.005536, so **lam = 0.1**;
+  Resampled `draw_scale` 1.0: 0.000324, 0.5: 0.000417, 0.25: 0.000570, 0.1: 0.000853, 0.05:
+  0.001130, 0.025: 0.001506, 0.01: 0.002140, so **draw_scale = 0.025**. At the current settings:
+  Robust 0.002033 (noise), 0.002016 (skilled), 0.000886 (all zero); Top-K 0.005917, 0.004748, 0;
+  MVO all-zero 0 (E7: a neutral rating leaves MVO and Top-K equal to Q0). Both values are written
+  to `config/study.yaml` with a comment naming the script and date, and marked provisional (S4,
+  S8) until Carter confirms them (`manualwork.md`).
+- **Decisions.** S4 is now the calibrated value; E7, G18, G19 and S8 are marked built in
+  `docs/open_questions.md`. README, `docs/design.md` and `docs/config_reference.md` show the new
+  formula and the confidence-only controls.
+
+### Tests
+
+- New: `tests/unit/test_v4_phase3b_views.py` (8): with every rating 0 the steered posterior mean
+  equals Q0's to 1e-12 and MVO and Top-K weights equal Q0's, for `IC_b` 0.02 and 0; the
+  counterfactual's mean equals Q0's with an uncertainty ratio below 1; the tilt follows `z_L` on a
+  diagonal covariance; a smaller `draw_scale` raises Resampled's tracking error; the CONF key round
+  trips; in a synthetic week every steered meta has both new fields, every CONF portfolio exists,
+  with every rating 0 the CONF portfolio equals the steered one, a failed source's CONF portfolios
+  hold Q0 with `fallback_q0`, and J8 replays them; the calibration script writes its CSV and summary.
+- Changed on purpose (16 new CONF portfolio keys in the test config): `test_v2_phase1_config_identity.py`
+  (expected keys and count), `tests/integration/test_v2_phase8_jobs.py` (key count and CONF meta),
+  `test_v4_phase3a_logging.py` (J7 fallback rows include the CONF controls). `test_phase7_views.py`
+  and `test_v2_phase6_views_bl.py` needed no change: they pass no Q0 mean, which keeps `pi`.
+- Run after the last change: `pytest tests/unit tests/integration` (default selection) passed except the three tests above, which were then updated and pass; the config, checklist, CI, preflight, strategy, logging and jobs files pass again after the calibrated values went into `study.yaml`. `tests/e2e` collects (not run; Phase 11). `ruff check`, `ruff format --check`, `mypy` clean.
+
+### Choices made while unattended
+
+- The skilled ratings in the calibration come from the synthetic world's next-week realized
+  returns (2 times the cross-sectional z-score plus unit noise, rounded and clipped to [-5, 5]),
+  because the stub provider's ratings are not tied to returns.
+- The calibration measures tracking error at the optimizer level on each synthetic week's inputs
+  (no simulator replay); that is what `expected_te_vs_q0` measures in the live run.
+- Confidence-only portfolios carry `decision_source: control`; their meta keeps the source key so
+  fallbacks and the audit treat them like the source's other portfolios.

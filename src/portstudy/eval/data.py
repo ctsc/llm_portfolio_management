@@ -90,6 +90,7 @@ class EvalData:
     strategy_of: dict[str, str] = field(default_factory=dict)  # steered or Q0 key -> strategy
     source_of: dict[str, str] = field(default_factory=dict)  # steered key -> source key
     controls: list[str] = field(default_factory=list)
+    conf_only: list[str] = field(default_factory=list)  # G19 confidence-only controls
     solver_failed: pd.DataFrame = field(default_factory=pd.DataFrame)  # weeks by portfolios
     view_shift: pd.DataFrame = field(default_factory=pd.DataFrame)  # weeks by portfolios
 
@@ -99,6 +100,11 @@ class EvalData:
             if pid.is_control:
                 if key not in self.controls:
                     self.controls.append(key)
+                continue
+            if pid.conf_only:
+                # G19 confidence-only controls: compared in Phases 7 and 8, never a source.
+                if key not in self.conf_only:
+                    self.conf_only.append(key)
                 continue
             self.strategy_of.setdefault(key, str(pid.strategy))
             if pid.source is not None:
@@ -244,7 +250,11 @@ def load_eval_data(
         if live_start is not None:
             weeks_used = [w for w in weeks_used if w >= live_start]
     keys = list(dict.fromkeys(portfolios))
-    source_portfolios = [key for key in keys if PortfolioId.parse(key).source is not None]
+    source_portfolios = [
+        key
+        for key in keys
+        if PortfolioId.parse(key).source is not None and not PortfolioId.parse(key).conf_only
+    ]
     portfolio_by_source: dict[str, str] = {}
     for key in source_portfolios:
         source = PortfolioId.parse(key).source

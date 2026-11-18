@@ -81,7 +81,11 @@ def test_j7_writes_every_portfolio_and_each_passes_check_weights(
     _run(ctx, inject_week, TO_J7)
     keys = ctx.portfolio_keys()
     n_sources = len(ctx.sources())
-    assert len(keys) == (n_sources + 1) * len(cfg.strategies.enabled) + len(cfg.strategies.controls)
+    n_conf = len(cfg.strategies.conf_only_controls) * n_sources  # v4 phase 3B (G19)
+    assert (
+        len(keys)
+        == (n_sources + 1) * len(cfg.strategies.enabled) + len(cfg.strategies.controls) + n_conf
+    )
     assert sorted(p.stem for p in weights_dir(inject_week).glob("*.csv")) == sorted(keys)
     for key in keys:
         weights = read_weights(inject_week, key).set_index("ticker")["weight"].astype(float)
@@ -93,6 +97,9 @@ def test_j7_writes_every_portfolio_and_each_passes_check_weights(
         elif pid.is_control:
             assert meta["decision_source"] == "control" and meta["view_shift"] == 0.0
             assert meta["use_llm_view"] is False and meta["n_llm_view"] == 0
+        elif pid.conf_only:  # v4 phase 3B (G19): a control portfolio for its source
+            assert meta["decision_source"] == "control" and meta["portfolio_kind"] == "conf_only"
+            assert pid.source is not None and meta["source"] == pid.source.key
         else:
             assert meta["decision_source"] == "llm" and meta["strategy"] == pid.strategy
             assert pid.source is not None and meta["source"] == pid.source.key

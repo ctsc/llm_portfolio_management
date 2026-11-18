@@ -133,9 +133,12 @@ Rank IC:    Spearman(likely rating at Friday cutoff, total return from next Mond
 View scale: IC_b = IC_L = views.fixed_ic (0.02) every week (A8, ic_mode: fixed); the trailing
             mean of the last 8 scored weeks is kept for ic_mode: trailing
 Residual:   s = a + c z_b + e ;  z_L = standardize(e)        (invalid outputs excluded)
-Views:      q_b = pi + IC_b sigma z_b ;  q_L = pi + IC_L sigma z_L
-            (pending PLAN4 Phase 3B, decision E7: q_L = mu_Q0 + IC_L sigma z_L, centered on the
-            Q0 posterior mean so a rating of 0 is neutral)
+Views:      q_b = pi + IC_b sigma z_b ;  q_L = mu_Q0 + IC_L sigma z_L
+            (E7: centered on the Q0 posterior mean, so a rating of 0 is neutral)
+Conf-only:  same Omega_L with z_L = 0 (G18); its posterior covariance M_conf drives the
+            Robust and Resampled confidence-only controls (G19);
+            conf_only_uncertainty_ratio = trace(M_conf) / trace(M_Q0)
+Expected TE vs Q0: sqrt((w - w_Q0)' Sigma (w - w_Q0)), in every steered weight meta
 Uncertainty: r_i = clip(k_sd_i / median(k_sd), 0.25, 4)
              Omega_b,ii = tau Sigma_ii r_i
              c_i = clip(1 - width_i / 10, 0.1, 1) ;  Omega_L,ii = tau Sigma_ii / c_i

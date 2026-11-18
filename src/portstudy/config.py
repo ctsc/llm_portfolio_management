@@ -10,7 +10,7 @@ import os
 from functools import lru_cache
 from math import ceil
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -221,6 +221,7 @@ class ResampledConfig(StrictModel):
     n_draws: int = 200
     seed: int = 7
     max_failed_share: float = 0.10
+    draw_scale: float = Field(default=1.0, gt=0)  # DECISION(S8): draws use draw_scale * M
 
 
 class TopKConfig(StrictModel):
@@ -243,6 +244,10 @@ class StrategiesConfig(StrictModel):
     resampled: ResampledConfig = ResampledConfig()
     topk: TopKConfig = TopKConfig()
     hrp: HrpConfig = HrpConfig()
+    # DECISION(G19): strategies that also get confidence-only control portfolios.
+    conf_only_controls: list[StrategyName] = Field(
+        default_factory=lambda: cast(list[StrategyName], ["robust", "resampled"])
+    )
 
 
 class SimulatorConfig(StrictModel):

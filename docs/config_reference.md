@@ -234,4 +234,4 @@ Decision B1. Maintained by
 | `llm.network_outage_tolerance_minutes` | 60 | How long J4 and J5 wait out a connection outage before counting failures | N4, N5 | 3A |
 | `view_sensitivity_min_tracking_error` (in `config/preregistration.yaml`) | null | Threshold below which a strategy is reported as insensitive to views | G13 | 4 |
 
-The LLM view formula changes in Phase 3B (decision E7): `q_L = mu_Q0 + IC_L sigma z_L`.
+The LLM view formula is `q_L = mu_Q0 + IC_L sigma z_L` (decision E7, built in Phase 3B).
