@@ -1591,3 +1591,45 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
   Phase 7 and 8 tables.
 - The H2 model-change sensitivity rows are intention-to-treat only; the signal-level main
   comparisons without flagged weeks are added with the report in Phase 9.
+
+## v4 phase 9: report rewrite
+
+### What changed
+
+- `eval/report.py` rewritten. `report.md` sections in order: Header (weeks, pilot excluded,
+  models, prompts, strategies, controls, confidence-only count, factor source, pre-registration
+  frozen date or "not frozen", fallback and active-view shares, decision values in force); Main
+  results (one row per preregistered comparison: effect, CI, p, Holm p, weeks, minimum detectable
+  effect, or a reason when no estimate exists); H1; H2 (signal rows, intention-to-treat and
+  active-week portfolio rows side by side, the information vs confidence split); H3; model
+  comparisons; H3b; H4 (exploratory); H5 (factor alpha and loadings, the placebo control with the
+  G-wording, deflated Sharpe and the |t| > 3 flag); controls vs HRP and equal weight; portfolio
+  metrics (Sharpe net of the T-bill rate, PSR, Sortino, Calmar, drawdown, CVaR, volatility, CER,
+  turnover, cost); tie-band sensitivity; view sensitivity (G13); model-change sensitivity and the
+  G20 repeat agreement; data integrity (per-week universe, removals, large moves, skips, fallback
+  counts); study log summary; how to read a null (each main test's minimum detectable effect).
+- CSV for every table, including `main_results`, `signal_tests`, `portfolio_tests`,
+  `view_sensitivity`, `model_change_weeks`, `tie_band_sensitivity`, `data_integrity`,
+  `study_log_summary`, `repeat_agreement` and `all_metrics`. Figures: weekly IC, IC gaps with CIs,
+  equity curves (all and per strategy), active returns with CIs per strategy, H3b, H4 ranking,
+  factor loadings per strategy. No shuffle figure or text.
+- New `eval/all_metrics.py` (G22): long-form `all_metrics.csv` (unit, unit type, metric,
+  estimate, CI, p, `p_adj`, family, T, reason) for every source, steered portfolio, Q0,
+  confidence-only portfolio, HRP, equal weight and pooled row; `check_completeness` lists missing
+  (unit, metric) pairs and NaNs without a reason, and the evaluation raises
+  `EvalIncompleteError` on any.
+- `portstudy eval`: `--synthetic`, `--config`, `--factor-source french|etf_proxy`, `--out`.
+- Retired from `eval/hypotheses.py` (superseded by Phases 7 and 8): `h1_llm_raw_vs_baseline`,
+  `h2_combined_vs_baseline`, `h2_portfolio_vs_q0`, `h3_skills_vs_controls`, and the per-strategy
+  Holm helper `_holm_within`; the remaining functions return raw p-values and the report assigns
+  families through `eval/multiple.py`.
+
+### Tests
+
+- New: `tests/integration/test_v4_phase9_report.py`: `portstudy eval --synthetic` through the CLI
+  writes every section heading, every CSV and figure, no "shuffle" anywhere, one Main results row
+  per preregistered comparison, every unit type in `all_metrics.csv`, a reason for every NaN.
+- Changed on purpose: `tests/integration/test_phase11_report.py` (new file names),
+  `tests/unit/test_v2_phase10_eval.py` (tests of the retired functions removed; H3b checks raw p).
+- Report runtime on the shared synthetic study (3 weeks, 54 portfolios): 6.0 s on Windows.
+- `ruff`, `mypy` clean.

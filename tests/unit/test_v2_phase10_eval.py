@@ -11,16 +11,10 @@ import pytest
 from portstudy.config import StudyConfig
 from portstudy.eval.data import EvalData, likely_column, width_column
 from portstudy.eval.hypotheses import (
-    h1_llm_raw_vs_baseline,
-    h2_combined_vs_baseline,
-    h2_portfolio_vs_q0,
-    h3_skills_vs_controls,
     h3b_width,
     h4_strategy_ranking,
     portfolio_metrics,
-    skills_prompt_ids,
 )
-from portstudy.eval.tests import holm
 
 MODELS = ["m-a", "m-b"]
 PROMPTS = ["bare", "placebo", "skills_1", "skills_2"]
@@ -128,46 +122,6 @@ def _build(
     )
 
 
-def test_h2_holm_adjusts_within_each_strategy_only(study_config: StudyConfig) -> None:
-    cfg = _fast(study_config)
-    data = _build(cfg, seed=1, strategy_edge={"mvo": 0.004, "cvar": 0.0})
-    df = h2_portfolio_vs_q0(data)
-    assert set(df["strategy"]) == set(STRATEGIES)
-    for strategy in STRATEGIES:
-        sub = df[df["strategy"] == strategy]
-        assert len(sub) == len(_sources())
-        np.testing.assert_allclose(sub["p_holm"].to_numpy(), holm(sub["p_perm"].to_numpy()))
-    # Adjusting across both strategies at once would give larger values for the planted edge.
-    mvo = df[df["strategy"] == "mvo"]
-    assert mvo["significant"].all()
-    joint = holm(df["p_perm"].to_numpy())
-    assert (joint >= df["p_holm"].to_numpy() - 1e-12).all()
-
-
-def test_h2_pairs_each_portfolio_with_its_own_q0(study_config: StudyConfig) -> None:
-    cfg = _fast(study_config)
-    data = _build(cfg, seed=2, strategy_edge={"mvo": 0.003, "cvar": -0.003})
-    df = h2_portfolio_vs_q0(data).set_index("portfolio")
-    for src in _sources():
-        assert df.loc[f"mvo__{src}", "mean_gap"] > 0 > df.loc[f"cvar__{src}", "mean_gap"]
-        assert df.loc[f"mvo__{src}", "source"] == src
-    assert not any(k in df.index for k in CONTROLS)
-
-
-def test_h3_covers_every_skills_kind_per_model(study_config: StudyConfig) -> None:
-    cfg = _fast(study_config)
-    data = _build(cfg, seed=3)
-    df = h3_skills_vs_controls(data)
-    skills = [p for p in PROMPTS if p in set(skills_prompt_ids())]
-    assert skills == ["skills_1", "skills_2"]
-    expected = {f"{m}: {p} vs {c}" for m in MODELS for p in skills for c in ("bare", "placebo")}
-    assert set(df["portfolio"]) == expected
-    assert set(df["model"]) == set(MODELS)
-    for model in MODELS:
-        sub = df[df["model"] == model]
-        np.testing.assert_allclose(sub["p_holm"].to_numpy(), holm(sub["p_perm"].to_numpy()))
-
-
 def test_h3b_detects_planted_width_effect_and_skips_equal_weeks(study_config: StudyConfig) -> None:
     cfg = _fast(study_config)
     data = _build(cfg, seed=4, width_effect=3.0, equal_width_weeks=3)
@@ -182,8 +136,7 @@ def test_h3b_detects_planted_width_effect_and_skips_equal_weeks(study_config: St
         + df["skipped_no_ic"]
         == N_WEEKS
     ).all()
-    assert df["significant"].all()
-    np.testing.assert_allclose(df["p_holm"].to_numpy(), holm(df["p_perm"].to_numpy()))
+    assert (df["p_perm"] < 0.05).all()  # v4 phase 9: families are assigned in the report
     flat = h3b_width(_build(cfg, seed=5, width_effect=0.0))
     assert flat["p_perm"].min() > 0.001
 
@@ -210,16 +163,9 @@ def test_controls_in_metrics_but_in_no_family(study_config: StudyConfig) -> None
     metrics = portfolio_metrics(data, clean_only=False)
     assert set(CONTROLS) <= set(metrics["portfolio"])
     assert set(metrics.loc[metrics["portfolio"].isin(CONTROLS), "strategy"]) == set(CONTROLS)
-    for table in (
-        h1_llm_raw_vs_baseline(data),
-        h2_combined_vs_baseline(data),
-        h2_portfolio_vs_q0(data),
-        h3_skills_vs_controls(data),
-        h3b_width(data),
-    ):
-        assert not table["portfolio"].isin(CONTROLS).any()
+    # v4 phase 9: H1 to H3 moved to signal_tests and portfolio_tests (Phases 7 and 8).
+    assert not h3b_width(data)["portfolio"].isin(CONTROLS).any()
     assert not h4_strategy_ranking(data)["strategy"].isin(CONTROLS).any()
-    assert set(h1_llm_raw_vs_baseline(data)["source"]) == set(_sources())
 
 
 def test_eval_config_has_h3b_and_per_strategy_families(study_config: StudyConfig) -> None:

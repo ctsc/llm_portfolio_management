@@ -189,15 +189,21 @@ def backup_cmd(
 def eval_cmd(
     synthetic: bool = typer.Option(False, "--synthetic"),
     config: str | None = typer.Option(None, "--config", help="study YAML path"),
+    factor_source: str | None = typer.Option(
+        None, "--factor-source", help="french or etf_proxy (overrides eval.factor_source)"
+    ),
+    out: str | None = typer.Option(None, "--out", help="report folder (default results/eval)"),
 ) -> None:
-    try:
-        from portstudy.eval.report import run_eval
-    except ImportError as exc:  # Phase 11 adds the evaluation engine
-        typer.echo(f"evaluation engine not available: {exc}")
-        raise typer.Exit(code=1) from exc
+    """Write the evaluation report, every table as CSV and all_metrics.csv (PLAN4 Phase 9)."""
+    from pathlib import Path
+
+    from portstudy.eval.report import run_eval
+
+    if factor_source not in (None, "french", "etf_proxy"):
+        raise typer.BadParameter("--factor-source must be french or etf_proxy")
     ctx = _context(synthetic, False, True, None, None, config)
-    out = run_eval(ctx)
-    typer.echo(f"report written to {out}")
+    folder = run_eval(ctx, Path(out) if out else None, factor_source)
+    typer.echo(f"report written to {folder}")
 
 
 @app.command("audit")
