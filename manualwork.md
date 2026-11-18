@@ -209,3 +209,15 @@ Decided on 2026-11-12, also in PLAN4 (nothing left to choose here):
    (it refuses to run earlier). Then `python scripts/fetch_french_factors.py` (once the library covers the
    study window), set `eval.factor_source: french`, run `portstudy eval`, and write the paper from
    the report.
+
+## Held for Carter before the freeze (added 2026-11-17 during the PLAN4 build)
+
+1. Confirm or override the S8 calibration values in `config/study.yaml` (`strategies.cvar.lam`
+   0.1 and `strategies.resampled.draw_scale` 0.025, both marked provisional; evidence in
+   `data/outputs/calibration/summary.md` after running `scripts/calibrate_view_sensitivity.py`).
+2. In `config/preregistration.yaml` set `view_sensitivity_min_tracking_error` (G13), then
+   `frozen: true` and `frozen_on: "<date>"` before the pilot.
+3. Replace the synthetic canary stocks in `config/canary/canary_inputs.csv` with 10 stocks and
+   their inputs from one real past snapshot (G21).
+4. On the desktop, confirm the WSL keep-awake helper (`pipeline/keep_awake.py`) and the
+   preflight clock check (`sudo hwclock -s` fix) work.

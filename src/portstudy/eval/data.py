@@ -91,6 +91,8 @@ class EvalData:
     source_of: dict[str, str] = field(default_factory=dict)  # steered key -> source key
     controls: list[str] = field(default_factory=list)
     conf_only: list[str] = field(default_factory=list)  # G19 confidence-only controls
+    factors: pd.DataFrame | None = None  # daily French factors (G11), or ETF proxies
+    factor_source: str = ""
     solver_failed: pd.DataFrame = field(default_factory=pd.DataFrame)  # weeks by portfolios
     view_shift: pd.DataFrame = field(default_factory=pd.DataFrame)  # weeks by portfolios
 
@@ -275,6 +277,15 @@ def load_eval_data(
     statuses = pd.DataFrame({k: {w: fb.week_status_for(w, k) for w in weeks_used} for k in keys})
     spy_weekly, spy_vol = _spy_series(weeks_used)
     solver_failed, view_shift = _meta_tables(weeks_used, keys)
+    from portstudy.eval.characteristics import characteristics_panel
+    from portstudy.eval.factors import load_factors
+
+    # Coverage is enforced by the factor regressions (Phase 8); characteristics use what exists.
+    factors, factor_source = load_factors(cfg, weeks_used, synthetic, require_coverage=False)
+    stock_week = _stock_week_table(weeks_used, list(portfolio_by_source))
+    chars = characteristics_panel(weeks_used, factors)
+    if len(stock_week) and len(chars):
+        stock_week = stock_week.merge(chars, on=["week_id", "ticker"], how="left")
     return EvalData(
         cfg=cfg,
         portfolios=source_portfolios,
@@ -289,7 +300,9 @@ def load_eval_data(
         statuses=statuses,
         spy_weekly=spy_weekly,
         spy_vol20=spy_vol,
-        stock_week=_stock_week_table(weeks_used, list(portfolio_by_source)),
+        stock_week=stock_week,
         solver_failed=solver_failed,
         view_shift=view_shift,
+        factors=factors,
+        factor_source=factor_source,
     )

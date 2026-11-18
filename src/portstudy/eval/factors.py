@@ -8,7 +8,11 @@ and reported as a gap. If an official Fama-French daily file is present at
 
 from __future__ import annotations
 
+import datetime as dt
+import io
+import zipfile
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -20,6 +24,7 @@ from portstudy.eval.tests import default_maxlags
 
 ETF_FACTORS = ["MKT_RF", "SMB", "HML", "RMW"]
 FF_FACTORS = ["MKT_RF", "SMB", "HML", "RMW", "CMA"]
+FRENCH_COLUMNS = [*FF_FACTORS, "MOM", "RF"]
 
 
 def daily_rf_from_snapshots(weeks: list[str]) -> pd.Series:
@@ -110,3 +115,136 @@ def factor_table(
     if source == "etf_proxies" and len(df):
         df["beta_CMA"] = np.nan  # investment factor unavailable from ETF proxies
     return df, source
+
+
+# Kenneth French daily files (DECISION(G11)) ---------------------------------------------------
+
+
+class FactorCoverageError(RuntimeError):
+    """The factor file ends before the study's last day."""
+
+
+def _french_text(path: Path) -> str:
+    """The CSV text of a French Data Library file, from the zip or an extracted CSV."""
+    if path.suffix.lower() == ".zip":
+        with zipfile.ZipFile(path) as zf:
+            name = next(n for n in zf.namelist() if n.lower().endswith(".csv"))
+            return zf.read(name).decode("utf-8", errors="replace")
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def read_french_daily(path: Path) -> pd.DataFrame:
+    """Daily rows (YYYYMMDD) of a French CSV in decimals; header and footer lines are skipped."""
+    lines = _french_text(path).splitlines()
+    header = next(
+        i
+        for i, ln in enumerate(lines)
+        if ln.strip().startswith(",") or "Mkt-RF" in ln or ln.strip().lower().startswith(",mom")
+    )
+    body = [lines[header]] + [
+        ln
+        for ln in lines[header + 1 :]
+        if ln[:8].strip().isdigit() and len(ln.split(",")[0].strip()) == 8
+    ]
+    raw = pd.read_csv(io.StringIO("\n".join(body)))
+    raw = raw.rename(columns={raw.columns[0]: "date"})
+    raw.columns = [str(c).strip() for c in raw.columns]
+    raw["date"] = pd.to_datetime(raw["date"].astype(str).str.strip(), format="%Y%m%d").dt.date
+    df = raw.set_index("date").astype(float) / 100.0
+    return df.rename(columns={"Mkt-RF": "MKT_RF", "Mom": "MOM", "WML": "MOM"})
+
+
+def french_factors(ff5_path: Path, momentum_path: Path) -> pd.DataFrame:
+    """MKT_RF, SMB, HML, RMW, CMA, MOM, RF in decimals, joined on date."""
+    ff5 = read_french_daily(ff5_path)
+    mom = read_french_daily(momentum_path)
+    mom = mom.rename(columns={mom.columns[0]: "MOM"}) if "MOM" not in mom else mom
+    joined = ff5.join(mom[["MOM"]], how="inner")
+    return joined.loc[:, FRENCH_COLUMNS].sort_index()
+
+
+def check_coverage(factors: pd.DataFrame, last_day: dt.date) -> None:
+    if not len(factors) or max(factors.index) < last_day:
+        end = max(factors.index).isoformat() if len(factors) else "nothing"
+        raise FactorCoverageError(
+            f"French factor file ends {end}, before the study's last day {last_day.isoformat()}; "
+            "run scripts/fetch_french_factors.py once the library covers the study"
+        )
+
+
+def synthetic_french_files(
+    world_prices: pd.DataFrame, folder: Path, seed: int = 11
+) -> tuple[Path, Path]:
+    """Seeded French-format FF5 and momentum CSVs from the synthetic world's ETF proxies, so tests
+    and the synthetic e2e run exercise the French path."""
+    import numpy as np
+
+    closes = world_prices.pivot_table(index="date", columns="ticker", values="close")
+    rets = closes.pct_change().dropna(how="all")
+    rng = np.random.default_rng(seed)
+    out = pd.DataFrame(index=rets.index)
+    out["Mkt-RF"] = rets["SPY"]
+    out["SMB"] = rets["IWM"] - rets["SPY"]
+    out["HML"] = rets["IWD"] - rets["IWF"]
+    out["RMW"] = rets["QUAL"] - rets["SPY"]
+    out["CMA"] = rng.normal(0, 0.003, len(out))
+    out["RF"] = 0.0001
+    mom = pd.DataFrame({"Mom": rng.normal(0, 0.006, len(out))}, index=out.index)
+    folder.mkdir(parents=True, exist_ok=True)
+
+    def write(df: pd.DataFrame, path: Path, title: str) -> Path:
+        stamp = [pd.Timestamp(d).strftime("%Y%m%d") for d in df.index]
+        body = "\n".join(
+            ",".join([s, *(f"{v * 100:.4f}" for v in row)]) for s, row in zip(stamp, df.to_numpy())
+        )
+        path.write_text(
+            f"{title}\n\n," + ",".join(df.columns) + "\n" + body + "\n", encoding="utf-8"
+        )
+        return path
+
+    return (
+        write(out, folder / "F-F_Research_Data_5_Factors_2x3_daily.csv", "synthetic FF5"),
+        write(mom, folder / "F-F_Momentum_Factor_daily.csv", "synthetic momentum"),
+    )
+
+
+FF5_NAME = "F-F_Research_Data_5_Factors_2x3_daily"
+MOM_NAME = "F-F_Momentum_Factor_daily"
+
+
+def _find(folder: Path, stem: str) -> Path | None:
+    for suffix in ("_CSV.zip", ".csv", ".CSV", ".zip"):
+        path = folder / f"{stem}{suffix}"
+        if path.exists():
+            return path
+    return None
+
+
+def load_factors(
+    cfg: Any, weeks: list[str], synthetic: bool = False, require_coverage: bool = True
+) -> tuple[pd.DataFrame | None, str]:
+    """The study's daily factors and their label. `french`: the configured files (default
+    `data/factors/`), with a synthetic set generated from the synthetic world's ETFs in synthetic
+    runs; fails clearly when the files end before the study. `etf_proxy`: the ETF method, labeled
+    for monitoring only (no MOM or CMA)."""
+    from portstudy import calendar as cal
+    from portstudy.paths import data_dir
+
+    if cfg.eval.factor_source == "etf_proxy":
+        return etf_factors(daily_rf_from_snapshots(weeks)), "ETF proxy, monitoring only"
+    folder = data_dir() / "factors"
+    ff5 = Path(cfg.eval.fama_french_file) if cfg.eval.fama_french_file else _find(folder, FF5_NAME)
+    mom = Path(cfg.eval.momentum_file) if cfg.eval.momentum_file else _find(folder, MOM_NAME)
+    if (ff5 is None or mom is None) and synthetic:
+        led = ledger.read_ledger()
+        ff5, mom = synthetic_french_files(led, folder)
+    if ff5 is None or mom is None:
+        if not require_coverage:
+            return None, "french (files missing)"
+        raise FactorCoverageError(
+            f"French factor files not found in {folder}; run scripts/fetch_french_factors.py"
+        )
+    factors = french_factors(ff5, mom)
+    if require_coverage and weeks:
+        check_coverage(factors, cal.cutoff_day(weeks[-1]))
+    return factors, "french"

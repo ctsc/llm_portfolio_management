@@ -1,0 +1,11 @@
+This file was created by CMPT_ME_BEME_OP_INV_RETS_DAILY using the 202609 CRSP database.
+The 1-month TBill return is from Ibbotson and Associates Inc.
+
+,Mkt-RF,SMB,HML,RMW,CMA,RF
+20260105,0.52,-0.10,0.20,0.05,-0.03,0.017
+20260106,-0.31,0.12,-0.08,0.02,0.04,0.017
+20260107,1.10,0.30,-0.25,-0.11,0.06,0.017
+20260108,0.05,-0.02,0.01,0.00,0.01,0.017
+20260109,-0.75,0.15,0.40,0.12,0.09,0.017
+
+Copyright 2026 Eugene F. Fama and Kenneth R. French

@@ -1452,3 +1452,37 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
   weekly points cannot estimate higher lags.
 - The Ledoit-Wolf test uses a circular block bootstrap with block length T^(1/3) and reports a
   symmetric percentile-t interval.
+
+## v4 phase 6: factor data and stock characteristics
+
+### What changed
+
+- `eval/factors.py`: `read_french_daily` reads a French Data Library daily file (zip or extracted
+  CSV, header and copyright lines skipped, percent to decimals); `french_factors` joins FF5 (2x3)
+  and momentum into `MKT_RF, SMB, HML, RMW, CMA, MOM, RF`; `check_coverage` raises
+  `FactorCoverageError` naming both dates when the file ends before the study; `load_factors`
+  picks `eval.factor_source` (`french` from the configured files or `data/factors/`, `etf_proxy`
+  labeled "ETF proxy, monitoring only"); `synthetic_french_files` writes seeded French-format files
+  from the synthetic world's ETF proxies so synthetic runs use the French path.
+- New `scripts/fetch_french_factors.py`: downloads both zips into `data/factors/`, records the
+  download date and last date covered in `factors_meta.json`, refuses to overwrite a file that
+  covers a later date. UNVERIFIED: the file names on the French site (first real run is manual).
+- New `eval/characteristics.py`: per stock-week, as of the cutoff only: baseline score, 12-1
+  momentum, 1-month reversal, log market cap, sector, 63-day volatility, 252-day beta to SPY,
+  trailing 252-day HML, RMW and CMA loadings from daily excess returns on the FF5 factors; each
+  numeric column also z-scored across stocks (`<column>_z`). `EvalData.stock_week` gains these
+  columns; `EvalData.factors` and `factor_source` carry the factor set.
+- Fixtures: `tests/fixtures/factors/` (five days of FF5 and momentum in the French format).
+
+### Tests
+
+- New: `tests/unit/test_v4_phase6_factors.py` (5): seven decimal columns from the fixture, zip and
+  CSV give the same frame, coverage failure message, characteristics unchanged when prices, SPY and
+  factors after the cutoff change (no look-ahead), synthetic factor files load.
+- The evaluation, report, checklist and 3A pipeline tests pass. `ruff`, `mypy` clean.
+
+### Choices made while unattended
+
+- `load_eval_data` loads factors without the coverage check (characteristics use what exists); the
+  Phase 8 factor regressions enforce coverage for the final run.
+- The ETF proxy method has no momentum proxy in the snapshot ETFs, so MOM is omitted there.
