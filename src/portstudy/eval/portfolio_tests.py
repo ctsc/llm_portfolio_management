@@ -523,11 +523,35 @@ def any_source_tests(data: Any) -> list[dict[str, Any]]:
         act = pd.DataFrame(
             {k: _weekly(data, k) - _weekly(data, q0) for k in data.steered_for(strategy)}
         ).dropna()
+        # Portfolios identical to Q0 every week carry no information and break the bootstrap.
+        constant = [c for c in act.columns if act[c].std(ddof=1) == 0]
+        act = act.drop(columns=constant)
         if act.shape[0] < 5 or act.shape[1] < 1:
+            rows.append(
+                _row(
+                    "H2",
+                    "SPA: any source beats Q0",
+                    strategy,
+                    p=float("nan"),
+                    note="too few weeks or no portfolio differing from Q0",
+                )
+            )
             continue
         bench = pd.Series(0.0, index=act.index)
-        spa = m.spa_test(bench, -act, seed=data.cfg.eval.seed)
-        winners = m.stepm(bench, -act, seed=data.cfg.eval.seed) or []
+        try:
+            spa = m.spa_test(bench, -act, seed=data.cfg.eval.seed)
+            winners = m.stepm(bench, -act, seed=data.cfg.eval.seed) or []
+        except (ValueError, ZeroDivisionError, np.linalg.LinAlgError) as exc:
+            rows.append(
+                _row(
+                    "H2",
+                    "SPA: any source beats Q0",
+                    strategy,
+                    p=float("nan"),
+                    note=f"arch bootstrap failed: {exc}",
+                )
+            )
+            continue
         rows.append(
             _row(
                 "H2",
@@ -535,6 +559,7 @@ def any_source_tests(data: Any) -> list[dict[str, Any]]:
                 strategy,
                 p=spa["p_consistent"] if spa else float("nan"),
                 stepm_superior=";".join(winners),
+                excluded_identical_to_q0=";".join(constant),
             )
         )
     return rows

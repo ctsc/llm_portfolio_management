@@ -70,7 +70,11 @@ def test_full_run_synthetic(
     context = WeekendRunner(cfg, model_registry, world).context(e2e_weeks[0])
     keys = context.portfolio_keys()
     n_sources = len(context.sources())
-    assert len(keys) == len(cfg.strategies.enabled) * (n_sources + 1) + len(cfg.strategies.controls)
+    n_conf = len(cfg.strategies.conf_only_controls) * n_sources  # v4 phase 3B (G19)
+    assert (
+        len(keys)
+        == len(cfg.strategies.enabled) * (n_sources + 1) + len(cfg.strategies.controls) + n_conf
+    )
     replayed_keys = keys
     for w in e2e_weeks:
         snap = read_snapshot(w)

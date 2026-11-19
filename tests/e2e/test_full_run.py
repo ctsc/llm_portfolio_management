@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from portstudy.config import ModelRegistry, StudyConfig
+from portstudy.config import ModelRegistry, StudyConfig, load_preregistration
 from portstudy.data.providers.synthetic import SyntheticWorld
 from portstudy.data.snapshot import read_snapshot
 from portstudy.eval.data import load_eval_data
@@ -62,7 +62,8 @@ def test_portfolio_identities_and_weight_files_every_week(
     keys = ctx.portfolio_keys()
     strategies = list(cfg.strategies.enabled)
     controls = list(cfg.strategies.controls)
-    assert len(keys) == len(strategies) * (len(ctx.sources()) + 1) + len(controls)
+    n_conf = len(ctx.cfg.strategies.conf_only_controls) * len(ctx.sources())  # v4 G19
+    assert len(keys) == len(strategies) * (len(ctx.sources()) + 1) + len(controls) + n_conf
     for w in e2e_weeks:
         folder = root / "outputs" / w / "weights"
         files = sorted(p.stem for p in folder.glob("*.csv"))
@@ -81,6 +82,9 @@ def test_portfolio_identities_and_weight_files_every_week(
                 assert meta["use_llm_view"] is False and float(meta["view_shift"]) == 0.0
             elif key.endswith("__Q0"):
                 assert meta["decision_source"] == "q0" and float(meta["view_shift"]) == 0.0
+            elif "__CONF__" in key:  # v4 phase 3B (G19) confidence-only controls
+                assert meta["decision_source"] in ("control", "fallback_q0")
+                assert meta["portfolio_kind"] == "conf_only"
             else:
                 assert meta["decision_source"] in ("llm", "fallback_q0")
 
@@ -250,7 +254,7 @@ def test_eval_on_clean_weeks_shows_planted_width_and_view_effects(
     clean = [w for w in e2e_weeks if w not in injected.values()]
     data = load_eval_data(cfg, ctx.portfolio_keys(), weeks=clean)
     folder = tmp_path / "report"
-    build_report(data, folder)
+    build_report(data, folder, load_preregistration(cfg=cfg))  # v4 phase 9 signature
     assert (folder / "report.md").exists()
     h3b = pd.concat([read_csv(p) for p in folder.glob("h3b*.csv")])
     assert not h3b.empty

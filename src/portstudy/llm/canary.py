@@ -58,6 +58,7 @@ CHECK_COLUMNS = [
 DEFAULT_AGREEMENT = 0.8  # used until the pilot repeat check has measured it
 FLAG_ALPHA = 0.01
 REPEAT_TICKERS = 50
+CANARY_WEEK = "canary"
 _LOG = logging.getLogger("portstudy.llm.canary")
 
 ModelFetch = Callable[[str], dict[str, Any] | None]
@@ -142,12 +143,14 @@ def canary_items(model: str, config_id: str, week_id: str, ctx: Any) -> list[Bat
             ctx.cfg,
             ctx.run_manifest(),
         )
+        # The canary inputs come from one frozen snapshot, so the request identity is the same
+        # every week (not the current week); records are kept per week in the canary folder.
         items.append(
             BatchItem(
-                make_custom_id(model, config_id, f"{week_id}-canary", str(row["ticker"])),
+                make_custom_id(model, config_id, CANARY_WEEK, str(row["ticker"])),
                 model,
                 config_id,
-                week_id,
+                CANARY_WEEK,
                 str(row["ticker"]),
                 prompt,
             )

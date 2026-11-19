@@ -429,8 +429,13 @@ ALLOWED_SILENT = {
     "backup.py": 3,
     "calendar.py": 1,
     "data/snapshot.py": 1,
+    "eval/all_metrics.py": 1,
     "eval/data.py": 1,
+    "eval/metrics.py": 1,
+    "eval/portfolio_tests.py": 1,
     "eval/report.py": 1,
+    "eval/signal_tests.py": 1,
+    "eval/tests.py": 1,
     "llm/cost.py": 1,
     "llm/prompts.py": 2,
     "llm/providers/litellm.py": 4,
@@ -444,7 +449,7 @@ ALLOWED_SILENT = {
     "pipeline/fallback.py": 4,
     "pipeline/jobs.py": 2,
     "pipeline/keep_awake.py": 1,
-    "pipeline/preflight.py": 6,
+    "pipeline/preflight.py": 7,
     "pipeline/study_log.py": 1,
 }
 

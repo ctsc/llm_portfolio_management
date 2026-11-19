@@ -1666,3 +1666,96 @@ force, push to GitHub (`origin master`) only, no long e2e or full-suite run afte
 ### Tests
 
 - Checklist, CI, shuffle-removed and gateway tests pass. `ruff`, `mypy` clean.
+
+## v4 phase 11: end-to-end verification on synthetic data
+
+### Results (Windows build machine, 2026-11-18 and 2026-11-19)
+
+- **Full default suite** (`pytest`, unit + integration + e2e, one run): 484 tests, 480 passed and
+  4 failed in 58.7 min (wall time while the synthetic study ran beside it). The 4 failures were
+  test expectations not yet updated for Phases 3B to 9 (three e2e assertions: the 16 CONF
+  portfolios, the Phase 9 `build_report(data, folder, prereg)` signature, the CONF metas'
+  `decision_source: control`) and the silent-handler pins for the new evaluation modules (each
+  turns an error into a NaN with a reason or a note row). All four were updated and pass: the
+  second e2e file plus the handler test (16 passed), then `tests/e2e/test_full_run.py` (9
+  passed; its wall time includes about 10 hours while Windows blocked new processes, see below).
+- **Slow tests** (`pytest -m slow`): 2 passed, 1 skipped (GPU Kronos smoke: no CUDA here), 8.3 min.
+- **Synthetic study** (pilot 2026-W02 plus 10 live weeks, `study_test.yaml` with `ic_mode: fixed`,
+  injected stub providers): every `run_weekend.py` week exit 0 (35 to 46 s per week);
+  `portstudy audit` clean on all 11 weeks; `repeat-check` on the pilot gave exact agreement 1.0
+  for every model and prompt; a changed `model` field injected for `stub-ow-a` in 2026-W07 flagged
+  only that model-week (`model_version v1 -> v2`) and the report's model-change table lists only
+  it; a forced Kronos failure in 2026-W09 ran with `kronos_fallback: true`; every weight meta has
+  `ic_mode: fixed`; all 16 CONF portfolios exist every week; the replay starts at the first live
+  Monday (2026-01-20), so the pilot is not replayed; `portstudy closeout` refused before
+  2026-03-30 and completed after it; `portstudy eval` took 26 s, every section is present, no
+  "shuffle". Main results (10 weeks): rq1 LLM minus baseline IC 0.090 (p 0.23, Holm 0.46, MDE
+  0.195); rq2 tilt gap 0.060 (p 0.020, Holm 0.061, MDE 0.060); rq3 skills minus bare 0.060
+  (p 0.0011, Holm 0.0046, MDE 0.036); rq5 skills minus placebo 0.022 (p 0.26, Holm 0.46, MDE
+  0.051). All four estimates are positive, in the direction of the stub's planted skill.
+- **G13 input for the pre-registration** (synthetic study, clean weeks): median expected weekly
+  tracking error vs Q0 and mean view shift per strategy: MVO 0.00527 and 0.276; Mean-CVaR 0.00070
+  and 0.041; Robust 0.00178 and 0.172; Resampled 0.00056 and 0.040; Top-K 0.00565 and 0.230 (these
+  runs use `study_test.yaml`, where `lam` and `draw_scale` keep their defaults).
+- **Calibration recheck** (`calibrate_view_sensitivity.py`, 12 weeks, 100 stocks): same choice,
+  Mean-CVaR `lam` 0.1 and Resampled `draw_scale` 0.025 (MVO median noise TE 0.005153).
+- **E7 at 100 stocks** (every rating 0): posterior mean equals Q0's to 1.7e-18; MVO weights equal
+  Q0's to 5.7e-16 and Top-K exactly; from lower uncertainty alone Robust moves 7.4% of the
+  portfolio, Resampled 3.3%, Mean-CVaR 0.4% (what the CONF controls separate). **G1b**: the
+  Phase 3A simulator test of a stop merged into the rebalance (no Tuesday sale) passes in the
+  full suite.
+- **Random kills on a three-week study**: 21 kills at seeded event points spread over
+  2026-W02 to W04 (each week rerun to completion before the next), then compared with an
+  uninterrupted run: all 424 output CSVs identical (study log and gateway timing excluded:
+  timestamps and run ids by design), no duplicated LLM record, 9 interruption and 7 resume events
+  in the timeline. Clean three-week run: 108 s.
+- **Benchmarks** (build machine, `benchmark_pipeline.py --sources 3 --weeks 24`): 100 stocks: mean
+  solve MVO 0.009 s, Mean-CVaR 6.49 s, Robust 0.031 s, Resampled 1.32 s, Top-K 0.001 s; J7 31.4 s
+  per week at 3 sources, 408 s projected at 51 sources. 300 stocks: MVO 0.070 s, Mean-CVaR 22.9 s,
+  Robust 0.32 s, Resampled 13.5 s, Top-K 0.002 s; J7 147 s per week at 3 sources, 1,913 s
+  projected at 51. Peak memory not measured on Windows. The desktop figures from 2026-11-10 stay
+  the README reference.
+- **`check_live_ready.py --skip-network`**: 23 failures, each an open `manualwork.md` item
+  (placeholder placebo and skills files, Kronos commit unpinned and forecaster stub, API prices
+  and snapshot ids, live dates, the seven environment keys, `vendor/kronos`, `config/universe.csv`,
+  the unfrozen pre-registration); markers TBD 5, UNPINNED 6, UNVERIFIED 22.
+- **Greps and authorship**: the Phase 1, 2 and 10 greps are clean except the allowed
+  retired-decision rows; all v4 commits are authored and committed by `ctsc
+  <cartertierney0@gmail.com>` with no trailers.
+
+### Fixes found during verification
+
+- Canary request ids used the current week, so the stub's week-seeded answers never matched the
+  pilot and every week was flagged; canary items now use a fixed id (`CANARY_WEEK = "canary"`),
+  since their inputs come from one frozen snapshot.
+- `arch` StepM crashed when a steered portfolio equalled Q0 every week; those portfolios are
+  excluded from SPA and StepM (listed in `excluded_identical_to_q0`), and a bootstrap failure
+  becomes a note row instead of stopping the evaluation.
+
+### Environment note
+
+- Midway through, a Windows Application Control policy started blocking the project's
+  `.venv\Scripts\python.exe`. Carter deleted the venv and ran `uv sync` with every extra, which
+  cleared it; the new environment includes torch 2.15.0 (CPU build), and the desktop tests pass
+  with torch present.
+
+## v4 complete
+
+PLAN4 Phases 1 to 11 are built, tested and pushed. In short: the shuffle test, the ARCTIC Slurm
+layer and the small models are gone; the weekly run is a desktop and WSL2 process with Kronos
+chunking, gateway error handling, live-readiness checks, open-to-open returns, crash-removal and
+large-move rules, the stop and no-price fixes, durable logging, the event timeline, fallback
+ledger, study log, audit, ARCTIC usage and dollar tracking, canaries and kill-safe resume; the LLM
+view is centered on Q0 with confidence-only controls and calibrated Mean-CVaR and Resampled
+settings; the evaluation is preregistered (four Holm main comparisons, Benjamini-Hochberg
+elsewhere) with residual IC, French factors, small-sample inference, Ledoit-Wolf Sharpe tests,
+G10 metrics and `all_metrics.csv`. Test count: 484 default tests plus 3 slow. Full default suite
+runtime: 58.7 min on the build machine with a concurrent study run (the e2e files alone about 47
+min).
+
+Open items for Carter (`manualwork.md`, including the four held for the freeze): confirm or
+override `lam` 0.1 and `draw_scale` 0.025; set `view_sensitivity_min_tracking_error`, then
+`frozen: true` and `frozen_on` in `config/preregistration.yaml`; replace the synthetic canary
+stocks with a real past week; confirm the WSL keep-awake helper and clock check on the desktop;
+plus the live-readiness items above (real prompt files, Kronos pin, API prices and snapshot ids,
+live dates, keys, universe file, the first French factor download).
